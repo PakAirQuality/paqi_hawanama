@@ -1,0 +1,11 @@
+{
+  "cycle_id": "cycle-20250927-152159",
+  "cycle_start": "2025-09-27T15:21:59.997720+00:00",
+  "cycle_end": "2025-09-27T15:24:08.534472+00:00",
+  "duration_seconds": 128.536752,
+  "stations_attempted": 192,
+  "responses_collected": 173,
+  "errors": 0,
+  "json_output_file": "/Users/rehanahmad/Desktop/Geo-analysis/hawanama-main/apps/worker/tasks/raw_api_data/cycle-20250927-152159.json",
+  "csv_output_file": "/Users/rehanahmad/Desktop/Geo-analysis/hawanama-main/apps/worker/tasks/raw_api_data/cycle-20250927-152159.csv"
+}

@@ -1,0 +1,8 @@
+# send only what the Dockerfile needs
+**
+!apps/api/**
+!apps/worker/**
+!apps/api/requirements.txt
+!apps/api/start.sh
+!apps/api/alembic.ini
+!apps/api/Dockerfile

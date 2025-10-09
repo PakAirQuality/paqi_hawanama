@@ -1,0 +1,460 @@
+'use client'
+
+import { useState } from 'react'
+import Link from 'next/link'
+import { ArrowLeft, MapPin, Clock, Activity, Thermometer, Droplets, Wind, Eye } from 'lucide-react'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
+import { useStationCurrent, useStationHistory, useStationPM25History, useAQICategories } from '@/hooks/useStation'
+import { formatPollutant, getWindDirection } from '@/lib/aqi'
+import { getAQICategory } from '@/lib/aqi'
+import { getAQIColorByValue } from '@/components/map/config/aqiStyles'
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  ResponsiveContainer,
+  Cell,
+  Tooltip,
+} from 'recharts'
+
+interface StationClientProps {
+  stationId: string
+}
+
+export default function StationClient({ stationId }: StationClientProps) {
+  const [chartMetric, setChartMetric] = useState<'aqi' | 'pm25'>('pm25')
+
+  const { data: current, isLoading: currentLoading, error: currentError } = useStationCurrent(stationId)
+  const { data: history, isLoading: historyLoading } = useStationHistory(stationId)
+  const { data: pm25History, isLoading: pm25HistoryLoading } = useStationPM25History(stationId)
+  const { data: categories } = useAQICategories()
+
+  if (currentLoading) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="container mx-auto px-4 py-6">
+          <div className="animate-pulse space-y-4">
+            <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+            <div className="h-64 bg-gray-200 rounded"></div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // Calculate statistics from history data including current reading
+  const getStatistics = () => {
+    if (!history || history.length === 0) {
+      // If no history but we have current data, use that
+      if (current && current.aqi_us != null) {
+        return { min: current.aqi_us, max: current.aqi_us, avg: current.aqi_us, coverage: 100 }
+      }
+      return { min: null, max: null, avg: null, coverage: 0 }
+    }
+    
+    // Combine history with current reading for statistics
+    let allReadings = [...history]
+    if (current && current.aqi_us != null && current.last_update) {
+      const currentTime = new Date(current.last_update)
+      const latestHistoryTime = history.length > 0 ? new Date(history[history.length - 1].timestamp) : new Date(0)
+      
+      // Add current reading if it's more recent
+      if (currentTime > latestHistoryTime) {
+        allReadings.push({
+          timestamp: current.last_update,
+          aqi_us: current.aqi_us,
+          p2_conc: current.main_value
+        })
+      }
+    }
+    
+    const validReadings = allReadings.filter(r => r.aqi_us != null)
+    const aqiValues = validReadings.map(r => r.aqi_us)
+    
+    if (aqiValues.length === 0) {
+      return { min: null, max: null, avg: null, coverage: 0 }
+    }
+    
+    return {
+      min: Math.min(...aqiValues),
+      max: Math.max(...aqiValues),
+      avg: aqiValues.reduce((a, b) => a + b, 0) / aqiValues.length,
+      coverage: (validReadings.length / allReadings.length) * 100
+    }
+  }
+  
+  const stats = getStatistics()
+  
+  // Get current AQI category
+  const category = current && categories ? getAQICategory(current.aqi_us, categories) : null
+  const currentAQI = current?.aqi_us || 0
+  
+  // Get health advisory based on current AQI
+  const getHealthAdvisory = (aqi: number | null) => {
+    if (!aqi) return { level: 'Unknown', message: 'No data available', color: 'gray' }
+    
+    if (aqi <= 50) return { level: 'Good', message: 'Air quality is satisfactory', color: 'green' }
+    if (aqi <= 100) return { level: 'Moderate', message: 'Air quality is acceptable for most people', color: 'yellow' }
+    if (aqi <= 150) return { level: 'Unhealthy for Sensitive Groups', message: 'People with respiratory disease should limit outdoor activities', color: 'orange' }
+    if (aqi <= 200) return { level: 'Unhealthy', message: 'Everyone may begin to experience health effects', color: 'red' }
+    if (aqi <= 300) return { level: 'Very Unhealthy', message: 'Health warnings of emergency conditions', color: 'purple' }
+    return { level: 'Hazardous', message: 'Emergency conditions affecting entire population', color: 'maroon' }
+  }
+  
+  const healthAdvisory = getHealthAdvisory(currentAQI)
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Header */}
+      <header className="border-b">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3">
+              <img 
+                src="/logo-cropped.png" 
+                alt="Hawanama Logo" 
+                className="w-12 h-12 object-contain"
+              />
+              <div>
+                <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
+                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+              </div>
+            </div>
+            <div className="flex items-center space-x-4">
+              <Link href="/">
+                <Button variant="ghost" size="sm">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back to Map
+                </Button>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </header>
+
+      {/* Station Header */}
+      <div className="border-b bg-gray-50">
+        <div className="container mx-auto px-4 py-4">
+          <div>
+            <h1 className="text-2xl font-bold text-foreground">
+              {current?.name || `Station ${stationId}`}
+            </h1>
+            <p className="text-sm text-muted-foreground">Station Details & Historical Data</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Content */}
+      <div className="container mx-auto px-4 py-6">
+        {current ? (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            {/* Station Info */}
+            <div className="lg:col-span-1 space-y-4">
+              
+              {/* Compact AQI Card */}
+              <div 
+                className="rounded-lg p-4"
+                style={{ backgroundColor: getAQIColorByValue(currentAQI || 0) }}
+              >
+                {/* Upper section: PM2.5 | Category */}
+                <div className="grid grid-cols-2 gap-4 items-center mb-4">
+                  
+                  {/* PM2.5 Number */}
+                  <div className="text-center">
+                    <div className="text-xs text-gray-700 mb-1">PM2.5</div>
+                    <div className="text-3xl font-bold leading-none text-gray-900">
+                      {current.main_value || '--'}
+                    </div>
+                  </div>
+                  
+                  {/* Category and US AQI */}
+                  <div className="text-center">
+                    <div className="text-sm font-semibold text-gray-800">
+                      {healthAdvisory.level}
+                    </div>
+                    <div className="text-xs text-gray-700 mt-1">
+                      US AQI {currentAQI || '--'}
+                    </div>
+                  </div>
+                </div>
+                
+                {/* Compact Weather Bar */}
+                <div className="mt-3 bg-white rounded-md px-3 py-2 flex items-center justify-between text-sm text-gray-800">
+                  <div className="flex items-center space-x-1">
+                    <Thermometer className="w-4 h-4" />
+                    <span>{current.temp_c}°C</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <Droplets className="w-4 h-4" />
+                    <span>{current.humidity}%</span>
+                  </div>
+                  <div className="flex items-center space-x-1">
+                    <Wind className="w-4 h-4" />
+                    <span>{current.wind_speed_kmh?.toFixed(1)} km/h</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Today's Statistics Card */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Today&apos;s Statistics</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex justify-between">
+                    <span className="text-sm">Min AQI</span>
+                    <span className={`text-sm font-bold ${
+                      stats.min <= 50 ? 'text-green-600' :
+                      stats.min <= 100 ? 'text-yellow-600' :
+                      stats.min <= 150 ? 'text-orange-600' :
+                      'text-red-600'
+                    }`}>
+                      {stats.min ? Math.round(stats.min) : 'No data'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Max AQI</span>
+                    <span className={`text-sm font-bold ${
+                      stats.max <= 50 ? 'text-green-600' :
+                      stats.max <= 100 ? 'text-yellow-600' :
+                      stats.max <= 150 ? 'text-orange-600' :
+                      stats.max <= 200 ? 'text-red-600' :
+                      'text-purple-600'
+                    }`}>
+                      {stats.max ? Math.round(stats.max) : 'No data'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Average</span>
+                    <span className="text-sm font-bold">
+                      {stats.avg ? Math.round(stats.avg) : 'No data'}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-sm">Total Readings</span>
+                    <span className="text-sm text-muted-foreground">
+                      {(() => {
+                        let count = history?.length || 0
+                        // Add 1 if current reading is newer than latest history
+                        if (current && current.last_update && history && history.length > 0) {
+                          const currentTime = new Date(current.last_update)
+                          const latestHistoryTime = new Date(history[history.length - 1].timestamp)
+                          if (currentTime > latestHistoryTime) count += 1
+                        } else if (current && (!history || history.length === 0)) {
+                          count = 1
+                        }
+                        return count
+                      })()}
+                    </span>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Charts and Historical Data */}
+            <div className="lg:col-span-2 space-y-4">
+              <Card>
+                <CardHeader className="pb-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+                    <div className="min-w-0">
+                      <CardTitle className="flex items-center text-lg">
+                        <Clock className="w-5 h-5 mr-2" />
+                        24-Hour {chartMetric === 'aqi' ? 'AQI' : 'PM2.5'} Trend
+                      </CardTitle>
+                      <CardDescription className="text-sm">
+                        Air quality measurements over the last 24 hours
+                      </CardDescription>
+                    </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        onClick={() => setChartMetric('aqi')}
+                        className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                          chartMetric === 'aqi' 
+                            ? 'bg-blue-100 text-blue-700 font-medium' 
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        AQI
+                      </button>
+                      <button
+                        onClick={() => setChartMetric('pm25')}
+                        className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                          chartMetric === 'pm25' 
+                            ? 'bg-blue-100 text-blue-700 font-medium' 
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        PM2.5
+                      </button>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  {(historyLoading || pm25HistoryLoading) ? (
+                    <div className="h-64 bg-gray-100 animate-pulse rounded"></div>
+                  ) : (() => {
+                    // Prepare combined chart data similar to city implementation
+                    const aqiData = history?.map((item) => ({
+                      timestamp: item.timestamp,
+                      hour: new Date(item.timestamp).getHours(),
+                      aqi: item.aqi_us,
+                      pm25: null as number | null
+                    })) || []
+                    
+                    const pm25Data = pm25History?.map((item) => ({
+                      timestamp: item.timestamp,
+                      hour: new Date(item.timestamp).getHours(),
+                      aqi: null as number | null,
+                      pm25: item.pm25
+                    })) || []
+                    
+                    // Merge data by timestamp
+                    const chartDataMap = new Map()
+                    
+                    // Add AQI data
+                    aqiData.forEach(item => {
+                      chartDataMap.set(item.timestamp, {
+                        hour: item.hour,
+                        aqi: item.aqi,
+                        pm25: item.pm25,
+                        timestamp: item.timestamp
+                      })
+                    })
+                    
+                    // Add PM2.5 data
+                    pm25Data.forEach(item => {
+                      const existing = chartDataMap.get(item.timestamp)
+                      if (existing) {
+                        existing.pm25 = item.pm25
+                      } else {
+                        chartDataMap.set(item.timestamp, {
+                          hour: item.hour,
+                          aqi: item.aqi,
+                          pm25: item.pm25,
+                          timestamp: item.timestamp
+                        })
+                      }
+                    })
+                    
+                    const chartData = Array.from(chartDataMap.values())
+                      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+                      .map(item => ({
+                        ...item,
+                        aqi: Math.round(item.aqi || 0),
+                        pm25: Math.round(item.pm25 || 0),
+                        color: getAQIColorByValue(item.aqi || 0)
+                      }))
+                    
+                    return chartData.length > 0 ? (
+                      <div className="bg-white border border-gray-100 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-4">
+                          <h3 className="text-sm font-medium text-gray-700">
+                            24h {chartMetric === 'aqi' ? 'AQI' : 'PM2.5'} Trend
+                          </h3>
+                          <div className="text-xl font-bold text-gray-900">
+                            {chartMetric === 'aqi' ? currentAQI : Math.round(current?.main_value || 0)}
+                            {chartMetric === 'pm25' && <span className="text-sm font-normal text-gray-600 ml-1">µg/m³</span>}
+                          </div>
+                        </div>
+
+                        <div className="relative">
+                          <ResponsiveContainer width="100%" height={280}>
+                            <BarChart
+                              data={chartData}
+                              margin={{ top: 10, right: 15, bottom: 25, left: 15 }}
+                              barCategoryGap="2%"
+                            >
+                              <XAxis
+                                dataKey="hour"
+                                type="number"
+                                domain={[0, 24]}
+                                ticks={[0, 3, 6, 9, 12, 15, 18, 21, 24]}
+                                axisLine={false}
+                                tickLine={false}
+                                stroke="#9ca3af"
+                                tick={{ fontSize: 12 }}
+                                tickFormatter={(value) => `${value}h`}
+                              />
+                              
+                              <YAxis
+                                orientation="right"
+                                axisLine={false}
+                                tickLine={false}
+                                stroke="#9ca3af"
+                                tick={{ fontSize: 12 }}
+                                tickFormatter={(value) => Math.round(value)}
+                                width={35}
+                              />
+
+                              <Tooltip
+                                contentStyle={{
+                                  backgroundColor: 'white',
+                                  border: '1px solid #e5e7eb',
+                                  borderRadius: '8px',
+                                  fontSize: '12px'
+                                }}
+                                formatter={(value, name) => [
+                                  chartMetric === 'aqi' ? `AQI ${value}` : `${value} µg/m³`,
+                                  chartMetric === 'aqi' ? 'AQI' : 'PM2.5'
+                                ]}
+                                labelFormatter={(hour) => `${hour}:00`}
+                              />
+
+                              <Bar
+                                dataKey={chartMetric}
+                                radius={[2, 2, 0, 0]}
+                                maxBarSize={28}
+                              >
+                                {chartData.map((entry, index) => (
+                                  <Cell 
+                                    key={`cell-${index}`} 
+                                    fill={getAQIColorByValue(entry.aqi)} 
+                                  />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="h-64 flex items-center justify-center text-muted-foreground">
+                        <div className="text-center">
+                          <p>No data available for chart</p>
+                          <p className="text-sm mt-2">
+                            No readings found for this station
+                          </p>
+                        </div>
+                      </div>
+                    )
+                  })()}
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        ) : (
+          <div className="text-center py-12">
+            <div className="space-y-4">
+              <p className="text-muted-foreground">Station not found</p>
+              {currentError && (
+                <div className="text-sm text-red-600 space-y-2">
+                  <p>Error: {currentError.message}</p>
+                  <p>Station ID: {stationId}</p>
+                </div>
+              )}
+              {!currentError && !current && (
+                <div className="text-sm text-gray-500 space-y-2">
+                  <p>Station ID: {stationId}</p>
+                  <p>Loading: {currentLoading ? 'Yes' : 'No'}</p>
+                  <p>No station data found for this ID</p>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}

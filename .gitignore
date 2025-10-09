@@ -1,0 +1,41 @@
+node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+.dev.vars*
+!.dev.vars.example
+.env*
+# Ignore build artifacts and cache files
+.next/
+.firebase/
+apps/web-next/.firebase/
+apps/web-next/.next/
+infra/.terraform/
+*.pack
+terraform-provider-*
+hawanama.db
+*.log
+__pycache__/
+node_modules/
+.env.local
+.env

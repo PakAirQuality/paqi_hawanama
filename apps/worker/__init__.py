@@ -1,0 +1,1 @@
+# Hawanama worker package

@@ -1,0 +1,37 @@
+{
+  "status": "success",
+  "states_processed": 6,
+  "cities_processed": 42,
+  "stations_discovered": 199,
+  "stations_created": 11,
+  "stations_updated": 188,
+  "completion_time_utc": "2025-09-29T20:28:28.290024+00:00",
+  "states_skipped": [
+    {
+      "state": "Azad Kashmir",
+      "reason": "aliases_exhausted"
+    },
+    {
+      "state": "FATA",
+      "reason": "aliases_exhausted"
+    }
+  ],
+  "cities_skipped": [
+    {
+      "city": "Murree",
+      "state": "Punjab",
+      "reason": "CityNotFound"
+    },
+    {
+      "city": "Qadirpur Ran",
+      "state": "Punjab",
+      "reason": "CityNotFound"
+    },
+    {
+      "city": "Kotri",
+      "state": "Sindh",
+      "reason": "CityNotFound"
+    }
+  ],
+  "run_id": "discovery-2025-09-29T20:25:30.692631+00:00"
+}

@@ -1,0 +1,23 @@
+{
+  "hosting": [
+    {
+      "site": "hawanama-frontend",
+      "source": "apps/web-next",
+      "frameworksBackend": { "region": "asia-south1" },
+      "rewrites": [
+        {
+          "source": "/api/**",
+          "run": { "serviceId": "hawanama", "region": "asia-south1" }
+        }
+      ],
+      "headers": [
+        {
+          "source": "**/*.@(js|css|png|jpg|svg|woff2)",
+          "headers": [
+            { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+          ]
+        }
+      ]
+    }
+  ]
+}

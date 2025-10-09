@@ -1,0 +1,120 @@
+"""
+Pydantic models for Current conditions endpoints
+"""
+
+from datetime import datetime
+from typing import Dict, Any, Optional, Literal, Union
+from pydantic import BaseModel, Field
+
+
+class Scope(BaseModel):
+    """Geographic scope for current conditions"""
+    country: str = Field(..., description="Country name")
+    state: str = Field(..., description="State or province name")
+    city: str = Field(..., description="City name")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "country": "Pakistan",
+                "state": "Punjab",
+                "city": "Lahore"
+            }
+        }
+
+
+class ScalarWithUnit(BaseModel):
+    """Pollutant concentration with unit"""
+    conc: float = Field(..., description="Concentration value")
+    unit: str = Field(..., description="Unit of measurement")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "conc": 32.6,
+                "unit": "µg/m³"
+            }
+        }
+
+
+class CurrentOut(BaseModel):
+    """Current air quality and weather conditions response"""
+    scope: Scope = Field(..., description="Geographic scope")
+    source: Literal["airvisual"] = Field(default="airvisual", description="Data source")
+    ts_utc: datetime = Field(..., description="UTC timestamp of the data")
+    ts_local: datetime = Field(..., description="Local timestamp of the data")
+    aqi: Dict[str, Union[int, str, None]] = Field(..., description="AQI information")
+    weather: Dict[str, Union[float, int, str, None]] = Field(..., description="Weather conditions")
+    pollutants: Dict[str, Optional[ScalarWithUnit]] = Field(..., description="Pollutant concentrations")
+    qc_state: Optional[str] = Field(None, description="Quality control state")
+    units: Dict[str, str] = Field(..., description="Standard units for measurements")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "scope": {
+                    "country": "Pakistan",
+                    "state": "Punjab", 
+                    "city": "Lahore"
+                },
+                "source": "airvisual",
+                "ts_utc": "2025-09-24T14:00:00Z",
+                "ts_local": "2025-09-24T19:00:00+05:00",
+                "aqi": {
+                    "us": 95,
+                    "cn": 70,
+                    "main_us": "pm25",
+                    "main_cn": "pm25"
+                },
+                "weather": {
+                    "temp_c": 28,
+                    "humidity": 54,
+                    "pressure_hpa": 1011,
+                    "wind_speed_ms": 1.67,
+                    "wind_dir_deg": 135,
+                    "icon": "01n",
+                    "heatIndex_c": 29
+                },
+                "pollutants": {
+                    "pm25": {"conc": 32.6, "unit": "µg/m³"},
+                    "pm10": None,
+                    "o3": None,
+                    "no2": None,
+                    "so2": None,
+                    "co": None
+                },
+                "qc_state": "OK",
+                "units": {
+                    "pm25": "µg/m³",
+                    "pm10": "µg/m³",
+                    "o3": "ppb",
+                    "no2": "ppb",
+                    "so2": "ppb",
+                    "co": "ppm"
+                }
+            }
+        }
+
+
+class StationMeta(BaseModel):
+    """Station metadata for resolving station_id to IQAir parameters"""
+    country: str = Field(..., description="Country name")
+    state: str = Field(..., description="State or province name")
+    city: str = Field(..., description="City name")
+    name: str = Field(..., description="Station name")
+    lat: float = Field(..., description="Latitude coordinate")
+    lon: float = Field(..., description="Longitude coordinate")
+    source_station_id: Optional[str] = Field(None, description="Source-specific station ID")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "country": "Pakistan",
+                "state": "Punjab",
+                "city": "Lahore",
+                "name": "Lahore US Consulate",
+                "lat": 31.5204,
+                "lon": 74.3587,
+                "source_station_id": None
+            }
+        }

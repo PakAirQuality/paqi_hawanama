@@ -1,0 +1,115 @@
+services:
+  postgres:
+    image: timescale/timescaledb-ha:pg16
+    container_name: hawanama-postgres
+    environment:
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: hawanama
+      POSTGRES_DB: hawanama
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/home/postgres/pgdata
+      - ./infra/init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./backups:/backups  # For database dumps
+    command: postgres -c shared_preload_libraries=timescaledb
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: hawanama-redis
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: hawanama
+      POSTGRES_DB: hawanama
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./apps/api:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  pg_tileserv:
+    image: pramsey/pg_tileserv:latest
+    ports:
+      - "7800:7800"
+    environment:
+      DATABASE_URL: postgresql://hawanama:hawanama@postgres:5432/hawanama
+    depends_on:
+      - postgres
+
+  worker:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: hawanama
+      POSTGRES_DB: hawanama
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis:6379
+      IQAIR_API_KEY: ${IQAIR_API_KEY:-}
+      OPENAQ_API_KEY: ${OPENAQ_API_KEY:-}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./apps/worker:/app
+    command: celery -A config.celery_app worker --loglevel=info --queues=metadata,readings,qc
+
+  scheduler:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    container_name: hawanama-scheduler
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: hawanama
+      POSTGRES_DB: hawanama
+      POSTGRES_PORT: 5432
+      REDIS_URL: redis://redis:6379
+      IQAIR_API_KEY: ${IQAIR_API_KEY:-}
+      OPENAQ_API_KEY: ${OPENAQ_API_KEY:-}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./apps/worker:/app
+    command: python main_scheduler.py
+    restart: unless-stopped
+
+  flower:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    ports:
+      - "5555:5555"
+    environment:
+      POSTGRES_SERVER: postgres
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      - redis
+    volumes:
+      - ./apps/worker:/app
+    command: celery -A config.celery_app flower --address=0.0.0.0 --port=5555
+
+volumes:
+  postgres_data:
+  redis_data:

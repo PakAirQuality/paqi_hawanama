@@ -1,0 +1,10 @@
+{
+  "run_id": "ingest-city-2025-09-26T00:09:27.429475+00:00",
+  "started_utc": "2025-09-26T00:09:27.429475+00:00",
+  "success_count": 38,
+  "fail_count": 0,
+  "rate_limit_per_min": 90,
+  "concurrency": 6,
+  "allow_state_alias": true,
+  "allow_nearest_fallback": false
+}

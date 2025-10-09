@@ -1,0 +1,231 @@
+"""
+Data normalization utilities for air quality data
+"""
+
+import logging
+from datetime import datetime, timezone
+from typing import Dict, Any, Optional, Literal
+import zoneinfo
+
+from app.schemas.nearest import CurrentOut
+
+logger = logging.getLogger(__name__)
+
+
+def to_local(ts_utc: datetime, tz_str: str) -> datetime:
+    """
+    Convert UTC timestamp to local time using timezone string
+    
+    Args:
+        ts_utc: UTC datetime object
+        tz_str: IANA timezone string (e.g., 'Asia/Karachi')
+        
+    Returns:
+        Localized datetime object, falls back to UTC if timezone invalid
+    """
+    try:
+        # Ensure UTC timezone is set
+        if ts_utc.tzinfo is None:
+            ts_utc = ts_utc.replace(tzinfo=timezone.utc)
+        elif ts_utc.tzinfo != timezone.utc:
+            ts_utc = ts_utc.astimezone(timezone.utc)
+            
+        # Convert to target timezone
+        target_tz = zoneinfo.ZoneInfo(tz_str)
+        return ts_utc.astimezone(target_tz)
+        
+    except (zoneinfo.ZoneInfoNotFoundError, ValueError) as e:
+        logger.warning(f"Invalid timezone '{tz_str}', falling back to UTC: {e}")
+        return ts_utc.replace(tzinfo=timezone.utc) if ts_utc.tzinfo is None else ts_utc
+
+
+def normalize_airvisual_current_data(
+    data: Dict[str, Any], 
+    aqi_filter: Literal["us", "cn", "both"] = "both",
+    tz_str: str = "Asia/Karachi"
+) -> CurrentOut:
+    """
+    Normalize AirVisual API current data to our canonical format
+    
+    Args:
+        data: Raw AirVisual API response data
+        aqi_filter: Which AQI scales to include ("us", "cn", "both")
+        tz_str: IANA timezone for local timestamp conversion
+        
+    Returns:
+        Normalized CurrentOut object
+    """
+    # Extract basic structure
+    current = data.get("current", {})
+    pollution = current.get("pollution", {})
+    weather = current.get("weather", {})
+    
+    # Parse timestamp
+    timestamp_str = pollution.get("ts")
+    if timestamp_str:
+        try:
+            # IQAir timestamps are in ISO format with 'Z' suffix
+            ts_utc = datetime.fromisoformat(timestamp_str.replace('Z', '+00:00'))
+        except ValueError:
+            logger.warning(f"Could not parse timestamp: {timestamp_str}")
+            ts_utc = datetime.now(timezone.utc)
+    else:
+        ts_utc = datetime.now(timezone.utc)
+    
+    # Convert to local time
+    ts_local = to_local(ts_utc, tz_str)
+    
+    # Normalize AQI data
+    aqi_data = {}
+    
+    if aqi_filter in ["us", "both"]:
+        aqi_data["us"] = pollution.get("aqius")
+        aqi_data["main_us"] = pollution.get("mainus")
+    
+    if aqi_filter in ["cn", "both"]:
+        aqi_data["cn"] = pollution.get("aqicn") 
+        aqi_data["main_cn"] = pollution.get("maincn")
+    
+    # Extract pollutant data
+    pm25_data = pollution.get("p2", {})
+    pm10_data = pollution.get("p1", {})
+    o3_data = pollution.get("o3", {})
+    no2_data = pollution.get("n2", {})
+    so2_data = pollution.get("s2", {})
+    co_data = pollution.get("co", {})
+    
+    pollutants = {
+        "pm25": {
+            "conc": pm25_data.get("conc"),
+            "unit": "µg/m³"
+        } if pm25_data.get("conc") is not None else None,
+        
+        "pm10": {
+            "conc": pm10_data.get("conc"),
+            "unit": "µg/m³"
+        } if pm10_data.get("conc") is not None else None,
+        
+        "o3": {
+            "conc": o3_data.get("conc"),
+            "unit": "ppb"
+        } if o3_data.get("conc") is not None else None,
+        
+        "no2": {
+            "conc": no2_data.get("conc"), 
+            "unit": "ppb"
+        } if no2_data.get("conc") is not None else None,
+        
+        "so2": {
+            "conc": so2_data.get("conc"),
+            "unit": "ppb"
+        } if so2_data.get("conc") is not None else None,
+        
+        "co": {
+            "conc": co_data.get("conc"),
+            "unit": "ppm"
+        } if co_data.get("conc") is not None else None,
+    }
+    
+    # Calculate heat index if temperature and humidity are available
+    heat_index = None
+    temp_c = weather.get("tp")
+    humidity = weather.get("hu")
+    
+    if temp_c is not None and humidity is not None:
+        heat_index = calculate_heat_index(temp_c, humidity)
+    
+    # Normalize weather data
+    weather_data = {
+        "temp_c": temp_c,
+        "humidity": humidity,
+        "pressure_hpa": weather.get("pr"),
+        "wind_speed_ms": weather.get("ws"),
+        "wind_dir_deg": weather.get("wd"),
+        "icon": weather.get("ic"),
+        "heatIndex_c": heat_index
+    }
+    
+    # Remove None values from weather
+    weather_data = {k: v for k, v in weather_data.items() if v is not None}
+    
+    # Standard units
+    units = {
+        "pm25": "µg/m³",
+        "pm10": "µg/m³",
+        "o3": "ppb", 
+        "no2": "ppb",
+        "so2": "ppb",
+        "co": "ppm"
+    }
+    
+    return CurrentOut(
+        ts_utc=ts_utc,
+        ts_local=ts_local,
+        aqi=aqi_data,
+        weather=weather_data,
+        pollutants=pollutants,
+        qc_state="OK",  # Default QC state
+        units=units
+    )
+
+
+def calculate_heat_index(temp_celsius: float, humidity: float) -> Optional[float]:
+    """
+    Calculate heat index in Celsius using the National Weather Service formula
+    
+    Args:
+        temp_celsius: Temperature in Celsius
+        humidity: Relative humidity percentage
+        
+    Returns:
+        Heat index in Celsius, or None if calculation not applicable
+    """
+    try:
+        # Convert Celsius to Fahrenheit for the calculation
+        temp_f = (temp_celsius * 9/5) + 32
+        
+        # Use simplified formula for temperatures < 80°F
+        if temp_f < 80:
+            return temp_celsius  # Return original temperature
+            
+        # Full heat index formula (in Fahrenheit)
+        hi_f = (-42.379 + 
+                2.04901523 * temp_f + 
+                10.14333127 * humidity - 
+                0.22475541 * temp_f * humidity - 
+                0.00683783 * temp_f**2 - 
+                0.05481717 * humidity**2 + 
+                0.00122874 * temp_f**2 * humidity + 
+                0.00085282 * temp_f * humidity**2 - 
+                0.00000199 * temp_f**2 * humidity**2)
+        
+        # Convert back to Celsius
+        heat_index_celsius = (hi_f - 32) * 5/9
+        
+        return round(heat_index_celsius, 1)
+        
+    except (ValueError, TypeError, ZeroDivisionError):
+        logger.warning(f"Failed to calculate heat index for temp={temp_celsius}, humidity={humidity}")
+        return None
+
+
+def extract_location_info(data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extract location information from AirVisual API response
+    
+    Args:
+        data: Raw AirVisual API response data
+        
+    Returns:
+        Dictionary with location information
+    """
+    location = data.get("location", {})
+    coordinates = location.get("coordinates", [])
+    
+    return {
+        "lat": coordinates[1] if len(coordinates) > 1 else None,
+        "lon": coordinates[0] if len(coordinates) > 0 else None,
+        "country": data.get("country"),
+        "state": data.get("state"),
+        "city": data.get("city")
+    }
