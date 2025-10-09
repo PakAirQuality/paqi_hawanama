@@ -18,14 +18,16 @@ const MapRefactored = dynamic(() => import('./MapRefactored'), {
 interface MapWrapperProps {
   className?: string
   heatmapVisible?: boolean
+  clusteringEnabled?: boolean
 }
 
-export default function MapWrapper({ className, heatmapVisible = true }: MapWrapperProps) {
+export default function MapWrapper({ className, heatmapVisible = true, clusteringEnabled = true }: MapWrapperProps) {
   return (
     <div className={`${className}`} style={{ minHeight: '400px' }}>
       <MapRefactored 
         className="w-full h-full" 
         heatmapVisible={heatmapVisible}
+        clusteringEnabled={clusteringEnabled}
       />
     </div>
   )

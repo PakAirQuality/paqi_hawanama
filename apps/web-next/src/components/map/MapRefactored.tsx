@@ -15,13 +15,15 @@ interface MapProps {
   zoom?: number;
   className?: string;
   heatmapVisible?: boolean;
+  clusteringEnabled?: boolean;
 }
 
 export default function MapRefactored({ 
   center, 
   zoom, 
   className = '', 
-  heatmapVisible = true 
+  heatmapVisible = true,
+  clusteringEnabled = true 
 }: MapProps) {
   const { openStation } = useStationSidebar();
   const { stations, loading, error } = useStationsData();
@@ -37,7 +39,26 @@ export default function MapRefactored({
   const [map, setMap] = useState<any>(null);
 
   const features = useMemo(() => {
-    if (!supercluster || !bounds || !viewport) return [];
+    if (!bounds || !viewport) return [];
+
+    // If clustering is disabled, return all individual stations
+    if (!clusteringEnabled || !supercluster) {
+      return stations.map(station => ({
+        type: 'Feature' as const,
+        geometry: {
+          type: 'Point' as const,
+          coordinates: [station.longitude, station.latitude]
+        },
+        properties: {
+          id: station.id,
+          name: station.name,
+          city: station.city,
+          aqi: station.aqi_raw,
+          pm25: station.pm25,
+          cluster: false
+        }
+      }));
+    }
 
     const clusters = supercluster.getClusters(bounds, Math.floor(viewport.zoom));
 
@@ -55,7 +76,7 @@ export default function MapRefactored({
     });
 
     return result;
-  }, [supercluster, bounds, viewport]);
+  }, [supercluster, bounds, viewport, stations, clusteringEnabled]);
 
   const handleMarkerClick = async (feature: any) => {
     const { geometry, properties } = feature;
@@ -175,14 +196,14 @@ export default function MapRefactored({
         >
           {/* Pakistan fill layer removed */}
           
-          {/* Pakistan outline */}
+          {/* Pakistan outline - hidden */}
           <Layer
             id="pakistan-outline"
             type="line"
             paint={{
-              'line-color': '#10b981',
-              'line-width': 2,
-              'line-opacity': 0.8
+              'line-color': 'transparent',
+              'line-width': 0,
+              'line-opacity': 0
             }}
           />
         </Source>
@@ -193,18 +214,13 @@ export default function MapRefactored({
           type="geojson"
           data="/pakistan_provinces.geojson"
         >
-          {/* Province fill for hover effect */}
+          {/* Province fill for hover effect - hidden */}
           <Layer
             id="provinces-fill"
             type="fill"
             paint={{
-              'fill-color': '#10b981',
-              'fill-opacity': [
-                'case',
-                ['boolean', ['feature-state', 'hover'], false],
-                0.15,
-                0
-              ]
+              'fill-color': 'transparent',
+              'fill-opacity': 0
             }}
             onMouseEnter={(e) => {
               if (e.features?.[0] && map) {
@@ -229,24 +245,14 @@ export default function MapRefactored({
             onClick={handleProvinceClick}
           />
           
-          {/* Province outline */}
+          {/* Province outline - hidden */}
           <Layer
             id="provinces-outline"
             type="line"
             paint={{
-              'line-color': '#10b981',
-              'line-width': [
-                'case',
-                ['boolean', ['feature-state', 'hover'], false],
-                3,
-                1.5
-              ],
-              'line-opacity': [
-                'case',
-                ['boolean', ['feature-state', 'hover'], false],
-                0.8,
-                0.6
-              ]
+              'line-color': 'transparent',
+              'line-width': 0,
+              'line-opacity': 0
             }}
           />
         </Source>
@@ -270,6 +276,7 @@ export default function MapRefactored({
                   pm25={feature.properties.pm25}
                   avg_pm25={feature.properties.avg_pm25}
                   point_count={feature.properties.point_count}
+                  zoom={viewport.zoom}
                 />
               </div>
             </Marker>

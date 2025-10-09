@@ -147,8 +147,8 @@ export default function CityMap({
           type: 'fill',
           source: 'city-airshed',
           paint: {
-            'fill-color': '#2563eb', // Blue color
-            'fill-opacity': 0.1
+            'fill-color': 'transparent', // Hide city boundary fill
+            'fill-opacity': 0
           }
         })
       }
@@ -160,9 +160,9 @@ export default function CityMap({
           type: 'line',
           source: 'city-airshed',
           paint: {
-            'line-color': '#2563eb', // Blue color
-            'line-width': 2,
-            'line-opacity': 0.8
+            'line-color': 'transparent', // Hide city boundary line
+            'line-width': 0,
+            'line-opacity': 0
           }
         })
       }

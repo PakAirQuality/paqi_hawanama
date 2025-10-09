@@ -25,15 +25,15 @@ export const MAP_CONFIG = {
 
 // Style configurations
 export const STYLES = {
-  cluster: { radius: 15, strokeWidth: 0, strokeColor: 'transparent', textSize: 12 },
-  point: { radius: 13, strokeWidth: 0, strokeColor: 'transparent', textSize: 10, opacity: 1.0 },
-  pakistan: { lineColor: '#065f46', lineWidth: 2, lineOpacity: 0.8 },
+  cluster: { radius: 8, strokeWidth: 0, strokeColor: 'transparent', textSize: 12 },
+  point: { radius: 8, strokeWidth: 0, strokeColor: 'transparent', textSize: 10, opacity: 1.0 },
+  pakistan: { lineColor: 'transparent', lineWidth: 0, lineOpacity: 0 },
   countryFocus: {
     // Inside Pakistan - Climate TRACE style prominent green overlay
     insideFill: 'rgba(16, 185, 129, 0.25)',  // emerald-500 with 25% opacity - much more prominent
-    insideStroke: '#059669',                  // emerald-600 for strong outline
-    insideStrokeWidth: 2.5,
-    insideStrokeOpacity: 0.8,
+    insideStroke: 'transparent',              // Hide country boundary outline
+    insideStrokeWidth: 0,
+    insideStrokeOpacity: 0,
     // Outside Pakistan - stronger dimming for dramatic contrast  
     outsideFill: 'rgba(75, 85, 99, 0.6)',    // gray-600 with 60% opacity - much darker
     outsideOpacity: 0.6,
@@ -47,24 +47,24 @@ export const STYLES = {
     accentColor: 'rgba(167, 243, 208, 0.12)', // emerald-200 for subtle tech accent
   },
   provinces: {
-    // Provincial boundary lines - enhanced visibility
-    strokeColor: '#059669',          // emerald-600 for better visibility against green overlay
-    strokeWidth: 2,                  // Slightly thicker for prominence
-    strokeOpacity: 0.8,              // More opaque for clarity
-    strokeDashArray: [4, 2],         // More pronounced dashed pattern
-    // Enhanced hover effects
-    hoverStrokeColor: '#047857',     // emerald-700 for strong hover contrast
-    hoverStrokeWidth: 3,             // Prominent hover width
-    hoverStrokeOpacity: 1,           // Full opacity on hover
-    hoverStrokeDashArray: [6, 2],    // Different dash pattern for hover
+    // Provincial boundary lines - hidden
+    strokeColor: 'transparent',      // Hide provincial boundaries
+    strokeWidth: 0,                  // No stroke width
+    strokeOpacity: 0,                // No opacity
+    strokeDashArray: [0, 0],         // No dash pattern
+    // Enhanced hover effects - disabled
+    hoverStrokeColor: 'transparent', // Hide hover stroke
+    hoverStrokeWidth: 0,             // No hover width
+    hoverStrokeOpacity: 0,           // No hover opacity
+    hoverStrokeDashArray: [0, 0],    // No hover dash pattern
     // Fill for interactive areas
     fillColor: 'transparent',
-    hoverFillColor: 'rgba(16, 185, 129, 0.15)', // More visible hover fill
-    // Additional glow effect for interactivity
-    glowColor: 'rgba(5, 150, 105, 0.4)',        // emerald-600 glow
-    glowWidth: 4,
-    hoverGlowColor: 'rgba(4, 120, 87, 0.6)',    // emerald-700 hover glow
-    hoverGlowWidth: 5
+    hoverFillColor: 'transparent',   // Hide hover fill
+    // Additional glow effect for interactivity - disabled
+    glowColor: 'transparent',        // Hide glow
+    glowWidth: 0,
+    hoverGlowColor: 'transparent',   // Hide hover glow
+    hoverGlowWidth: 0
   },
   heatmap: {
     // Zoom levels for heatmap visibility - now covers low zoom levels

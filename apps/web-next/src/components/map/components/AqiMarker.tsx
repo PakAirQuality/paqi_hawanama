@@ -27,9 +27,18 @@ interface AqiMarkerProps {
   avg_pm25?: number;
   point_count?: number;
   isCluster: boolean;
+  zoom?: number;
 }
 
-const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster }) => {
+const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster, zoom = 5 }) => {
+  // Calculate zoom-responsive size
+  const getZoomResponsiveSize = (baseSize: number, currentZoom: number): number => {
+    // Scale markers based on zoom: smaller at low zoom, larger at high zoom
+    const zoomFactor = Math.max(0.6, Math.min(1.4, currentZoom / 8)); // Range: 0.6x to 1.4x
+    return Math.round(baseSize * zoomFactor);
+  };
+
+  const markerSize = getZoomResponsiveSize(8, zoom); // Base size 8, responsive to zoom
   // Debug logging
   if (!isCluster) {
     console.log('AqiMarker individual station:', { aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster });
@@ -44,8 +53,21 @@ const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, poi
   const colorClass = getAqiColorClass(colorValue);
 
   return (
-    <div className={`aqi-marker-container ${isCluster ? 'cluster' : 'point'}`}>
-      <div className={`aqi-marker ${colorClass}`}>
+    <div 
+      className={`aqi-marker-container ${isCluster ? 'cluster' : 'point'}`}
+      style={{
+        width: `${markerSize * 2}px`,
+        height: `${markerSize * 2}px`
+      }}
+    >
+      <div 
+        className={`aqi-marker ${colorClass}`}
+        style={{
+          width: `${markerSize * 2}px`,
+          height: `${markerSize * 2}px`,
+          fontSize: `${Math.max(8, markerSize - 2)}px` // Responsive font size
+        }}
+      >
         <span>{displayValue}</span>
       </div>
     </div>
