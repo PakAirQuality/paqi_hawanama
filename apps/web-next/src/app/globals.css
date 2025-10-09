@@ -217,3 +217,24 @@
 .marker-cluster-large div {
     background-color: rgba(241, 128, 23, 0.6);
 }
+
+/* Remove grey shading from Recharts bar charts */
+.recharts-bar-rectangle:hover {
+    filter: brightness(1.1) !important;
+    opacity: 1 !important;
+}
+
+.recharts-active-shape {
+    filter: brightness(1.1) !important;
+    opacity: 1 !important;
+}
+
+/* Ensure tooltips and interactions work without grey overlay */
+.recharts-tooltip-cursor {
+    display: none !important;
+}
+
+.recharts-bar .recharts-rectangle:hover {
+    filter: brightness(1.1) !important;
+    opacity: 1 !important;
+}

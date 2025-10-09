@@ -246,12 +246,14 @@ export default function CityClient({ citySlug }: CityClientProps) {
                       </div>
                     </div>
 
-                    <div className="relative">
+                    <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current">
                       <ResponsiveContainer width="100%" height={140}>
                         <BarChart
                           data={chartData}
                           margin={{ top: 10, right: 15, bottom: 25, left: 15 }}
                           barCategoryGap="2%"
+                          onClick={() => {}} // Disable click events
+                          onMouseMove={() => {}} // Disable mouse tracking
                         >
                           <XAxis
                             dataKey="hour"
@@ -293,11 +295,14 @@ export default function CityClient({ citySlug }: CityClientProps) {
                             dataKey={chartMetric}
                             radius={[2, 2, 0, 0]}
                             maxBarSize={28}
+                            isAnimationActive={false}
+                            style={{ cursor: 'default' }}
                           >
                             {chartData.map((entry, index) => (
                               <Cell 
                                 key={`cell-${index}`} 
-                                fill={getAQIColorByValue(entry.aqi)} 
+                                fill={getAQIColorByValue(entry.aqi)}
+                                style={{ cursor: 'default' }}
                               />
                             ))}
                           </Bar>
