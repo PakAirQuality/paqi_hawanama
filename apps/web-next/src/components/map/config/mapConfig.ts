@@ -25,8 +25,8 @@ export const MAP_CONFIG = {
 
 // Style configurations
 export const STYLES = {
-  cluster: { radius: 8, strokeWidth: 0, strokeColor: 'transparent', textSize: 12 },
-  point: { radius: 8, strokeWidth: 0, strokeColor: 'transparent', textSize: 10, opacity: 1.0 },
+  cluster: { radius: 14, strokeWidth: 0, strokeColor: 'transparent', textSize: 11 },
+  point: { radius: 14, strokeWidth: 0, strokeColor: 'transparent', textSize: 10, opacity: 1.0 },
   pakistan: { lineColor: 'transparent', lineWidth: 0, lineOpacity: 0 },
   countryFocus: {
     // Inside Pakistan - Climate TRACE style prominent green overlay

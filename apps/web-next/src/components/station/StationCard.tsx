@@ -188,29 +188,37 @@ export function StationCard() {
             </div>
           ) : current && categories && category ? (
             <>
-              {/* Header with close button */}
-              <div className="flex items-start justify-end mb-1">
+              {/* Header: Station Name and Close Button */}
+              <div className="flex items-start justify-between mb-1">
+                <div className="flex-1 pr-2">
+                  <div className="text-lg font-bold text-gray-900 leading-tight">
+                    {current.name}
+                  </div>
+                  <div className="text-xs text-gray-400 mt-0.5">
+                    Last updated: {new Date(current.last_update).toLocaleTimeString('en-US', {
+                      timeZone: 'Asia/Karachi',
+                      hour12: false,
+                      hour: '2-digit',
+                      minute: '2-digit'
+                    })} PKT
+                  </div>
+                </div>
                 <button
                   onClick={close}
-                  className="text-gray-400 hover:text-gray-600 p-1"
+                  className="text-gray-400 hover:text-gray-600 p-1 flex-shrink-0"
                   aria-label="Close"
                 >
                   <X size={18} />
                 </button>
               </div>
 
-              {/* Station Name - Bolded */}
-              <div className="text-lg font-bold text-gray-900 mb-3">
-                {current.name}
-              </div>
-
-              {/* Compact AQI Card - Copied from Station Page */}
+              {/* Compact AQI Card */}
               <div 
-                className="rounded-lg p-4"
+                className="rounded-lg p-3 mt-2"
                 style={{ backgroundColor: getAQIColorByValue(currentAQI || 0) }}
               >
                 {/* Upper section: US AQI | Category */}
-                <div className="grid grid-cols-2 gap-4 items-center mb-4">
+                <div className="grid grid-cols-2 gap-4 items-center mb-3">
                   
                   {/* PM2.5 Number */}
                   <div className="text-center">
@@ -354,26 +362,14 @@ export function StationCard() {
               )}
 
               {/* View Details Button */}
-              <div className="mt-3 pt-2 border-t border-gray-100">
+              <div className="mt-2 pt-2 border-t border-gray-100">
                 <a
                   href={`/station/${stationId}`}
-                  className="w-full block text-center hover:bg-sky-700 text-gray-50 bg-sky-800 py-2 transition-colors text-sm font-medium"
+                  className="w-full block text-center hover:bg-sky-700 text-gray-50 bg-sky-800 py-2 transition-colors text-sm font-medium rounded"
                   onClick={close}
                 >
                   View Details
                 </a>
-              </div>
-
-              {/* Footer - Last Updated */}
-              <div className="flex justify-end mt-2">
-                <div className="text-xs text-gray-400">
-                  Last updated: {new Date(current.last_update).toLocaleTimeString('en-US', {
-                    timeZone: 'Asia/Karachi',
-                    hour12: false,
-                    hour: '2-digit',
-                    minute: '2-digit'
-                  })} PKT
-                </div>
               </div>
             </>
           ) : (

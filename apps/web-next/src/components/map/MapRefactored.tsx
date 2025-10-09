@@ -23,7 +23,7 @@ export default function MapRefactored({
   zoom, 
   className = '', 
   heatmapVisible = true,
-  clusteringEnabled = true 
+  clusteringEnabled = false 
 }: MapProps) {
   const { openStation } = useStationSidebar();
   const { stations, loading, error } = useStationsData();

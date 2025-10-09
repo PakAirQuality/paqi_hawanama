@@ -21,7 +21,7 @@ interface MapWrapperProps {
   clusteringEnabled?: boolean
 }
 
-export default function MapWrapper({ className, heatmapVisible = true, clusteringEnabled = true }: MapWrapperProps) {
+export default function MapWrapper({ className, heatmapVisible = true, clusteringEnabled = false }: MapWrapperProps) {
   return (
     <div className={`${className}`} style={{ minHeight: '400px' }}>
       <MapRefactored 

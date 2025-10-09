@@ -1,5 +1,6 @@
 import React from 'react';
 import { pm25ToAQI } from '../config/aqiStyles';
+import { STYLES } from '../config/mapConfig';
 
 // Helper function to get the correct CSS class for AQI color
 // Now works with PM2.5 values converted to AQI for color
@@ -31,14 +32,8 @@ interface AqiMarkerProps {
 }
 
 const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster, zoom = 5 }) => {
-  // Calculate zoom-responsive size
-  const getZoomResponsiveSize = (baseSize: number, currentZoom: number): number => {
-    // Scale markers based on zoom: smaller at low zoom, larger at high zoom
-    const zoomFactor = Math.max(0.6, Math.min(1.4, currentZoom / 8)); // Range: 0.6x to 1.4x
-    return Math.round(baseSize * zoomFactor);
-  };
-
-  const markerSize = getZoomResponsiveSize(8, zoom); // Base size 8, responsive to zoom
+  // Use config values for base size - no zoom scaling
+  const markerSize = isCluster ? STYLES.cluster.radius : STYLES.point.radius;
   // Debug logging
   if (!isCluster) {
     console.log('AqiMarker individual station:', { aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster });
@@ -52,23 +47,31 @@ const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, poi
   const colorValue = isCluster ? avg_pm25 : pm25;
   const colorClass = getAqiColorClass(colorValue);
 
+  // Hide text at very low zoom levels (globe view)
+  const showText = zoom >= 3;
+  
+  // Make markers more compact at low zoom levels
+  const isLowZoom = zoom < 3;
+  const compactSize = isLowZoom ? Math.max(4, markerSize * 0.3) : markerSize;
+  const actualSize = compactSize * 2;
+
   return (
     <div 
-      className={`aqi-marker-container ${isCluster ? 'cluster' : 'point'}`}
+      className={`aqi-marker-container ${isCluster ? 'cluster' : 'point'} ${isLowZoom ? 'low-zoom' : ''}`}
       style={{
-        width: `${markerSize * 2}px`,
-        height: `${markerSize * 2}px`
+        width: `${actualSize}px`,
+        height: `${actualSize}px`
       }}
     >
       <div 
         className={`aqi-marker ${colorClass}`}
         style={{
-          width: `${markerSize * 2}px`,
-          height: `${markerSize * 2}px`,
-          fontSize: `${Math.max(8, markerSize - 2)}px` // Responsive font size
+          width: `${actualSize}px`,
+          height: `${actualSize}px`,
+          fontSize: `${Math.max(8, compactSize - 2)}px`
         }}
       >
-        <span>{displayValue}</span>
+        {showText && <span>{displayValue}</span>}
       </div>
     </div>
   );
