@@ -1,7 +1,8 @@
 export const CLUSTER_CONFIG = {
-  radius: 50, // Cluster radius in pixels
-  maxZoom: 20,  // Changed from 16 to 20
-  minZoom: 5,   // Min zoom to cluster points on
+  radius: 40,     // Small radius - only cluster when stations overlap
+  maxZoom: 18,    // Cluster until very high zoom, then show all individual stations
+  minZoom: 0,     // Start clustering from the lowest zoom
+  minPoints: 5,   // Need at least 5 stations to form a cluster (only dense areas)
 };
 
 export const CLUSTER_BEHAVIOR = {

@@ -7,7 +7,6 @@ import { useStationSidebar } from '@/stores/stationSidebar';
 
 // Modular imports
 import { useStationsData } from './hooks/useStationsData';
-import { useSupercluster } from './hooks/useSupercluster';
 import AqiMarker from './components/AqiMarker';
 
 interface MapProps {
@@ -15,19 +14,16 @@ interface MapProps {
   zoom?: number;
   className?: string;
   heatmapVisible?: boolean;
-  clusteringEnabled?: boolean;
 }
 
 export default function MapRefactored({ 
   center, 
   zoom, 
   className = '', 
-  heatmapVisible = true,
-  clusteringEnabled = false 
+  heatmapVisible = true
 }: MapProps) {
   const { openStation } = useStationSidebar();
   const { stations, loading, error } = useStationsData();
-  const supercluster = useSupercluster(stations);
 
   const [viewport, setViewport] = useState({
     longitude: center?.[0] || 69.3451,
@@ -39,62 +35,28 @@ export default function MapRefactored({
   const [map, setMap] = useState<any>(null);
 
   const features = useMemo(() => {
-    if (!bounds || !viewport) return [];
-
-    // If clustering is disabled, return all individual stations
-    if (!clusteringEnabled || !supercluster) {
-      return stations.map(station => ({
-        type: 'Feature' as const,
-        geometry: {
-          type: 'Point' as const,
-          coordinates: [station.longitude, station.latitude]
-        },
-        properties: {
-          id: station.id,
-          name: station.name,
-          city: station.city,
-          aqi: station.aqi_raw,
-          pm25: station.pm25,
-          cluster: false
-        }
-      }));
-    }
-
-    const clusters = supercluster.getClusters(bounds, Math.floor(viewport.zoom));
-
-    // Calculate the average PM2.5 for each cluster and preserve AQI for individual stations
-    const result = clusters.map(cluster => {
-      if (cluster.properties.cluster) {
-        // For clusters, avg_pm25 is already calculated in reduce function
-        // cluster.properties.avg_pm25 should be available
-      } else {
-        // For individual stations, ensure we have both AQI and PM2.5 data
-        cluster.properties.aqi = cluster.properties.aqi_raw || cluster.properties.aqi;
-        cluster.properties.pm25 = cluster.properties.pm25; // PM2.5 value for individual stations
+    // Return all individual stations
+    return stations.map(station => ({
+      type: 'Feature' as const,
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [station.longitude, station.latitude]
+      },
+      properties: {
+        id: station.id,
+        name: station.name,
+        city: station.city,
+        aqi: station.aqi_raw,
+        pm25: station.pm25,
+        cluster: false
       }
-      return cluster;
-    });
+    }));
+  }, [stations]);
 
-    return result;
-  }, [supercluster, bounds, viewport, stations, clusteringEnabled]);
-
-  const handleMarkerClick = async (feature: any) => {
-    const { geometry, properties } = feature;
-    const [longitude, latitude] = geometry.coordinates;
-
-    if (!supercluster) return;
-
-    if (properties.cluster) {
-      try {
-        const zoom = await supercluster.getClusterExpansionZoom(properties.cluster_id);
-        setViewport({ longitude, latitude, zoom });
-      } catch (err) {
-        console.error("Error getting cluster expansion zoom:", err);
-      }
-    } else {
-      // For individual stations, open the sidebar
-      openStation(String(properties.id));
-    }
+  const handleMarkerClick = (feature: any) => {
+    const { properties } = feature;
+    // Open the station sidebar for all markers (individual stations only)
+    openStation(String(properties.id));
   };
 
   const handleProvinceClick = (e: any) => {
@@ -258,9 +220,7 @@ export default function MapRefactored({
         </Source>
 
         {features.map(feature => {
-          const isCluster = feature.properties.cluster;
-          const pointId = isCluster ? feature.properties.cluster_id : feature.properties.id;
-          const key = `marker-${pointId}`;
+          const key = `marker-${feature.properties.id}`;
 
           return (
             <Marker
@@ -270,13 +230,10 @@ export default function MapRefactored({
             >
               <div onClick={() => handleMarkerClick(feature)}>
                 <AqiMarker
-                  isCluster={!!isCluster}
                   aqi={feature.properties.aqi}
-                  avg_aqi={feature.properties.avg_aqi}
                   pm25={feature.properties.pm25}
-                  avg_pm25={feature.properties.avg_pm25}
-                  point_count={feature.properties.point_count}
-                  zoom={viewport.zoom}
+                  isCluster={false}
+                  zoom={viewport?.zoom || 5}
                 />
               </div>
             </Marker>

@@ -25,7 +25,7 @@ export const MAP_CONFIG = {
 
 // Style configurations
 export const STYLES = {
-  cluster: { radius: 14, strokeWidth: 0, strokeColor: 'transparent', textSize: 11 },
+  cluster: { radius: 16, strokeWidth: 0, strokeColor: 'transparent', textSize: 11 },
   point: { radius: 14, strokeWidth: 0, strokeColor: 'transparent', textSize: 10, opacity: 1.0 },
   pakistan: { lineColor: 'transparent', lineWidth: 0, lineOpacity: 0 },
   countryFocus: {

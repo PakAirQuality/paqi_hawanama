@@ -196,12 +196,7 @@
   border-radius: 50%;
 }
 
-/* Style for larger cluster markers */
-.aqi-marker-container.cluster .aqi-marker {
-  width: 48px;
-  height: 48px;
-  font-size: 16px;
-}
+/* All markers use consistent styling */
 
 /* AQI Color Classes - matching cluster colors with glow */
 .bg-no-reading { 
@@ -235,27 +230,7 @@
   --glow-color: rgba(153, 27, 27, 0.4);
 }
 
-/* Cluster color classes to match your specified spectrum */
-.marker-cluster-small {
-    background-color: rgba(181, 226, 140, 0.6);
-}
-.marker-cluster-small div {
-    background-color: rgba(110, 204, 57, 0.6);
-}
-
-.marker-cluster-medium {
-    background-color: rgba(241, 211, 87, 0.6);
-}
-.marker-cluster-medium div {
-    background-color: rgba(240, 194, 12, 0.6);
-}
-
-.marker-cluster-large {
-    background-color: rgba(253, 156, 115, 0.6);
-}
-.marker-cluster-large div {
-    background-color: rgba(241, 128, 23, 0.6);
-}
+/* Individual station markers only */
 
 /* Remove grey shading from Recharts bar charts */
 .recharts-bar-rectangle:hover {

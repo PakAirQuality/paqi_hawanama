@@ -23,29 +23,20 @@ const getAqiColorClass = (pm25: number | null | undefined): string => {
 
 interface AqiMarkerProps {
   aqi?: number;
-  avg_aqi?: number;
   pm25?: number;
-  avg_pm25?: number;
-  point_count?: number;
   isCluster: boolean;
   zoom?: number;
 }
 
-const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster, zoom = 5 }) => {
-  // Use config values for base size - no zoom scaling
-  const markerSize = isCluster ? STYLES.cluster.radius : STYLES.point.radius;
-  // Debug logging
-  if (!isCluster) {
-    console.log('AqiMarker individual station:', { aqi, avg_aqi, pm25, avg_pm25, point_count, isCluster });
-  }
+const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, pm25, isCluster, zoom = 5 }) => {
+  // Use config values for base size - only points since no clustering
+  const markerSize = STYLES.point.radius;
 
-  // Show PM2.5 values: 'avg_pm25' for clusters, 'pm25' for individual stations
-  const pm25ValueToShow = isCluster ? avg_pm25 : pm25;
-  const displayValue = pm25ValueToShow ? Math.round(pm25ValueToShow) : '-';
+  // Show PM2.5 value
+  const displayValue = pm25 ? Math.round(pm25) : '-';
 
-  // Use PM2.5 values for color determination
-  const colorValue = isCluster ? avg_pm25 : pm25;
-  const colorClass = getAqiColorClass(colorValue);
+  // Use PM2.5 value for color determination
+  const colorClass = getAqiColorClass(pm25);
 
   // Hide text at very low zoom levels (globe view)
   const showText = zoom >= 3;
@@ -57,7 +48,7 @@ const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, avg_aqi, pm25, avg_pm25, poi
 
   return (
     <div 
-      className={`aqi-marker-container ${isCluster ? 'cluster' : 'point'} ${isLowZoom ? 'low-zoom' : ''}`}
+      className={`aqi-marker-container point ${isLowZoom ? 'low-zoom' : ''}`}
       style={{
         width: `${actualSize}px`,
         height: `${actualSize}px`
