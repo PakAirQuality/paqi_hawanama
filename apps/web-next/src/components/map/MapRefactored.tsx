@@ -139,16 +139,32 @@ export default function MapRefactored({
   }
 
   return (
-    <div className={`w-full relative ${className}`} style={{ height: 'calc(100vh - 120px)' }}>
+    <div className={`w-full h-full relative ${className}`} style={{ 
+      maxWidth: '100vw', 
+      maxHeight: '100vh',
+      overflow: 'hidden'
+    }}>
       <Map
         {...viewport}
+        zoom={viewport?.zoom || 5}
         mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
         mapStyle="mapbox://styles/mapbox/outdoors-v12"
         onMove={handleMapChange}
         onLoad={handleMapChange}
-        style={{ width: '100%', height: '100%' }}
+        style={{ 
+          width: '100%', 
+          height: '100%',
+          maxWidth: '100vw',
+          maxHeight: '100vh'
+        }}
         maxPitch={60}
         attributionControl={false}
+        touchZoomRotate={true}
+        touchPitch={false}
+        dragPan={true}
+        scrollZoom={true}
+        doubleClickZoom={true}
+        keyboard={false}
       >
         {/* Pakistan boundary with green outline and shading */}
         <Source

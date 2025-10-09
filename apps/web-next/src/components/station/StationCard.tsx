@@ -269,11 +269,11 @@ export function StationCard() {
                         {chartMetric === 'aqi' ? currentAQI : Math.round(current?.main_value || 0)}
                         {chartMetric === 'pm25' && <span className="text-xs font-normal text-gray-600 ml-1">µg/m³</span>}
                       </div>
-                      {/* Toggle Buttons - moved beneath the values */}
-                      <div className="flex items-center space-x-1">
+                      {/* Toggle Buttons - compact for mobile */}
+                      <div className="flex items-center space-x-0.5 sm:space-x-1">
                         <button
                           onClick={() => setChartMetric('aqi')}
-                          className={`px-2 py-1 text-xs rounded transition-colors ${
+                          className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-xs rounded transition-colors ${
                             chartMetric === 'aqi' 
                               ? 'bg-blue-100 text-blue-700 font-medium' 
                               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -283,7 +283,7 @@ export function StationCard() {
                         </button>
                         <button
                           onClick={() => setChartMetric('pm25')}
-                          className={`px-2 py-1 text-xs rounded transition-colors ${
+                          className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-xs rounded transition-colors ${
                             chartMetric === 'pm25' 
                               ? 'bg-blue-100 text-blue-700 font-medium' 
                               : 'bg-gray-100 text-gray-600 hover:bg-gray-200'

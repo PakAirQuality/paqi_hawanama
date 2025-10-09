@@ -1,134 +1,116 @@
 'use client'
 
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState } from 'react'
 import MapWrapper from '@/components/map/MapWrapper'
 import { StationCard } from '@/components/station/StationCard'
 import { CitySearch } from '@/components/ui/CitySearch'
-import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
-import Link from 'next/link'
-import { usePersistentState } from '@/hooks/usePersistentState'
+import { Search, X } from 'lucide-react'
 
 export default function Home() {
+  const [showCitySearch, setShowCitySearch] = useState(false)
 
-  // Debug database state
-  const { data: debugInfo } = useQuery({
-    queryKey: ['debug-info'],
-    queryFn: async () => {
-      console.log('🔍 DEBUG: Fetching debug info...')
-      const result = await api.getDebugInfo()
-      console.log('🔍 DEBUG: Database debug info:', result)
-      return result
-    },
-  })
-
-  // Fetch dashboard statistics
-  const { data: dashboardStats, isLoading } = useQuery({
-    queryKey: ['dashboard-stats'],
-    queryFn: () => api.getDashboardStats(),
-    refetchInterval: 60000, // Refresh every minute
-  })
   return (
-    <div className="flex flex-col h-screen bg-background">
-      {/* Header */}
-      <header className="flex-shrink-0 border-b">
-        <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center space-x-3 min-w-0">
-              <img 
-                src="/logo-cropped.png" 
-                alt="Hawanama Logo" 
-                className="w-8 h-8 sm:w-12 sm:h-12 object-contain flex-shrink-0"
-              />
-              <div className="min-w-0">
-                <h1 className="text-lg sm:text-2xl font-bold text-foreground truncate">Hawanama</h1>
-                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Pakistan Air Quality Monitoring</p>
-              </div>
-            </div>
-            <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
-              <CitySearch className="w-32 sm:w-48 md:w-64" />
-              <nav className="hidden md:flex items-center space-x-4">
-                <span className="text-sm text-muted-foreground">Cities</span>
-              </nav>
-              <div className="hidden sm:flex items-center space-x-2">
-                <span className="text-sm text-muted-foreground">Live Data</span>
-                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              </div>
-            </div>
+    <div className="relative w-full overflow-hidden touch-none" style={{ 
+      height: '100vh', 
+      height: '100dvh',
+      width: '100vw',
+      maxWidth: '100vw',
+      position: 'fixed',
+      top: 0,
+      left: 0,
+      right: 0,
+      bottom: 0
+    }}>
+      {/* Full Screen Map */}
+      <MapWrapper className="absolute inset-0 w-full h-full touch-pan-x touch-pan-y" />
+      
+      {/* Live Data - Upper Left with safe area */}
+      <div className="absolute top-safe-or-4 left-4 sm:top-8 sm:left-8 z-50" style={{ top: 'max(env(safe-area-inset-top), 1rem)' }}>
+        <div className="flex items-center space-x-2 bg-black/20 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 shadow-2xl">
+          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50"></div>
+          <span className="text-xs font-medium text-white/90 tracking-wide">LIVE</span>
+        </div>
+      </div>
+
+      {/* Logo - Lower Left (Floating) - Mobile Safe with safe area */}
+      <div className="absolute left-4 sm:left-8 z-50" style={{ bottom: 'max(env(safe-area-inset-bottom, 1rem), 1rem)' }}>
+        <div className="relative group">
+          {/* Main container with blue button styling */}
+          <div 
+            className="relative flex items-center justify-center cursor-pointer overflow-visible transform transition-all duration-200 hover:brightness-110 group-hover:scale-105"
+            style={{
+              background: 'linear-gradient(135deg, #1899D6 0%, #0EA5E9 50%, #0284C7 100%)',
+              border: 'solid transparent',
+              borderRadius: '20px',
+              borderWidth: '0 0 3px',
+              color: '#FFFFFF',
+              padding: '4px',
+              boxSizing: 'border-box',
+              boxShadow: '0 4px 15px rgba(24, 153, 214, 0.3)'
+            }}
+          >
+            {/* Blue gradient shadow layer */}
+            <div 
+              className="absolute inset-0 -z-10"
+              style={{
+                background: 'linear-gradient(135deg, #1CB0F6 0%, #0EA5E9 100%)',
+                border: 'solid transparent',
+                borderRadius: '20px',
+                borderWidth: '0 0 3px',
+                bottom: '-3px',
+                left: '0',
+                right: '0',
+                top: '0',
+                backgroundClip: 'padding-box'
+              }}
+            ></div>
+            
+            <img 
+              src="/hawanama.png" 
+              alt="Hawanama Logo" 
+              className="w-12 h-12 sm:w-16 sm:h-16 object-contain relative z-10 drop-shadow-lg"
+              style={{
+                filter: 'brightness(0) invert(1)' // Makes the logo white
+              }}
+            />
           </div>
         </div>
-      </header>
-
-      {/* Main Content - Full Width Map */}
-      <div className="relative flex-1 w-full h-[calc(100vh-140px)]">
-        {/* Full Width Map */}
-        <MapWrapper 
-          className="w-full h-full"
-        />
-        
-        {/* Floating Overview Card - Temporarily commented out */}
-        {/* <div className="absolute top-4 left-4 z-10">
-          <Card className="w-80 bg-white shadow-lg">
-            <CardHeader className="pb-2">
-              <CardTitle className="text-base">Overview</CardTitle>
-              <CardDescription className="text-xs">Real-time air quality across Pakistan</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-medium">Active Stations</span>
-                  <span className="text-xl font-bold">
-                    {isLoading ? '...' : dashboardStats?.active_stations || 0}
-                  </span>
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  {isLoading ? 'Loading...' : `${dashboardStats?.total_stations || 0} total stations`}
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-medium">Avg PM 2.5</span>
-                  <span className={`text-xl font-bold ${
-                    dashboardStats?.aqi_color === 'green' ? 'text-green-600' :
-                    dashboardStats?.aqi_color === 'yellow' ? 'text-yellow-600' :
-                    dashboardStats?.aqi_color === 'orange' ? 'text-orange-600' :
-                    dashboardStats?.aqi_color === 'red' ? 'text-red-600' :
-                    dashboardStats?.aqi_color === 'purple' ? 'text-purple-600' :
-                    'text-gray-600'
-                  }`}>
-                    {isLoading ? '...' : dashboardStats?.avg_pm25 || '--'}
-                  </span>
-                </div>
-                <div className="text-[10px] text-muted-foreground">
-                  {isLoading ? 'Loading...' : 'μg/m³'}
-                </div>
-              </div>
-              <div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs font-medium">Last Update</span>
-                  <span className="text-xs">
-                    {isLoading ? '...' : dashboardStats?.last_update || 'No data'}
-                  </span>
-                </div>
-              </div>
-              {dashboardStats?.top_cities && dashboardStats.top_cities.length > 0 && (
-                <div>
-                  <div className="text-xs font-medium mb-1">Highest AQI Cities</div>
-                  <div className="space-y-0.5">
-                    {dashboardStats.top_cities.slice(0, 3).map((city: { name: string; aqi: number }, index: number) => (
-                      <div key={index} className="flex justify-between text-[10px]">
-                        <span className="truncate">{city.name.split(',')[0]}</span>
-                        <span className="font-medium">{Math.round(city.aqi)}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </div> */}
-        
       </div>
+
+      {/* Cities Button - Mobile: Same level as logo, Desktop: Top Right */}
+      <div className="absolute right-4 sm:right-8 sm:top-8 z-50" style={{ bottom: 'max(env(safe-area-inset-bottom, 1rem), 1rem)' }}>
+        <button
+          onClick={() => setShowCitySearch(!showCitySearch)}
+          className="group flex items-center justify-center w-12 h-12 sm:w-14 sm:h-14 bg-black/20 backdrop-blur-md rounded-2xl border border-white/10 shadow-2xl hover:bg-black/30 transition-all duration-300 hover:scale-105"
+          title="Search Cities"
+        >
+          <svg 
+            className="w-5 h-5 sm:w-6 sm:h-6 text-white group-hover:text-blue-300 transition-colors" 
+            fill="currentColor" 
+            viewBox="0 0 24 24"
+          >
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+        </button>
+      </div>
+
+      {/* Floating City Search - Mobile: Top right level with LIVE button, Desktop: Right of Cities Button */}
+      {showCitySearch && (
+        <div 
+          className="absolute right-4 sm:right-24 sm:bottom-auto z-[60] animate-in slide-in-from-right-2 duration-300"
+          style={{ 
+            top: 'max(env(safe-area-inset-top), 1rem)',
+            '@media (min-width: 640px)': {
+              top: '2rem'
+            }
+          }}
+        >
+          <CitySearch 
+            className="w-48 sm:w-80" 
+            onSelect={() => setShowCitySearch(false)}
+          />
+        </div>
+      )}
       
       {/* Station Card Popup */}
       <StationCard />

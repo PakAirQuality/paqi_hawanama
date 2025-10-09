@@ -22,7 +22,13 @@ interface MapWrapperProps {
 
 export default function MapWrapper({ className, heatmapVisible = true }: MapWrapperProps) {
   return (
-    <div className={`${className}`} style={{ minHeight: '400px' }}>
+    <div className={`${className}`} style={{ 
+      width: '100%', 
+      height: '100%',
+      maxWidth: '100vw',
+      maxHeight: '100vh',
+      overflow: 'hidden'
+    }}>
       <MapRefactored 
         className="w-full h-full" 
         heatmapVisible={heatmapVisible}

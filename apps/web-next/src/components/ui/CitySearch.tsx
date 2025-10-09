@@ -17,9 +17,10 @@ interface City {
 
 interface CitySearchProps {
   className?: string
+  onSelect?: () => void
 }
 
-export function CitySearch({ className = '' }: CitySearchProps) {
+export function CitySearch({ className = '', onSelect }: CitySearchProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState('')
   const [filteredCities, setFilteredCities] = useState<City[]>([])
@@ -68,6 +69,7 @@ export function CitySearch({ className = '' }: CitySearchProps) {
     setSearchTerm('')
     setIsOpen(false)
     router.push(`/city/${city.slug}`)
+    onSelect?.() // Call the onSelect callback if provided
   }
 
   const handleInputFocus = () => {
@@ -91,7 +93,7 @@ export function CitySearch({ className = '' }: CitySearchProps) {
   return (
     <div ref={searchRef} className={`relative ${className}`}>
       <div className="relative">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-white/70 h-4 w-4" />
         <input
           ref={inputRef}
           type="text"
@@ -99,14 +101,14 @@ export function CitySearch({ className = '' }: CitySearchProps) {
           value={searchTerm}
           onChange={handleInputChange}
           onFocus={handleInputFocus}
-          className="w-full pl-10 pr-4 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent bg-white min-w-0"
+          className="w-full pl-10 pr-4 py-3 text-sm border border-white/30 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 bg-white/20 backdrop-blur-sm placeholder-black/70 text-white min-w-0"
         />
       </div>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-md shadow-lg z-50 max-h-80 overflow-y-auto min-w-0">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-white/90 backdrop-blur-2xl border border-white/40 rounded-2xl shadow-2xl z-50 max-h-80 overflow-y-auto min-w-0">
           {isLoading ? (
-            <div className="p-4 text-center text-gray-500 text-sm">
+            <div className="p-4 text-center text-gray-600 text-sm">
               Loading cities...
             </div>
           ) : filteredCities.length > 0 ? (
@@ -115,15 +117,15 @@ export function CitySearch({ className = '' }: CitySearchProps) {
                 <button
                   key={city.id}
                   onClick={() => handleCitySelect(city)}
-                  className="w-full px-4 py-3 text-left hover:bg-gray-50 flex items-center justify-between group transition-colors min-w-0"
+                  className="w-full px-4 py-3 text-left hover:bg-black/10 flex items-center justify-between group transition-colors min-w-0 rounded-xl mx-2"
                 >
                   <div className="flex items-center space-x-3 min-w-0 flex-1">
-                    <MapPin className="h-4 w-4 text-gray-400 group-hover:text-blue-500 flex-shrink-0" />
+                    <MapPin className="h-4 w-4 text-gray-600 group-hover:text-blue-600 flex-shrink-0" />
                     <div className="min-w-0 flex-1">
-                      <div className="text-sm font-medium text-gray-900 truncate">
+                      <div className="text-sm font-medium text-black truncate">
                         {city.name}
                       </div>
-                      <div className="text-xs text-gray-500 truncate">
+                      <div className="text-xs text-gray-600 truncate">
                         {city.state} • {city.station_count} station{city.station_count !== 1 ? 's' : ''}
                       </div>
                     </div>
@@ -133,18 +135,18 @@ export function CitySearch({ className = '' }: CitySearchProps) {
                       <div className={`text-sm font-semibold ${getAqiColor(city.avg_aqi)}`}>
                         {Math.round(city.avg_aqi)}
                       </div>
-                      <div className="text-xs text-gray-400">AQI</div>
+                      <div className="text-xs text-gray-500">AQI</div>
                     </div>
                   )}
                 </button>
               ))}
             </div>
           ) : searchTerm.trim() ? (
-            <div className="p-4 text-center text-gray-500 text-sm">
+            <div className="p-4 text-center text-gray-600 text-sm">
               No cities found matching "{searchTerm}"
             </div>
           ) : (
-            <div className="p-4 text-center text-gray-500 text-sm">
+            <div className="p-4 text-center text-gray-600 text-sm">
               Start typing to search cities
             </div>
           )}

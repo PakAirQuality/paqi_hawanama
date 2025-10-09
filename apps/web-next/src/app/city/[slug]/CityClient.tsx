@@ -20,15 +20,15 @@ import {
   Tooltip,
 } from 'recharts'
 
-// Compact rectangular AQI box component for city page with black text
+// Compact rectangular AQI box component for city page with black text - responsive sizing
 const CityAQIBox: React.FC<{ value: number }> = ({ value }) => {
   return (
     <div 
-      className="w-24 h-20 rounded-lg flex flex-col items-center justify-center text-black font-bold shadow-md border border-black/10"
+      className="w-16 h-12 sm:w-24 sm:h-20 rounded-lg flex flex-col items-center justify-center text-black font-bold shadow-md border border-black/10"
       style={{ backgroundColor: getAQIColorByValue(value) }}
     >
-      <div className="text-2xl font-bold leading-tight">{Math.round(value) || '--'}</div>
-      <div className="text-xs font-medium -mt-0.5">AQI</div>
+      <div className="text-lg sm:text-2xl font-bold leading-tight">{Math.round(value) || '--'}</div>
+      <div className="text-[10px] sm:text-xs font-medium -mt-0.5">AQI</div>
     </div>
   )
 }
@@ -167,11 +167,12 @@ export default function CityClient({ citySlug }: CityClientProps) {
               </div>
             </div>
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
-              <CitySearch className="w-32 sm:w-48 md:w-64" />
+              <div className="relative">
+                <CitySearch className="w-32 sm:w-48 md:w-64 ring-2 ring-blue-400/50 border-blue-400/50 rounded-2xl" />
+              </div>
               <nav className="hidden md:flex items-center space-x-4">
                 <Link href="/" className="text-sm hover:underline">Dashboard</Link>
                 <span className="text-sm text-muted-foreground">Cities</span>
-                <span className="text-sm font-medium truncate max-w-20">{cityData.city_name}</span>
               </nav>
             </div>
           </div>
@@ -183,15 +184,26 @@ export default function CityClient({ citySlug }: CityClientProps) {
         {/* Compact City Header */}
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="min-w-0">
-              <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{cityData.city_name}</h1>
-              <p className="text-sm text-muted-foreground">{cityData.state}, Pakistan</p>
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{cityData.city_name}</h1>
+                <p className="text-sm text-muted-foreground">{cityData.state}, Pakistan</p>
+              </div>
+              {/* Mobile: AQI box next to city name */}
+              <div className="sm:hidden">
+                <CityAQIBox value={cityData.avg_aqi || 0} />
+              </div>
             </div>
-            <div className="flex flex-col items-center sm:items-end">
+            {/* Desktop: AQI box in original position */}
+            <div className="hidden sm:flex flex-col items-center sm:items-end">
               <CityAQIBox value={cityData.avg_aqi || 0} />
               <div className={`text-sm font-semibold mt-1 text-center sm:text-right ${getAQIColorClass(cityData.aqi_color)}`}>
                 {cityData.aqi_category}
               </div>
+            </div>
+            {/* Mobile: AQI category below */}
+            <div className={`sm:hidden text-sm font-semibold ${getAQIColorClass(cityData.aqi_color)}`}>
+              {cityData.aqi_category}
             </div>
           </div>
         </div>
@@ -209,10 +221,10 @@ export default function CityClient({ citySlug }: CityClientProps) {
                       {historicalLoading ? 'Loading...' : `${chartData.length} hourly readings`}
                     </CardDescription>
                   </div>
-                  <div className="flex items-center space-x-2">
+                  <div className="flex items-center space-x-1 sm:space-x-2">
                     <button
                       onClick={() => setChartMetric('aqi')}
-                      className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      className={`px-2 py-1 sm:px-3 sm:py-1 text-xs sm:text-sm rounded-md transition-colors ${
                         chartMetric === 'aqi' 
                           ? 'bg-blue-100 text-blue-700 font-medium' 
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
@@ -222,7 +234,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
                     </button>
                     <button
                       onClick={() => setChartMetric('pm25')}
-                      className={`px-3 py-1 text-sm rounded-md transition-colors ${
+                      className={`px-2 py-1 sm:px-3 sm:py-1 text-xs sm:text-sm rounded-md transition-colors ${
                         chartMetric === 'pm25' 
                           ? 'bg-blue-100 text-blue-700 font-medium' 
                           : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
