@@ -192,6 +192,7 @@ async def get_city(
         stations_result = await db.execute(text(stations_query), {"city_id": city_data.id})
         stations = stations_result.fetchall()
         
+        
         # Calculate AQI distribution
         distribution = {
             'good': 0,
@@ -210,7 +211,7 @@ async def get_city(
         stations_list = []
         for station in stations:
             station_data = {
-                "id": station.station_id,
+                "id": station.station_id,  # Use hash ID (original behavior)
                 "name": station.name,
                 "latitude": float(station.lat) if station.lat else None,
                 "longitude": float(station.lon) if station.lon else None,
@@ -418,3 +419,5 @@ async def get_city_historical(
     except Exception as e:
         logger.error(f"Error getting historical data for city {city_slug}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+

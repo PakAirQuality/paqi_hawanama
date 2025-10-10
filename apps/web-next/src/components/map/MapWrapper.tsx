@@ -25,9 +25,8 @@ export default function MapWrapper({ className, heatmapVisible = true }: MapWrap
     <div className={`${className}`} style={{ 
       width: '100%', 
       height: '100%',
-      maxWidth: '100vw',
-      maxHeight: '100vh',
-      overflow: 'hidden'
+      transform: 'translate3d(0, 0, 0)', // Force GPU acceleration
+      willChange: 'transform' // Optimize for animations
     }}>
       <MapRefactored 
         className="w-full h-full" 

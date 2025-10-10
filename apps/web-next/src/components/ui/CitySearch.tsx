@@ -101,52 +101,51 @@ export function CitySearch({ className = '', onSelect }: CitySearchProps) {
           value={searchTerm}
           onChange={handleInputChange}
           onFocus={handleInputFocus}
-          className="w-full pl-10 pr-4 py-3 text-sm border border-white/30 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 bg-white/20 backdrop-blur-sm placeholder-black/70 text-white min-w-0"
+          className="w-full pl-10 pr-4 py-3 text-sm border border-white/30 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-400/50 focus:border-blue-400/50 bg-white/20 backdrop-blur-sm placeholder-black/70 text-black min-w-0"
         />
       </div>
 
       {isOpen && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white/90 backdrop-blur-2xl border border-white/40 rounded-2xl shadow-2xl z-50 max-h-80 overflow-y-auto min-w-0">
+        <div className="absolute top-full left-0 right-0 mt-2 bg-white/90 backdrop-blur-2xl border border-white/40 rounded-2xl shadow-2xl z-50 max-h-80 overflow-y-auto overflow-x-hidden">
           {isLoading ? (
-            <div className="p-4 text-center text-gray-600 text-sm">
+            <div className="p-3 text-center text-gray-600 text-sm">
               Loading cities...
             </div>
           ) : filteredCities.length > 0 ? (
-            <div className="py-2">
+            <div className="py-1">
               {filteredCities.map((city) => (
                 <button
                   key={city.id}
                   onClick={() => handleCitySelect(city)}
-                  className="w-full px-4 py-3 text-left hover:bg-black/10 flex items-center justify-between group transition-colors min-w-0 rounded-xl mx-2"
+                  className="w-full px-3 py-2 text-left hover:bg-black/10 flex items-center justify-between group transition-colors overflow-hidden"
                 >
-                  <div className="flex items-center space-x-3 min-w-0 flex-1">
-                    <MapPin className="h-4 w-4 text-gray-600 group-hover:text-blue-600 flex-shrink-0" />
-                    <div className="min-w-0 flex-1">
+                  <div className="flex items-center space-x-2 min-w-0 flex-1 overflow-hidden">
+                    <MapPin className="h-3 w-3 text-gray-600 group-hover:text-blue-600 flex-shrink-0" />
+                    <div className="min-w-0 flex-1 overflow-hidden">
                       <div className="text-sm font-medium text-black truncate">
                         {city.name}
                       </div>
                       <div className="text-xs text-gray-600 truncate">
-                        {city.state} • {city.station_count} station{city.station_count !== 1 ? 's' : ''}
+                        {city.state} • {city.station_count} stations
                       </div>
                     </div>
                   </div>
                   {city.avg_aqi && (
-                    <div className="text-right flex-shrink-0">
-                      <div className={`text-sm font-semibold ${getAqiColor(city.avg_aqi)}`}>
+                    <div className="text-right flex-shrink-0 ml-2">
+                      <div className={`text-xs font-semibold ${getAqiColor(city.avg_aqi)}`}>
                         {Math.round(city.avg_aqi)}
                       </div>
-                      <div className="text-xs text-gray-500">AQI</div>
                     </div>
                   )}
                 </button>
               ))}
             </div>
           ) : searchTerm.trim() ? (
-            <div className="p-4 text-center text-gray-600 text-sm">
+            <div className="p-3 text-center text-gray-600 text-sm">
               No cities found matching "{searchTerm}"
             </div>
           ) : (
-            <div className="p-4 text-center text-gray-600 text-sm">
+            <div className="p-3 text-center text-gray-600 text-sm">
               Start typing to search cities
             </div>
           )}

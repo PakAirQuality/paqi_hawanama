@@ -164,6 +164,15 @@ export function StationCard() {
   const currentAQI = current?.aqi_us || 0
   const currentHour = new Date().getHours()
 
+  // Debug logging for data inconsistency tracking
+  if (process.env.NODE_ENV === 'development' && current && stationId) {
+    console.log(`🏠 Station popup data for ${stationId}:`, { 
+      main_value: current.main_value, 
+      aqi_us: current.aqi_us,
+      last_update: current.last_update 
+    });
+  }
+
   return (
     <>
       {/* Mobile backdrop only */}
@@ -225,6 +234,7 @@ export function StationCard() {
                     <div className="text-xs text-gray-700 mb-1">PM2.5</div>
                     <div className="text-3xl font-bold leading-none text-gray-900">
                       {current.main_value || '--'}
+                      <span className="text-xs font-normal text-gray-600 ml-1">µg/m³</span>
                     </div>
                   </div>
                   
@@ -259,50 +269,45 @@ export function StationCard() {
 
               {/* 24h Trend Bar Chart with Toggle */}
               {!(historyLoading && pm25HistoryLoading) && chartData.length > 0 && (
-                <div className="bg-white border border-gray-100 rounded-xl p-2 mt-3">
+                  <div className="bg-white border border-gray-100 rounded-xl p-2">
                   <div className="flex items-center justify-between mb-2">
                     <h3 className="text-sm font-medium text-gray-700">
                       24h {chartMetric === 'aqi' ? 'AQI' : 'PM2.5'} Trend
                     </h3>
-                    <div className="flex flex-col items-end space-y-1">
-                      <div className="text-xl font-bold text-gray-900">
-                        {chartMetric === 'aqi' ? currentAQI : Math.round(current?.main_value || 0)}
-                        {chartMetric === 'pm25' && <span className="text-xs font-normal text-gray-600 ml-1">µg/m³</span>}
-                      </div>
-                      {/* Toggle Buttons - compact for mobile */}
-                      <div className="flex items-center space-x-0.5 sm:space-x-1">
-                        <button
-                          onClick={() => setChartMetric('aqi')}
-                          className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-xs rounded transition-colors ${
-                            chartMetric === 'aqi' 
-                              ? 'bg-blue-100 text-blue-700 font-medium' 
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          AQI
-                        </button>
-                        <button
-                          onClick={() => setChartMetric('pm25')}
-                          className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-xs rounded transition-colors ${
-                            chartMetric === 'pm25' 
-                              ? 'bg-blue-100 text-blue-700 font-medium' 
-                              : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
-                          }`}
-                        >
-                          PM2.5
-                        </button>
-                      </div>
+                    <div className="flex items-center space-x-0.5 sm:space-x-1">
+                      <button
+                        onClick={() => setChartMetric('aqi')}
+                        className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-xs rounded transition-colors ${
+                          chartMetric === 'aqi' 
+                            ? 'bg-blue-100 text-blue-700 font-medium' 
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        AQI
+                      </button>
+                      <button
+                        onClick={() => setChartMetric('pm25')}
+                        className={`px-1.5 py-0.5 sm:px-2 sm:py-1 text-xs rounded transition-colors ${
+                          chartMetric === 'pm25' 
+                            ? 'bg-blue-100 text-blue-700 font-medium' 
+                            : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                        }`}
+                      >
+                        PM2.5
+                      </button>
                     </div>
                   </div>
 
-                  <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current">
-                    <ResponsiveContainer width="100%" height={140}>
+                  <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current [&_.recharts-wrapper]:!outline-none [&_.recharts-surface]:!outline-none">
+                    <div style={{ width: '100%', height: '140px', outline: 'none' }}>
+                      <ResponsiveContainer width="100%" height="100%">
                       <BarChart
                         data={chartData}
                         margin={{ top: 10, right: 15, bottom: 25, left: 15 }}
                         barCategoryGap="2%"
                         onClick={() => {}} // Disable click events
                         onMouseMove={() => {}} // Disable mouse tracking
+                        style={{ outline: 'none' }}
                       >
                         <XAxis
                           dataKey="hour"
@@ -356,7 +361,8 @@ export function StationCard() {
                           ))}
                         </Bar>
                       </BarChart>
-                    </ResponsiveContainer>
+                      </ResponsiveContainer>
+                    </div>
                   </div>
                 </div>
               )}

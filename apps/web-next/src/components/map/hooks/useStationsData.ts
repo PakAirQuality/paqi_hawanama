@@ -12,10 +12,15 @@ export const useStationsData = () => {
 
   useEffect(() => {
     let mounted = true
+    let refreshInterval: NodeJS.Timeout
     
-    const fetchStations = async () => {
+    const fetchStations = async (isRefresh = false) => {
       try {
-        console.log('🔍 useStationsData: Fetching stations...')
+        if (!isRefresh) {
+          console.log('🔍 useStationsData: Initial fetch...')
+        } else {
+          console.log('🔍 useStationsData: Refreshing stations data...')
+        }
         const data = await api.getStations()
         console.log('🔍 useStationsData: Received', data?.length || 0, 'stations')
         if (mounted) { 
@@ -28,16 +33,27 @@ export const useStationsData = () => {
           setError(err instanceof Error ? err.message : 'Failed to fetch stations')
         }
       } finally {
-        if (mounted) {
+        if (mounted && !isRefresh) {
           setLoading(false)
         }
       }
     }
 
+    // Initial fetch
     fetchStations()
     
+    // Set up refresh interval (5 minutes to match station popup)
+    refreshInterval = setInterval(() => {
+      if (mounted) {
+        fetchStations(true)
+      }
+    }, 5 * 60 * 1000) // 5 minutes
+    
     return () => { 
-      mounted = false 
+      mounted = false
+      if (refreshInterval) {
+        clearInterval(refreshInterval)
+      }
     }
   }, [])
 

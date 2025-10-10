@@ -130,15 +130,11 @@
     overflow-x: hidden;
   }
   
-  /* Prevent horizontal and vertical overflow on mobile */
+  /* Prevent horizontal overflow on mobile */
   body {
     overflow-x: hidden;
-    overflow-y: hidden;
     width: 100vw;
     max-width: 100vw;
-    height: 100vh;
-    max-height: 100vh;
-    position: fixed;
     margin: 0;
     padding: 0;
   }
@@ -155,12 +151,25 @@
       font-size: 16px;
     }
     
-    /* Prevent pull-to-refresh and overscroll behavior */
+    /* Prevent pull-to-refresh and overscroll behavior - but allow map touch */
     html, body {
       overscroll-behavior: none;
-      touch-action: pan-x pan-y;
+      -webkit-overflow-scrolling: touch;
     }
   }
+}
+
+/* Map page specific - prevent scrolling only on map page */
+.map-page {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
+}
+
+.map-page body {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
 }
 
 /* Base container for the marker */
@@ -284,6 +293,35 @@
 
 .mapboxgl-ctrl-attrib-inner {
     display: none !important;
+}
+
+/* Remove Recharts focus/click outlines and borders */
+.recharts-wrapper,
+.recharts-surface,
+.recharts-layer,
+.recharts-bar,
+.recharts-rectangle {
+    outline: none !important;
+    border: none !important;
+}
+
+.recharts-wrapper:focus,
+.recharts-surface:focus,
+.recharts-layer:focus,
+.recharts-bar:focus,
+.recharts-rectangle:focus {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Remove active/click states */
+.recharts-bar:active,
+.recharts-rectangle:active,
+.recharts-wrapper:active {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
 /* AQI Colors - Override dark mode to maintain health standard colors */

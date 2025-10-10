@@ -139,11 +139,7 @@ export default function MapRefactored({
   }
 
   return (
-    <div className={`w-full h-full relative ${className}`} style={{ 
-      maxWidth: '100vw', 
-      maxHeight: '100vh',
-      overflow: 'hidden'
-    }}>
+    <div className={`w-full h-full relative ${className}`}>
       <Map
         {...viewport}
         zoom={viewport?.zoom || 5}
@@ -153,18 +149,30 @@ export default function MapRefactored({
         onLoad={handleMapChange}
         style={{ 
           width: '100%', 
-          height: '100%',
-          maxWidth: '100vw',
-          maxHeight: '100vh'
+          height: '100%'
         }}
-        maxPitch={60}
+        maxPitch={45}
         attributionControl={false}
-        touchZoomRotate={true}
+        // Optimized touch settings for smooth mobile interaction
+        touchZoomRotate={{
+          around: 'center'
+        }}
         touchPitch={false}
+        dragRotate={false}
         dragPan={true}
-        scrollZoom={true}
+        scrollZoom={{
+          around: 'center'
+        }}
         doubleClickZoom={true}
         keyboard={false}
+        // Performance optimizations
+        maxTileCacheSize={200}
+        renderWorldCopies={false}
+        optimizeForTerrain={false}
+        antialias={false}
+        // Smooth transitions
+        transitionDuration={300}
+        pitchWithRotate={false}
       >
         {/* Pakistan boundary with green outline and shading */}
         <Source

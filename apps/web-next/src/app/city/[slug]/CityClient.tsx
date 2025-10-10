@@ -110,27 +110,33 @@ export default function CityClient({ citySlug }: CityClientProps) {
     )
   }
 
-  const getAQIColorClass = (aqi_color: string) => {
-    switch (aqi_color) {
-      case 'green': return 'text-green-600'
-      case 'yellow': return 'text-yellow-600'
-      case 'orange': return 'text-orange-600'
-      case 'red': return 'text-red-600'
-      case 'purple': return 'text-purple-600'
-      case 'maroon': return 'text-red-900'
-      default: return 'text-gray-600'
+  // Helper function to get AQI color styles using proper EPA colors
+  const getAQIStyles = (aqi_category: string, aqiValue?: number) => {
+    // If we have an AQI value, use the proper color system
+    if (aqiValue) {
+      const bgColor = getAQIColorByValue(aqiValue)
+      return {
+        style: { backgroundColor: bgColor, color: '#000000' }, // Black text for better contrast
+        className: 'font-bold text-black'
+      }
     }
-  }
-
-  const getAQIBgClass = (aqi_color: string) => {
-    switch (aqi_color) {
-      case 'green': return 'bg-green-100'
-      case 'yellow': return 'bg-yellow-100'
-      case 'orange': return 'bg-orange-100'
-      case 'red': return 'bg-red-100'
-      case 'purple': return 'bg-purple-100'
-      case 'maroon': return 'bg-red-200'
-      default: return 'bg-gray-100'
+    
+    // Fallback to category-based colors if no AQI value
+    switch (aqi_category) {
+      case 'good': 
+        return { style: { backgroundColor: 'rgba(110, 204, 57, 1)', color: '#000000' }, className: 'font-bold text-black' }
+      case 'moderate': 
+        return { style: { backgroundColor: 'rgba(240, 194, 12, 1)', color: '#000000' }, className: 'font-bold text-black' }
+      case 'unhealthy_sensitive': 
+        return { style: { backgroundColor: 'rgba(241, 128, 23, 1)', color: '#000000' }, className: 'font-bold text-black' }
+      case 'unhealthy': 
+        return { style: { backgroundColor: 'rgba(239, 120, 85, 1)', color: '#ffffff' }, className: 'font-bold text-white' }
+      case 'very_unhealthy': 
+        return { style: { backgroundColor: '#a070b5', color: '#ffffff' }, className: 'font-bold text-white' }
+      case 'hazardous': 
+        return { style: { backgroundColor: '#991b1b', color: '#ffffff' }, className: 'font-bold text-white' }
+      default: 
+        return { style: { backgroundColor: '#6b7280', color: '#ffffff' }, className: 'font-bold text-white' }
     }
   }
 
@@ -148,6 +154,22 @@ export default function CityClient({ citySlug }: CityClientProps) {
       timestamp: reading.timestamp
     }
   }) || []
+
+  // Debug city data fields
+  if (process.env.NODE_ENV === 'development' && cityData) {
+    console.log('🏙️ City data fields:', {
+      avg_aqi: cityData.avg_aqi,
+      avg_pm25: cityData.avg_pm25,
+      stations_sample: cityData.stations?.[0],
+      stations_ids: cityData.stations?.slice(0, 3).map(s => ({ 
+        name: s.name, 
+        id: s.id, 
+        id_type: typeof s.id,
+        station_id: s.station_id 
+      })),
+      all_fields: Object.keys(cityData)
+    });
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -172,7 +194,6 @@ export default function CityClient({ citySlug }: CityClientProps) {
               </div>
               <nav className="hidden md:flex items-center space-x-4">
                 <Link href="/" className="text-sm hover:underline">Dashboard</Link>
-                <span className="text-sm text-muted-foreground">Cities</span>
               </nav>
             </div>
           </div>
@@ -197,13 +218,6 @@ export default function CityClient({ citySlug }: CityClientProps) {
             {/* Desktop: AQI box in original position */}
             <div className="hidden sm:flex flex-col items-center sm:items-end">
               <CityAQIBox value={cityData.avg_aqi || 0} />
-              <div className={`text-sm font-semibold mt-1 text-center sm:text-right ${getAQIColorClass(cityData.aqi_color)}`}>
-                {cityData.aqi_category}
-              </div>
-            </div>
-            {/* Mobile: AQI category below */}
-            <div className={`sm:hidden text-sm font-semibold ${getAQIColorClass(cityData.aqi_color)}`}>
-              {cityData.aqi_category}
             </div>
           </div>
         </div>
@@ -464,30 +478,41 @@ export default function CityClient({ citySlug }: CityClientProps) {
               </CardHeader>
               <CardContent className="p-0">
                 <div className="max-h-80 overflow-y-auto">
-                  {(cityData?.stations || []).map((station: { id: number; name: string; latest_aqi?: number; latest_pm25?: number; hours_since_update?: number }) => (
-                    <Link 
+                  {(cityData?.stations || []).map((station: { id: string; name: string; latest_aqi?: number; latest_pm25?: number; temp_c?: number; hours_since_update?: number; aqi_category?: string }) => (
+                    <div 
                       key={station.id} 
-                      href={`/station/${station.id}`}
-                      className="block p-3 border-b hover:bg-gray-50 transition-colors"
+                      className="block p-3 border-b"
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex-1 min-w-0">
                           <h4 className="font-medium truncate text-sm">{station.name}</h4>
                           <div className="flex items-center space-x-3 text-xs text-muted-foreground mt-1">
-                            <span>PM2.5: {station.pm25 ? `${station.pm25}µg/m³` : 'N/A'}</span>
-                            <span>Temp: {station.temp ? `${station.temp}°C` : 'N/A'}</span>
+                            <span>PM2.5: {station.latest_pm25 ? `${station.latest_pm25}µg/m³` : 'N/A'}</span>
+                            <span>Temp: {station.temp_c ? `${station.temp_c}°C` : 'N/A'}</span>
                           </div>
                         </div>
                         <div className="flex flex-col items-end">
-                          <div className={`px-2 py-1 rounded text-xs font-bold ${getAQIColorClass(station.aqi_category)} ${getAQIBgClass(station.aqi_category)}`}>
-                            {station.aqi_raw || '--'}
-                          </div>
+                          {(() => {
+                            const styles = getAQIStyles(station.aqi_category || '', station.latest_aqi)
+                            return (
+                              <div 
+                                className={`px-2 py-1 rounded text-xs ${styles.className}`}
+                                style={styles.style}
+                              >
+                                {station.latest_aqi || '--'}
+                              </div>
+                            )
+                          })()}
                           <div className="text-[10px] text-muted-foreground mt-1">
-                            {station.hours_since_update ? `${station.hours_since_update.toFixed(1)}h ago` : 'Recent'}
+                            {station.hours_since_update ? (
+                              station.hours_since_update < 1 
+                                ? `${Math.round(station.hours_since_update * 60)}m ago`
+                                : `${station.hours_since_update.toFixed(1)}h ago`
+                            ) : 'Recent'}
                           </div>
                         </div>
                       </div>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               </CardContent>

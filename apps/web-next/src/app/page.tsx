@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import MapWrapper from '@/components/map/MapWrapper'
 import { StationCard } from '@/components/station/StationCard'
 import { CitySearch } from '@/components/ui/CitySearch'
@@ -9,20 +9,25 @@ import { Search, X } from 'lucide-react'
 export default function Home() {
   const [showCitySearch, setShowCitySearch] = useState(false)
 
+  // Prevent body scrolling on map page only
+  useEffect(() => {
+    const originalStyle = window.getComputedStyle(document.body).overflow
+    document.body.style.overflow = 'hidden'
+    
+    return () => {
+      document.body.style.overflow = originalStyle
+    }
+  }, [])
+
   return (
-    <div className="relative w-full overflow-hidden touch-none" style={{ 
+    <div className="map-page relative w-full h-full overflow-hidden" style={{ 
       height: '100vh', 
       height: '100dvh',
       width: '100vw',
-      maxWidth: '100vw',
-      position: 'fixed',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0
+      maxWidth: '100vw'
     }}>
       {/* Full Screen Map */}
-      <MapWrapper className="absolute inset-0 w-full h-full touch-pan-x touch-pan-y" />
+      <MapWrapper className="absolute inset-0 w-full h-full" />
       
       {/* Live Data - Upper Left with safe area */}
       <div className="absolute top-safe-or-4 left-4 sm:top-8 sm:left-8 z-50" style={{ top: 'max(env(safe-area-inset-top), 1rem)' }}>
@@ -97,18 +102,17 @@ export default function Home() {
       {/* Floating City Search - Mobile: Top right level with LIVE button, Desktop: Right of Cities Button */}
       {showCitySearch && (
         <div 
-          className="absolute right-4 sm:right-24 sm:bottom-auto z-[60] animate-in slide-in-from-right-2 duration-300"
+          className="absolute right-4 sm:right-24 z-[60] animate-in slide-in-from-right-2 duration-300"
           style={{ 
             top: 'max(env(safe-area-inset-top), 1rem)',
-            '@media (min-width: 640px)': {
-              top: '2rem'
-            }
           }}
         >
-          <CitySearch 
-            className="w-48 sm:w-80" 
-            onSelect={() => setShowCitySearch(false)}
-          />
+          <div className="sm:mt-6"> {/* Align with cities button - moved up slightly */}
+            <CitySearch 
+              className="w-48 sm:w-80" 
+              onSelect={() => setShowCitySearch(false)}
+            />
+          </div>
         </div>
       )}
       
