@@ -442,9 +442,34 @@ class DataIngestionTask:
         # ---- history ----
         hist_p = (parsed.get("history") or {}).get("pollution") or []
         if isinstance(hist_p, list):
+            # CRITICAL FIX: IQAir history timestamps are systematically lagged by 1 hour
+            # Each history entry's timestamp is 1 hour behind its actual time
+            # Example: history shows 20:00 but that data is actually from 21:00
+            # Solution: Shift all history timestamps forward by +1 hour
             for p in hist_p:
                 if isinstance(p, dict):
-                    _add_pollution(p)
+                    ts_raw = p.get("ts")
+                    if ts_raw:
+                        try:
+                            # Parse original (lagged) timestamp
+                            original_ts = self._parse_ts(ts_raw)
+                            
+                            # Shift forward by 1 hour to get actual time
+                            corrected_ts = original_ts + timedelta(hours=1)
+                            
+                            # Create corrected history entry with fixed timestamp
+                            p_corrected = p.copy()
+                            p_corrected["ts"] = corrected_ts.isoformat().replace("+00:00", "Z")
+                            
+                            # Add with corrected timestamp
+                            _add_pollution(p_corrected)
+                            
+                        except Exception:
+                            # Skip if timestamp parsing fails
+                            continue
+                    else:
+                        # No timestamp in history entry, add as-is
+                        _add_pollution(p)
         hist_w = (parsed.get("history") or {}).get("weather") or []
         if isinstance(hist_w, list):
             for w in hist_w:
