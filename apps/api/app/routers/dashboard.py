@@ -323,22 +323,37 @@ async def get_station_history_data(
         if not station_row:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        # Get historical readings for this station
+        # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
-            SELECT ts_utc, aqi_us
-            FROM readings
-            WHERE scope_key = :station_id 
-            AND scope_type = 'station'
-            AND ts_utc > NOW() - INTERVAL '%s hours'
-            AND aqi_us IS NOT NULL
-            ORDER BY ts_utc ASC
+            WITH RECURSIVE hour_series AS (
+                SELECT 
+                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                UNION ALL
+                SELECT 
+                    hour_utc + INTERVAL '1 hour'
+                FROM hour_series
+                WHERE hour_utc < date_trunc('hour', NOW())
+            )
+            SELECT 
+                hs.hour_utc,
+                hs.hour_utc AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi' AS hour_pk,
+                r.aqi_us
+            FROM hour_series hs
+            LEFT JOIN readings r ON (
+                date_trunc('hour', r.ts_utc) = hs.hour_utc
+                AND r.scope_key = :station_id 
+                AND r.scope_type = 'station'
+            )
+            ORDER BY hs.hour_utc ASC
         """ % hours), {"station_id": station_row.station_id})
         
         history_rows = history_result.fetchall()
         history_data = [
             {
-                "timestamp": row.ts_utc.isoformat(),
-                "aqi_us": int(row.aqi_us)
+                "timestamp_utc": row.hour_utc.isoformat() + "Z",
+                "timestamp_pk": row.hour_pk.isoformat(),
+                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
+                "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None
             }
             for row in history_rows
         ]
@@ -383,22 +398,37 @@ async def get_station_history_pm25_data(
         if not station_row:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        # Get historical PM2.5 readings for this station
+        # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
-            SELECT ts_utc, pm25
-            FROM readings
-            WHERE scope_key = :station_id 
-            AND scope_type = 'station'
-            AND ts_utc > NOW() - INTERVAL '%s hours'
-            AND pm25 IS NOT NULL
-            ORDER BY ts_utc ASC
+            WITH RECURSIVE hour_series AS (
+                SELECT 
+                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                UNION ALL
+                SELECT 
+                    hour_utc + INTERVAL '1 hour'
+                FROM hour_series
+                WHERE hour_utc < date_trunc('hour', NOW())
+            )
+            SELECT 
+                hs.hour_utc,
+                hs.hour_utc AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi' AS hour_pk,
+                r.pm25
+            FROM hour_series hs
+            LEFT JOIN readings r ON (
+                date_trunc('hour', r.ts_utc) = hs.hour_utc
+                AND r.scope_key = :station_id 
+                AND r.scope_type = 'station'
+            )
+            ORDER BY hs.hour_utc ASC
         """ % hours), {"station_id": station_row.station_id})
         
         history_rows = history_result.fetchall()
         history_data = [
             {
-                "timestamp": row.ts_utc.isoformat(),
-                "pm25": float(row.pm25)
+                "timestamp_utc": row.hour_utc.isoformat() + "Z",
+                "timestamp_pk": row.hour_pk.isoformat(),
+                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
+                "pm25": float(row.pm25) if row.pm25 is not None else None
             }
             for row in history_rows
         ]
