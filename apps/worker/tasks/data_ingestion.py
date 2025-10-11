@@ -40,6 +40,18 @@ except Exception:
     pd = None
     _HAVE_PANDAS = False
 
+# ---------- NEW: time helpers ----------
+def _norm_hour(dt: datetime) -> datetime:
+    """Floor to the exact hour (UTC-aware in/out)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+def _approx_one_hour(a: datetime, b: datetime) -> bool:
+    """True if a - b ≈ 1h (tolerates small jitters)."""
+    return abs((a - b) - timedelta(hours=1)) <= timedelta(minutes=10)
+# ---------------------------------------
+
 # Aliases to fix label mismatches between /stations and /station endpoints.
 STATE_ALIAS_MAP: Dict[str, List[str]] = {
     "Islamabad": ["Islamabad Capital Territory", "Islamabad Federal Capital Territory"],
@@ -338,6 +350,7 @@ class DataIngestionTask:
         bucket: Dict[datetime, Dict[str, Any]] = {}
 
         def _entry(ts: datetime) -> Dict[str, Any]:
+            ts = _norm_hour(ts)  # ---------- NEW ----------
             e = bucket.get(ts)
             if e:
                 return e
@@ -367,6 +380,7 @@ class DataIngestionTask:
                 return
             try:
                 ts = self._parse_ts(ts_raw)
+                ts = _norm_hour(ts)  # ---------- NEW ----------
             except Exception:
                 return
             if ts < cutoff:
@@ -407,6 +421,7 @@ class DataIngestionTask:
                 return
             try:
                 ts = self._parse_ts(ts_raw)
+                ts = _norm_hour(ts)  # ---------- NEW ----------
             except Exception:
                 return
             if ts < cutoff:
@@ -433,7 +448,15 @@ class DataIngestionTask:
 
         # ---- current ----
         cur_p = (parsed.get("current") or {}).get("pollution")
+        current_ts = None  # ---------- NEW ----------
         if isinstance(cur_p, dict):
+            # capture normalized current ts for robust history skip
+            ts_raw = cur_p.get("ts")
+            if ts_raw:
+                try:
+                    current_ts = _norm_hour(self._parse_ts(ts_raw))
+                except Exception:
+                    current_ts = None
             _add_pollution(cur_p)
         cur_w = (parsed.get("current") or {}).get("weather")
         if isinstance(cur_w, dict):
@@ -442,51 +465,29 @@ class DataIngestionTask:
         # ---- history ----
         hist_p = (parsed.get("history") or {}).get("pollution") or []
         if isinstance(hist_p, list):
-            # CRITICAL FIX: IQAir history timestamps are systematically lagged by 1 hour
-            # Each history entry's timestamp is 1 hour behind its actual time
-            # Example: history shows 20:00 but that data is actually from 21:00
-            # Solution: Shift all history timestamps forward by +1 hour
-            # Skip history entries that are exactly 1 hour behind current data to avoid duplicates
-            
-            # Get current pollution timestamp for comparison
-            current_ts = None
-            cur_p = (parsed.get("current") or {}).get("pollution")
-            if isinstance(cur_p, dict):
-                ts_raw = cur_p.get("ts")
-                if ts_raw:
-                    try:
-                        current_ts = self._parse_ts(ts_raw)
-                    except Exception:
-                        pass
-            
+            # IQAir history timestamps are systematically lagged by ~1 hour.
             for p in hist_p:
-                if isinstance(p, dict):
-                    ts_raw = p.get("ts")
-                    if ts_raw:
-                        try:
-                            # Parse original (lagged) timestamp
-                            original_ts = self._parse_ts(ts_raw)
-                            
-                            # Skip if this history entry is exactly 1 hour behind current data
-                            if current_ts and (current_ts - original_ts) == timedelta(hours=1):
-                                continue
-                            
-                            # Shift forward by 1 hour to get actual time
-                            corrected_ts = original_ts + timedelta(hours=1)
-                            
-                            # Create corrected history entry with fixed timestamp
-                            p_corrected = p.copy()
-                            p_corrected["ts"] = corrected_ts.isoformat().replace("+00:00", "Z")
-                            
-                            # Add with corrected timestamp
-                            _add_pollution(p_corrected)
-                            
-                        except Exception:
-                            # Skip if timestamp parsing fails
-                            continue
-                    else:
-                        # No timestamp in history entry, add as-is
-                        _add_pollution(p)
+                if not isinstance(p, dict):
+                    continue
+                ts_raw = p.get("ts")
+                if not ts_raw:
+                    continue
+                try:
+                    original_ts = _norm_hour(self._parse_ts(ts_raw))
+                except Exception:
+                    continue
+
+                # Skip the history entry that corresponds to "current - 1h"
+                if current_ts and _approx_one_hour(current_ts, original_ts):
+                    continue
+
+                # Shift forward by +1h (correct the IQAir lag)
+                corrected_ts = _norm_hour(original_ts + timedelta(hours=1))
+
+                p_corrected = p.copy()
+                p_corrected["ts"] = corrected_ts.isoformat().replace("+00:00", "Z")
+                _add_pollution(p_corrected)
+
         hist_w = (parsed.get("history") or {}).get("weather") or []
         if isinstance(hist_w, list):
             for w in hist_w:
@@ -498,12 +499,70 @@ class DataIngestionTask:
             # Remove raw field and add missing defaults for database compatibility
             if 'raw' in row:
                 del row['raw']
-            # Ensure qc_state is set (required for database)
             if 'qc_state' not in row or row['qc_state'] is None:
                 row['qc_state'] = 'raw'
         
         rows.extend(bucket.values())
         return rows
+
+    # ---------- NEW: in-run de-dup ----------
+    def _dedupe_rows_in_memory(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        by_key: Dict[tuple, Dict[str, Any]] = {}
+
+        def merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+            # prefer non-null values from b to fill a
+            for k, v in b.items():
+                if k in ("scope_type", "scope_key", "ts_utc"):
+                    continue
+                if a.get(k) is None and v is not None:
+                    a[k] = v
+            return a
+
+        for r in rows:
+            # normalize defensively
+            r["ts_utc"] = _norm_hour(r["ts_utc"].astimezone(timezone.utc))
+            key = (r["scope_key"], r["ts_utc"])
+            if key in by_key:
+                by_key[key] = merge(by_key[key], r)
+            else:
+                by_key[key] = r
+        return list(by_key.values())
+    # ----------------------------------------
+
+    # ---------- NEW: drop rows that already exist in DB ----------
+    async def _drop_existing_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        if not rows:
+            return rows
+
+        # Group rows by scope_key for efficient range queries
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for r in rows:
+            grouped.setdefault(r["scope_key"], []).append(r)
+
+        keep: List[Dict[str, Any]] = []
+        from sqlalchemy import text  # import here to avoid global dependency
+        async with AsyncSessionLocal() as sess:
+            for scope_key, grp in grouped.items():
+                # compute a loose window to minimize roundtrips
+                ts_vals = sorted([_norm_hour(x["ts_utc"]) for x in grp])
+                min_ts, max_ts = ts_vals[0], ts_vals[-1]
+
+                q = text("""
+                    SELECT ts_utc
+                    FROM readings
+                    WHERE scope_key = :scope_key
+                      AND ts_utc >= :min_ts
+                      AND ts_utc <= :max_ts
+                """)
+                rs = await sess.execute(q, {"scope_key": scope_key, "min_ts": min_ts, "max_ts": max_ts})
+                existing = { _norm_hour(row[0].astimezone(timezone.utc)) for row in rs.fetchall() }
+
+                for r in grp:
+                    tsn = _norm_hour(r["ts_utc"])
+                    if tsn not in existing:
+                        keep.append(r)
+        return keep
+    # -------------------------------------------------------------
 
     # ----------------------------- public API --------------------------------
 
@@ -582,9 +641,16 @@ class DataIngestionTask:
                 failures.append({**meta, "error": "unexpected_result_type"})
                 failed += 1
 
+        # ---------- NEW: de-dup and drop-existing before bulk write ----------
         if buf:
-            await self._bulk_write_readings(buf)
-            logger.info("Bulk upserted %d readings.", len(buf))
+            buf = self._dedupe_rows_in_memory(buf)
+            buf = await self._drop_existing_rows(buf)
+            if buf:
+                await self._bulk_write_readings(buf)
+                logger.info("Bulk upserted %d readings after de-dup.", len(buf))
+            else:
+                logger.info("Nothing new to upsert after de-dup.")
+        # ---------------------------------------------------------------------
 
         # write a small report for transparency
         self._write_report(success_count=total_rows, fail_entries=failures)
