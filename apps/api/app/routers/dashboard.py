@@ -336,7 +336,7 @@ async def get_station_history_data(
             )
             SELECT 
                 hs.hour_utc,
-                hs.hour_utc AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi' AS hour_pk,
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
                 r.aqi_us
             FROM hour_series hs
             LEFT JOIN readings r ON (
@@ -351,7 +351,7 @@ async def get_station_history_data(
         history_data = [
             {
                 "timestamp_utc": row.hour_utc.isoformat() + "Z",
-                "timestamp_pk": row.hour_pk.isoformat(),
+                "timestamp_pk": row.hour_pk.isoformat() + "+05:00",
                 "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
                 "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None
             }
@@ -411,7 +411,7 @@ async def get_station_history_pm25_data(
             )
             SELECT 
                 hs.hour_utc,
-                hs.hour_utc AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Karachi' AS hour_pk,
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
                 r.pm25
             FROM hour_series hs
             LEFT JOIN readings r ON (
@@ -426,7 +426,7 @@ async def get_station_history_pm25_data(
         history_data = [
             {
                 "timestamp_utc": row.hour_utc.isoformat() + "Z",
-                "timestamp_pk": row.hour_pk.isoformat(),
+                "timestamp_pk": row.hour_pk.isoformat() + "+05:00",
                 "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
                 "pm25": float(row.pm25) if row.pm25 is not None else None
             }
