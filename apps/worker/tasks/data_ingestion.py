@@ -446,6 +446,19 @@ class DataIngestionTask:
             # Each history entry's timestamp is 1 hour behind its actual time
             # Example: history shows 20:00 but that data is actually from 21:00
             # Solution: Shift all history timestamps forward by +1 hour
+            # Skip history entries that are exactly 1 hour behind current data to avoid duplicates
+            
+            # Get current pollution timestamp for comparison
+            current_ts = None
+            cur_p = (parsed.get("current") or {}).get("pollution")
+            if isinstance(cur_p, dict):
+                ts_raw = cur_p.get("ts")
+                if ts_raw:
+                    try:
+                        current_ts = self._parse_ts(ts_raw)
+                    except Exception:
+                        pass
+            
             for p in hist_p:
                 if isinstance(p, dict):
                     ts_raw = p.get("ts")
@@ -453,6 +466,10 @@ class DataIngestionTask:
                         try:
                             # Parse original (lagged) timestamp
                             original_ts = self._parse_ts(ts_raw)
+                            
+                            # Skip if this history entry is exactly 1 hour behind current data
+                            if current_ts and (current_ts - original_ts) == timedelta(hours=1):
+                                continue
                             
                             # Shift forward by 1 hour to get actual time
                             corrected_ts = original_ts + timedelta(hours=1)
