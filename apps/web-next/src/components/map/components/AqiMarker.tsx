@@ -1,17 +1,13 @@
 import React from 'react';
-import { pm25ToAQI } from '../config/aqiStyles';
 import { STYLES } from '../config/mapConfig';
 
 // Helper function to get the correct CSS class for AQI color
-// Now works with PM2.5 values converted to AQI for color
-const getAqiColorClass = (pm25: number | null | undefined): string => {
+// Always use API-provided AQI value for consistent coloring
+const getAqiColorClass = (aqi: number | null | undefined): string => {
   // Handle null/undefined/negative values (no reading)
-  if (pm25 === null || pm25 === undefined || pm25 < 0) return 'bg-no-reading';
+  if (aqi === null || aqi === undefined || aqi <= 0) return 'bg-no-reading';
   
-  // Convert PM2.5 to AQI for color determination
-  const aqi = pm25ToAQI(pm25);
-  
-  // Handle actual AQI values - don't treat 0 AQI as no reading since PM2.5 of 0-2 can legitimately convert to AQI 0
+  // Use API-provided AQI value directly for color determination
   if (aqi <= 50) return 'bg-good';
   if (aqi <= 100) return 'bg-moderate';
   if (aqi <= 150) return 'bg-unhealthy-sensitive';
@@ -39,8 +35,8 @@ const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, pm25, isCluster, zoom = 5 })
   // Show PM2.5 value
   const displayValue = pm25 ? Math.round(pm25) : '-';
 
-  // Use PM2.5 value for color determination
-  const colorClass = getAqiColorClass(pm25);
+  // Use API-provided AQI value for color determination
+  const colorClass = getAqiColorClass(aqi);
 
   // Hide white/no-reading markers at lower zoom levels
   const isNoReadingMarker = colorClass === 'bg-no-reading';

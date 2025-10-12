@@ -204,11 +204,11 @@ export function StationCard() {
         onClick={handleBackdropClick}
       />
       
-      {/* Card positioned on right side */}
+      {/* Card positioned on left side */}
       <div className={`
-        fixed top-24 right-4 z-50 w-full max-w-xs
+        fixed top-24 left-4 z-50 w-full max-w-xs
         transform transition-transform duration-300 ease-out
-        ${isOpen ? 'translate-x-0' : 'translate-x-full'}
+        ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <div className="bg-white rounded-2xl shadow-xl p-3 max-h-[calc(100vh-2rem)] overflow-y-auto">
           {currentLoading ? (

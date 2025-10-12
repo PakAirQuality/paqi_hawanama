@@ -59,24 +59,4 @@ export function getAQICategoryLabel(aqi: number, categoryLabel: string): string 
   return categoryLabel
 }
 
-/**
- * Convert PM2.5 concentration to AQI value for color coding
- * Based on EPA AQI breakpoints for PM2.5 (24-hour average)
- */
-export function pm25ToAQI(pm25: number): number {
-  if (pm25 <= 0) return 0
-  if (pm25 <= 12.0) return Math.round((50 / 12.0) * pm25)
-  if (pm25 <= 35.4) return Math.round(((100 - 51) / (35.4 - 12.1)) * (pm25 - 12.1) + 51)
-  if (pm25 <= 55.4) return Math.round(((150 - 101) / (55.4 - 35.5)) * (pm25 - 35.5) + 101)
-  if (pm25 <= 150.4) return Math.round(((200 - 151) / (150.4 - 55.5)) * (pm25 - 55.5) + 151)
-  if (pm25 <= 250.4) return Math.round(((300 - 201) / (250.4 - 150.5)) * (pm25 - 150.5) + 201)
-  return Math.round(((500 - 301) / (500.4 - 250.5)) * (pm25 - 250.5) + 301)
-}
 
-/**
- * Get AQI color based on PM2.5 value
- */
-export function getAQIColorByPM25(pm25: number): string {
-  const aqi = pm25ToAQI(pm25)
-  return getAQIColorByValue(aqi)
-}

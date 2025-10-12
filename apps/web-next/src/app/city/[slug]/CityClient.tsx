@@ -4,8 +4,10 @@ import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Button } from '@/components/ui/button'
 import { CitySearch } from '@/components/ui/CitySearch'
 import Link from 'next/link'
+import { ArrowLeft } from 'lucide-react'
 import AQIChart from '@/components/charts/AQIChart'
 import CityMap from '@/components/city/CityMap'
 import WeatherCard from '@/components/weather/WeatherCard'
@@ -204,9 +206,14 @@ export default function CityClient({ citySlug }: CityClientProps) {
               <div className="relative">
                 <CitySearch className="w-32 sm:w-48 md:w-64 ring-2 ring-blue-400/50 border-blue-400/50 rounded-2xl" />
               </div>
-              <nav className="hidden md:flex items-center space-x-4">
-                <Link href="/" className="text-sm hover:underline">Dashboard</Link>
-              </nav>
+              <div className="flex items-center space-x-4">
+                <Link href="/">
+                  <Button variant="ghost" size="sm">
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Back to Map
+                  </Button>
+                </Link>
+              </div>
             </div>
           </div>
         </div>
@@ -274,22 +281,12 @@ export default function CityClient({ citySlug }: CityClientProps) {
               <CardContent>
                 {!historicalLoading && chartData.length > 0 ? (
                   <div className="bg-white border border-gray-100 rounded-xl p-4">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="text-sm font-medium text-gray-700">
-                        24h {chartMetric === 'aqi' ? 'AQI' : 'PM2.5'} Trend
-                      </h3>
-                      <div className="text-xl font-bold text-gray-900">
-                        {chartMetric === 'aqi' ? cityData.avg_aqi : Math.round(cityData.avg_pm25 || 0)}
-                        {chartMetric === 'pm25' && <span className="text-sm font-normal text-gray-600 ml-1">µg/m³</span>}
-                      </div>
-                    </div>
-
                     <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current">
-                      <ResponsiveContainer width="100%" height={140}>
+                      <ResponsiveContainer width="100%" height={200}>
                         <BarChart
                           data={chartData}
-                          margin={{ top: 10, right: 15, bottom: 25, left: 15 }}
-                          barCategoryGap="2%"
+                          margin={{ top: 15, right: 50, bottom: 30, left: 15 }}
+                          barCategoryGap="30%"
                           onClick={() => {}} // Disable click events
                           onMouseMove={() => {}} // Disable mouse tracking
                         >
@@ -316,9 +313,10 @@ export default function CityClient({ citySlug }: CityClientProps) {
                             axisLine={false}
                             tickLine={false}
                             stroke="#9ca3af"
-                            tick={{ fontSize: 12 }}
+                            tick={{ fontSize: 11, dx: 15 }}
                             tickFormatter={(value) => Math.round(value)}
-                            width={35}
+                            width={60}
+                            domain={[0, 'dataMax + 10']}
                           />
 
                           <Tooltip
@@ -350,8 +348,8 @@ export default function CityClient({ citySlug }: CityClientProps) {
 
                           <Bar
                             dataKey={chartMetric}
-                            radius={[2, 2, 0, 0]}
-                            maxBarSize={28}
+                            radius={[3, 3, 0, 0]}
+                            maxBarSize={14}
                             isAnimationActive={false}
                             style={{ cursor: 'default' }}
                           >

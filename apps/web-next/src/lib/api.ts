@@ -122,7 +122,17 @@ export const api = {
     const data = await response.json()
     
     // Extract stations array from the API response structure
-    return data.stations || []
+    const stations = data.stations || []
+    
+    // Filter out stations with readings older than 2 hours
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
+    
+    return stations.filter((station: any) => {
+      if (!station.last_reading) return false
+      
+      const lastReadingTime = new Date(station.last_reading)
+      return lastReadingTime > twoHoursAgo
+    })
   },
 
   // Get single station

@@ -365,34 +365,25 @@ export default function StationClient({ stationId }: StationClientProps) {
                     
                     return chartData.length > 0 ? (
                       <div className="bg-white border border-gray-100 rounded-xl p-4">
-                        <div className="flex items-center justify-between mb-4">
-                          <h3 className="text-sm font-medium text-gray-700">
-                            24h {chartMetric === 'aqi' ? 'AQI' : 'PM2.5'} Trend
-                          </h3>
-                          <div className="text-xl font-bold text-gray-900">
-                            {chartMetric === 'aqi' ? currentAQI : Math.round(current?.main_value || 0)}
-                            {chartMetric === 'pm25' && <span className="text-sm font-normal text-gray-600 ml-1">µg/m³</span>}
-                          </div>
-                        </div>
-
                         <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current">
-                          <ResponsiveContainer width="100%" height={280}>
+                          <ResponsiveContainer width="100%" height={320}>
                             <BarChart
                               data={chartData}
-                              margin={{ top: 10, right: 15, bottom: 25, left: 15 }}
-                              barCategoryGap="2%"
+                              margin={{ top: 15, right: 50, bottom: 30, left: 15 }}
+                              barCategoryGap="25%"
                               onClick={() => {}} // Disable click events
                               onMouseMove={() => {}} // Disable mouse tracking
                             >
                               <XAxis
                                 dataKey="chartPosition"
                                 type="number"
-                                domain={[0, chartData.length - 1]}
+                                domain={['dataMin', 'dataMax']}
                                 axisLine={false}
                                 tickLine={false}
                                 stroke="#9ca3af"
-                                tick={{ fontSize: 12 }}
-                                tickCount={5}
+                                tick={{ fontSize: 11 }}
+                                tickCount={6}
+                                allowDataOverflow={false}
                                 tickFormatter={(value) => {
                                   const dataPoint = chartData[Math.round(value)]
                                   if (!dataPoint) return ""
@@ -407,9 +398,10 @@ export default function StationClient({ stationId }: StationClientProps) {
                                 axisLine={false}
                                 tickLine={false}
                                 stroke="#9ca3af"
-                                tick={{ fontSize: 12 }}
+                                tick={{ fontSize: 11, dx: 15 }}
                                 tickFormatter={(value) => Math.round(value)}
-                                width={35}
+                                width={60}
+                                domain={[0, 'dataMax + 10']}
                               />
 
                               <Tooltip
@@ -442,7 +434,7 @@ export default function StationClient({ stationId }: StationClientProps) {
                               <Bar
                                 dataKey={chartMetric}
                                 radius={[2, 2, 0, 0]}
-                                maxBarSize={28}
+                                maxBarSize={16}
                                 isAnimationActive={false}
                                 style={{ cursor: 'default' }}
                               >
