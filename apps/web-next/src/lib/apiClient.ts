@@ -16,14 +16,18 @@ export interface StationCurrent {
 }
 
 export interface StationHistory {
-  timestamp: string
-  aqi_us: number
+  timestamp_utc: string
+  timestamp_pk: string
+  timestamp: string  // Keep for backward compatibility
+  aqi_us: number | null
   p2_conc?: number
 }
 
 export interface StationPM25History {
-  timestamp: string
-  pm25: number
+  timestamp_utc: string
+  timestamp_pk: string
+  timestamp: string  // Keep for backward compatibility
+  pm25: number | null
 }
 
 export interface AQICategory {
@@ -36,7 +40,7 @@ export interface AQICategory {
 
 export const apiClient = {
   async getStationCurrent(stationId: string, signal?: AbortSignal): Promise<StationCurrent> {
-    const url = `${BASE_URL}/api/v1/dashboard/stations/${stationId}/current`
+    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/current`
     console.log('[apiClient] Fetching station current from:', url)
     
     try {
@@ -59,7 +63,7 @@ export const apiClient = {
   },
 
   async getStationHistory(stationId: string, hours = 24, signal?: AbortSignal): Promise<StationHistory[]> {
-    const url = `${BASE_URL}/api/v1/dashboard/stations/${stationId}/history?hours=${hours}`
+    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/history?hours=${hours}`
     console.log('[apiClient] Fetching station history from:', url)
     
     try {
@@ -82,7 +86,7 @@ export const apiClient = {
   },
 
   async getStationPM25History(stationId: string, hours = 24, signal?: AbortSignal): Promise<StationPM25History[]> {
-    const url = `${BASE_URL}/api/v1/dashboard/stations/${stationId}/history/pm25?hours=${hours}`
+    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/history/pm25?hours=${hours}`
     console.log('[apiClient] Fetching station PM2.5 history from:', url)
     
     try {
@@ -105,7 +109,7 @@ export const apiClient = {
   },
 
   async getAQICategories(signal?: AbortSignal): Promise<AQICategory[]> {
-    const response = await fetch(`${BASE_URL}/api/v1/meta/aqi-categories`, { signal })
+    const response = await fetch(`${BASE_URL}/v1/meta/aqi-categories`, { signal })
     if (!response.ok) throw new Error('Failed to fetch AQI categories')
     
     const data = await response.json()

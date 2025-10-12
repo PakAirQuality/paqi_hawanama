@@ -8,11 +8,13 @@ interface HistoryMiniChartProps {
 }
 
 export function HistoryMiniChart({ data, categories }: HistoryMiniChartProps) {
-  // Prepare chart data with colors
+  // Prepare chart data with colors using Pakistan time
   const chartData = data.map(item => {
     const category = getAQICategory(item.aqi_us, categories)
+    const pkDate = new Date(item.timestamp_pk || item.timestamp)
     return {
-      time: new Date(item.timestamp).getHours(),
+      time: pkDate.getHours(),
+      timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
       aqi: item.aqi_us,
       fill: category.color,
     }
@@ -23,11 +25,14 @@ export function HistoryMiniChart({ data, categories }: HistoryMiniChartProps) {
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
           <XAxis 
-            dataKey="time" 
+            dataKey="timeLabel" 
             axisLine={false}
             tickLine={false}
-            tick={{ fontSize: 11, fill: '#6B7280' }}
-            tickFormatter={(value) => `${value}h`}
+            tick={{ fontSize: 10, fill: '#6B7280' }}
+            interval={0}
+            angle={-45}
+            textAnchor="end"
+            height={40}
           />
           <YAxis 
             axisLine={false}

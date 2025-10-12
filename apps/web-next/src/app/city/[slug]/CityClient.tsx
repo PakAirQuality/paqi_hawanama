@@ -140,18 +140,30 @@ export default function CityClient({ citySlug }: CityClientProps) {
     }
   }
 
-  // Prepare chart data for bar chart (matching station card format)
-  const chartData = historicalData?.readings?.map((reading: { timestamp: string; avg_aqi?: number; avg_pm25?: number; reporting_stations?: number }) => {
-    const hour = new Date(reading.timestamp).getHours()
-    const aqiValue = reading.avg_aqi || 0
-    const pm25Value = reading.avg_pm25 || 0
+  // Prepare chart data for bar chart using Pakistan time and handling null values
+  const chartData = historicalData?.readings?.map((reading: { 
+    timestamp_utc: string; 
+    timestamp_pk: string; 
+    timestamp: string; 
+    avg_aqi?: number; 
+    avg_pm25?: number; 
+    reporting_stations?: number 
+  }, index: number) => {
+    // Use Pakistan time for display
+    const pkDate = new Date(reading.timestamp_pk || reading.timestamp)
+    const hour = pkDate.getHours()
+    const aqiValue = reading.avg_aqi
+    const pm25Value = reading.avg_pm25
     
     return {
       hour: hour,
-      aqi: Math.round(aqiValue),
-      pm25: Math.round(pm25Value),
-      color: getAQIColorByValue(aqiValue),
-      timestamp: reading.timestamp
+      timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+      aqi: aqiValue !== null && aqiValue !== undefined ? Math.round(aqiValue) : null,
+      pm25: pm25Value !== null && pm25Value !== undefined ? Math.round(pm25Value) : null,
+      color: getAQIColorByValue(aqiValue || 0),
+      timestamp_pk: reading.timestamp_pk || reading.timestamp,
+      timestamp_utc: reading.timestamp_utc || reading.timestamp,
+      chartPosition: index
     }
   }) || []
 
@@ -282,15 +294,21 @@ export default function CityClient({ citySlug }: CityClientProps) {
                           onMouseMove={() => {}} // Disable mouse tracking
                         >
                           <XAxis
-                            dataKey="hour"
+                            dataKey="chartPosition"
                             type="number"
-                            domain={[0, 24]}
-                            ticks={[0, 3, 6, 9, 12, 15, 18, 21, 24]}
+                            domain={[0, chartData.length - 1]}
                             axisLine={false}
                             tickLine={false}
                             stroke="#9ca3af"
-                            tick={{ fontSize: 12 }}
-                            tickFormatter={(value) => `${value}h`}
+                            tick={{ fontSize: 10 }}
+                            tickCount={5}
+                            tickFormatter={(value) => {
+                              const dataPoint = chartData[Math.round(value)]
+                              if (!dataPoint) return ""
+                              const hour = dataPoint.hour
+                              if (hour === 0) return "00:00"
+                              return `${hour.toString().padStart(2, '0')}:00`
+                            }}
                           />
                           
                           <YAxis
@@ -314,7 +332,20 @@ export default function CityClient({ citySlug }: CityClientProps) {
                               chartMetric === 'aqi' ? `AQI ${value}` : `${value} µg/m³`,
                               chartMetric === 'aqi' ? 'AQI' : 'PM2.5'
                             ]}
-                            labelFormatter={(hour) => `${hour}:00`}
+                            labelFormatter={(label, payload) => {
+                              if (payload && payload[0]?.payload?.timestamp_pk) {
+                                const date = new Date(payload[0].payload.timestamp_pk)
+                                return date.toLocaleString('en-US', {
+                                  month: 'short',
+                                  day: 'numeric',
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                  hour12: false,
+                                  timeZone: 'Asia/Karachi'
+                                }) + ' PKT'
+                              }
+                              return label
+                            }}
                           />
 
                           <Bar

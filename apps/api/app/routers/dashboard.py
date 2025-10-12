@@ -247,14 +247,14 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
 
 
 
-@router.get("/stations/{station_numeric_id}/current")
+@router.get("/stations/{station_id}/current")
 async def get_station_current_data(
-    station_numeric_id: int,
+    station_id: str,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get current data for a specific station using numeric ID from stations list"""
+    """Get current data for a specific station using station ID"""
     try:
-        # First get station details by numeric position using the same query as stations list
+        # Get station details by station_id hash
         stations_result = await db.execute(text("""
             WITH latest_readings AS (
                 SELECT DISTINCT ON (scope_key) 
@@ -269,10 +269,8 @@ async def get_station_current_data(
                 lr.pm25, lr.aqi_us, lr.temp_c, lr.humidity, lr.pressure_hpa, lr.wind_speed_ms, lr.wind_dir_deg, lr.ts_utc
             FROM stations s
             LEFT JOIN latest_readings lr ON s.station_id = lr.scope_key
-            WHERE s.active = true
-            ORDER BY s.name
-            LIMIT 1 OFFSET :offset
-        """), {"offset": station_numeric_id - 1})
+            WHERE s.active = true AND s.station_id = :station_id
+        """), {"station_id": station_id})
         
         station_row = stations_result.fetchone()
         if not station_row:
@@ -302,22 +300,20 @@ async def get_station_current_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/stations/{station_numeric_id}/history")
+@router.get("/stations/{station_id}/history")
 async def get_station_history_data(
-    station_numeric_id: int,
+    station_id: str,
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical data for a specific station using numeric ID"""
+    """Get historical data for a specific station using station ID"""
     try:
-        # First get the station_id hash from numeric position
+        # Verify station exists and is active
         station_lookup = await db.execute(text("""
             SELECT station_id 
             FROM stations 
-            WHERE active = true 
-            ORDER BY name 
-            LIMIT 1 OFFSET :offset
-        """), {"offset": station_numeric_id - 1})
+            WHERE station_id = :station_id AND active = true
+        """), {"station_id": station_id})
         
         station_row = station_lookup.fetchone()
         if not station_row:
@@ -345,7 +341,7 @@ async def get_station_history_data(
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"station_id": station_row.station_id})
+        """ % hours), {"station_id": station_id})
         
         history_rows = history_result.fetchall()
         history_data = [
@@ -365,16 +361,16 @@ async def get_station_history_data(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/stations/{station_numeric_id}/history/pm25")
+@router.get("/stations/{station_id}/history/pm25")
 async def get_station_history_pm25_data(
-    station_numeric_id: int,
+    station_id: str,
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical PM2.5 concentration data for a specific station using numeric ID
+    """Get historical PM2.5 concentration data for a specific station using station ID
     
     Args:
-        station_numeric_id: The numeric ID of the station (from stations list)
+        station_id: The hash-based station ID
         hours: Number of hours of history to fetch (default: 24)
         
     Returns:
@@ -385,14 +381,12 @@ async def get_station_history_pm25_data(
         using parameterized queries and proper error handling.
     """
     try:
-        # First get the station_id hash from numeric position
+        # Verify station exists and is active
         station_lookup = await db.execute(text("""
             SELECT station_id 
             FROM stations 
-            WHERE active = true 
-            ORDER BY name 
-            LIMIT 1 OFFSET :offset
-        """), {"offset": station_numeric_id - 1})
+            WHERE station_id = :station_id AND active = true
+        """), {"station_id": station_id})
         
         station_row = station_lookup.fetchone()
         if not station_row:
@@ -420,7 +414,7 @@ async def get_station_history_pm25_data(
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"station_id": station_row.station_id})
+        """ % hours), {"station_id": station_id})
         
         history_rows = history_result.fetchall()
         history_data = [

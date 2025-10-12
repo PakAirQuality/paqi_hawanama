@@ -297,55 +297,70 @@ export default function StationClient({ stationId }: StationClientProps) {
                     <div className="h-64 bg-gray-100 animate-pulse rounded"></div>
                   ) : (() => {
                     // Prepare combined chart data similar to city implementation
-                    const aqiData = history?.map((item) => ({
-                      timestamp: item.timestamp,
-                      hour: new Date(item.timestamp).getHours(),
-                      aqi: item.aqi_us,
-                      pm25: null as number | null
-                    })) || []
+                    const aqiData = history?.map((item) => {
+                      const pkDate = new Date(item.timestamp_pk || item.timestamp)
+                      return {
+                        timestamp_pk: item.timestamp_pk || item.timestamp,
+                        timestamp_utc: item.timestamp_utc || item.timestamp,
+                        hour: pkDate.getHours(),
+                        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+                        aqi: item.aqi_us,
+                        pm25: null as number | null
+                      }
+                    }) || []
                     
-                    const pm25Data = pm25History?.map((item) => ({
-                      timestamp: item.timestamp,
-                      hour: new Date(item.timestamp).getHours(),
-                      aqi: null as number | null,
-                      pm25: item.pm25
-                    })) || []
+                    const pm25Data = pm25History?.map((item) => {
+                      const pkDate = new Date(item.timestamp_pk || item.timestamp)
+                      return {
+                        timestamp_pk: item.timestamp_pk || item.timestamp,
+                        timestamp_utc: item.timestamp_utc || item.timestamp,
+                        hour: pkDate.getHours(),
+                        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+                        aqi: null as number | null,
+                        pm25: item.pm25
+                      }
+                    }) || []
                     
-                    // Merge data by timestamp
+                    // Merge data by Pakistan timestamp
                     const chartDataMap = new Map()
                     
                     // Add AQI data
                     aqiData.forEach(item => {
-                      chartDataMap.set(item.timestamp, {
+                      chartDataMap.set(item.timestamp_pk, {
                         hour: item.hour,
+                        timeLabel: item.timeLabel,
                         aqi: item.aqi,
                         pm25: item.pm25,
-                        timestamp: item.timestamp
+                        timestamp_pk: item.timestamp_pk,
+                        timestamp_utc: item.timestamp_utc
                       })
                     })
                     
                     // Add PM2.5 data
                     pm25Data.forEach(item => {
-                      const existing = chartDataMap.get(item.timestamp)
+                      const existing = chartDataMap.get(item.timestamp_pk)
                       if (existing) {
                         existing.pm25 = item.pm25
                       } else {
-                        chartDataMap.set(item.timestamp, {
+                        chartDataMap.set(item.timestamp_pk, {
                           hour: item.hour,
+                          timeLabel: item.timeLabel,
                           aqi: item.aqi,
                           pm25: item.pm25,
-                          timestamp: item.timestamp
+                          timestamp_pk: item.timestamp_pk,
+                          timestamp_utc: item.timestamp_utc
                         })
                       }
                     })
                     
                     const chartData = Array.from(chartDataMap.values())
-                      .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-                      .map(item => ({
+                      .sort((a, b) => new Date(a.timestamp_pk).getTime() - new Date(b.timestamp_pk).getTime())
+                      .map((item, index) => ({
                         ...item,
-                        aqi: Math.round(item.aqi || 0),
-                        pm25: Math.round(item.pm25 || 0),
-                        color: getAQIColorByValue(item.aqi || 0)
+                        aqi: item.aqi || null,  // Keep null values instead of converting to 0
+                        pm25: item.pm25 || null,  // Keep null values instead of converting to 0
+                        color: getAQIColorByValue(item.aqi || 0),
+                        chartPosition: index
                       }))
                     
                     return chartData.length > 0 ? (
@@ -370,15 +385,21 @@ export default function StationClient({ stationId }: StationClientProps) {
                               onMouseMove={() => {}} // Disable mouse tracking
                             >
                               <XAxis
-                                dataKey="hour"
+                                dataKey="chartPosition"
                                 type="number"
-                                domain={[0, 24]}
-                                ticks={[0, 3, 6, 9, 12, 15, 18, 21, 24]}
+                                domain={[0, chartData.length - 1]}
                                 axisLine={false}
                                 tickLine={false}
                                 stroke="#9ca3af"
                                 tick={{ fontSize: 12 }}
-                                tickFormatter={(value) => `${value}h`}
+                                tickCount={5}
+                                tickFormatter={(value) => {
+                                  const dataPoint = chartData[Math.round(value)]
+                                  if (!dataPoint) return ""
+                                  const hour = dataPoint.hour
+                                  if (hour === 0) return "00:00"
+                                  return `${hour.toString().padStart(2, '0')}:00`
+                                }}
                               />
                               
                               <YAxis
@@ -402,7 +423,20 @@ export default function StationClient({ stationId }: StationClientProps) {
                                   chartMetric === 'aqi' ? `AQI ${value}` : `${value} µg/m³`,
                                   chartMetric === 'aqi' ? 'AQI' : 'PM2.5'
                                 ]}
-                                labelFormatter={(hour) => `${hour}:00`}
+                                labelFormatter={(label, payload) => {
+                                  if (payload && payload[0]?.payload?.timestamp_pk) {
+                                    const date = new Date(payload[0].payload.timestamp_pk)
+                                    return date.toLocaleString('en-US', {
+                                      month: 'short',
+                                      day: 'numeric',
+                                      hour: '2-digit',
+                                      minute: '2-digit',
+                                      hour12: false,
+                                      timeZone: 'Asia/Karachi'
+                                    }) + ' PKT'
+                                  }
+                                  return label
+                                }}
                               />
 
                               <Bar

@@ -2,6 +2,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-15278
 
 export interface Station {
   id: number
+  station_id?: string  // Hash-based station ID from API
   name: string
   city_id?: number
   city?: string  // Add city name for boundary filtering
@@ -116,7 +117,7 @@ export const api = {
     if (params?.source) query.append('source', params.source)
     if (params?.bbox) query.append('bbox', params.bbox)
     
-    const url = `${API_BASE_URL}/v1/stations${query.toString() ? '?' + query.toString() : ''}`
+    const url = `${API_BASE_URL}/v1/dashboard/stations${query.toString() ? '?' + query.toString() : ''}`
     const response = await fetch(url)
     const data = await response.json()
     
