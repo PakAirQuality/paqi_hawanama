@@ -8,7 +8,7 @@ Provides CSV export functionality for:
 These endpoints return streaming CSV responses for bulk data download.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
@@ -268,9 +268,24 @@ async def export_city_readings_csv(
         raise HTTPException(status_code=500, detail="Failed to export city readings")
 
 
-@router.get("/station-readings-by-city-csv")
+@router.get("/station-readings-by-city-csv/{city}")
 async def export_station_readings_by_city_csv(
-    city_name: str = Query(..., description="Name of the city to filter stations"),
+    city: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="Lahore",
+        enum=[
+            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
+            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
+            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
+            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
+            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
+            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
+            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
+            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
+            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
+        ]
+    ),
     db: AsyncSession = Depends(get_database),
     days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)"),
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
@@ -286,7 +301,7 @@ async def export_station_readings_by_city_csv(
     - Quality control flags and timestamps
     
     Parameters:
-    - city_name: Name of the city to filter stations (required)
+    - city: Name of the city to filter stations (required, selected from dropdown)
     - days_back: Number of days of historical data to include (default: 30, max: 365)
     - start_date: Start date in YYYY-MM-DD format (overrides days_back if provided)
     - end_date: End date in YYYY-MM-DD format (overrides days_back if provided)
@@ -311,7 +326,7 @@ async def export_station_readings_by_city_csv(
     else:
         date_filter = f"AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'"
     
-    logger.info(f"Exporting station readings CSV for city '{city_name}' with date filter: {date_filter}")
+    logger.info(f"Exporting station readings CSV for city '{city}' with date filter: {date_filter}")
     
     # Station readings export filtered by city name
     query = f"""
@@ -352,14 +367,14 @@ async def export_station_readings_by_city_csv(
     """
     
     try:
-        result = await db.execute(text(query), (city_name,))
+        result = await db.execute(text(query), (city,))
         
         # Check if any results were found
         rows = result.fetchall()
         if not rows:
             raise HTTPException(
                 status_code=404, 
-                detail=f"No station data found for city '{city_name}' in the specified time period"
+                detail=f"No station data found for city '{city}' in the specified time period"
             )
         
         # Create CSV content generator
@@ -415,7 +430,7 @@ async def export_station_readings_by_city_csv(
         
         # Generate filename with timestamp and city name
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_city_name = "".join(c for c in city_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_city_name = "".join(c for c in city if c.isalnum() or c in (' ', '-', '_')).rstrip()
         safe_city_name = safe_city_name.replace(' ', '_')
         
         if start_date and end_date:
@@ -437,9 +452,24 @@ async def export_station_readings_by_city_csv(
         raise HTTPException(status_code=500, detail="Failed to export station readings by city")
 
 
-@router.get("/station-readings-by-city-pm25-csv")
+@router.get("/station-readings-by-city-pm25-csv/{city}")
 async def export_station_readings_by_city_pm25_csv(
-    city_name: str = Query(..., description="Name of the city to filter stations"),
+    city: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="Lahore",
+        enum=[
+            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
+            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
+            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
+            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
+            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
+            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
+            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
+            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
+            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
+        ]
+    ),
     db: AsyncSession = Depends(get_database),
     days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)"),
     start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
@@ -456,7 +486,7 @@ async def export_station_readings_by_city_pm25_csv(
     This is a lightweight version optimized specifically for PM2.5 analysis.
     
     Parameters:
-    - city_name: Name of the city to filter stations (required)
+    - city: Name of the city to filter stations (required, selected from dropdown)
     - days_back: Number of days of historical data to include (default: 30, max: 365)
     - start_date: Start date in YYYY-MM-DD format (overrides days_back if provided)
     - end_date: End date in YYYY-MM-DD format (overrides days_back if provided)
@@ -481,7 +511,7 @@ async def export_station_readings_by_city_pm25_csv(
     else:
         date_filter = f"AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'"
     
-    logger.info(f"Exporting PM2.5-only station readings CSV for city '{city_name}' with date filter: {date_filter}")
+    logger.info(f"Exporting PM2.5-only station readings CSV for city '{city}' with date filter: {date_filter}")
     
     # PM2.5-only station readings export filtered by city name
     query = f"""
@@ -508,14 +538,14 @@ async def export_station_readings_by_city_pm25_csv(
     """
     
     try:
-        result = await db.execute(text(query), (city_name,))
+        result = await db.execute(text(query), (city,))
         
         # Check if any results were found
         rows = result.fetchall()
         if not rows:
             raise HTTPException(
                 status_code=404, 
-                detail=f"No PM2.5 station data found for city '{city_name}' in the specified time period"
+                detail=f"No PM2.5 station data found for city '{city}' in the specified time period"
             )
         
         # Create CSV content generator
@@ -555,7 +585,7 @@ async def export_station_readings_by_city_pm25_csv(
         
         # Generate filename with timestamp and city name
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        safe_city_name = "".join(c for c in city_name if c.isalnum() or c in (' ', '-', '_')).rstrip()
+        safe_city_name = "".join(c for c in city if c.isalnum() or c in (' ', '-', '_')).rstrip()
         safe_city_name = safe_city_name.replace(' ', '_')
         
         if start_date and end_date:
