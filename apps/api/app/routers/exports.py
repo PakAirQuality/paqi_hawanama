@@ -96,7 +96,7 @@ async def export_station_readings_csv(
             
             # Write filtered header (removed pm10, o3, no2, so2, co columns)
             header = [
-                'station_id', 'station_name', 'latitude', 'longitude',
+                'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'state_name', 'country_name', 'timestamp_utc',
                 'pm25_ugm3', 'aqi_us', 'aqi_cn', 'main_pollutant_us', 'main_pollutant_cn',
                 'temperature_celsius', 'humidity_percent', 'pressure_hpa',
@@ -288,8 +288,8 @@ async def export_station_readings_by_city_csv(
     ),
     db: AsyncSession = Depends(get_database),
     days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)"),
-    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
-    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format")
+    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format (e.g., 2024-01-01)", example="2024-01-01"),
+    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format (e.g., 2024-12-31)", example="2024-12-31")
 ):
     """
     Export station-level readings for a specific city as CSV.
@@ -360,14 +360,14 @@ async def export_station_readings_by_city_csv(
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
-        AND LOWER(COALESCE(c.name, '')) = LOWER(%s)
+        AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         {date_filter}
     ORDER BY r.scope_key, r.ts_utc ASC
     LIMIT 50000
     """
     
     try:
-        result = await db.execute(text(query), (city,))
+        result = await db.execute(text(query), {'city_name': city})
         
         # Check if any results were found
         rows = result.fetchall()
@@ -384,7 +384,7 @@ async def export_station_readings_by_city_csv(
             
             # Write header
             header = [
-                'station_id', 'station_name', 'latitude', 'longitude',
+                'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'state_name', 'country_name', 'timestamp_utc',
                 'pm25_ugm3', 'aqi_us', 'aqi_cn', 'main_pollutant_us', 'main_pollutant_cn',
                 'temperature_celsius', 'humidity_percent', 'pressure_hpa',
@@ -472,8 +472,8 @@ async def export_station_readings_by_city_pm25_csv(
     ),
     db: AsyncSession = Depends(get_database),
     days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)"),
-    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format"),
-    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format")
+    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format (e.g., 2024-01-01)", example="2024-01-01"),
+    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format (e.g., 2024-12-31)", example="2024-12-31")
 ):
     """
     Export PM2.5-only station readings for a specific city as CSV.
@@ -530,7 +530,7 @@ async def export_station_readings_by_city_pm25_csv(
     LEFT JOIN stations s ON r.scope_key = s.station_id
     LEFT JOIN cities c ON s.city_id = c.id
     WHERE r.scope_type = 'station'
-        AND LOWER(COALESCE(c.name, '')) = LOWER(%s)
+        AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         AND r.pm25 IS NOT NULL
         {date_filter}
     ORDER BY r.scope_key, r.ts_utc ASC
@@ -538,7 +538,7 @@ async def export_station_readings_by_city_pm25_csv(
     """
     
     try:
-        result = await db.execute(text(query), (city,))
+        result = await db.execute(text(query), {'city_name': city})
         
         # Check if any results were found
         rows = result.fetchall()
@@ -555,7 +555,7 @@ async def export_station_readings_by_city_pm25_csv(
             
             # Write minimal header focused only on PM2.5
             header = [
-                'station_id', 'station_name', 'latitude', 'longitude',
+                'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'timestamp_utc', 'pm25_ugm3', 
                 'qc_state', 'source', 'pm25_units'
             ]
