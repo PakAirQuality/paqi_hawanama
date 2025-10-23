@@ -51,17 +51,11 @@ async def export_station_readings_csv(
     
     # Station readings export with metadata from JOINs
     query = f"""
-    WITH numbered_stations AS (
-        SELECT station_id, name, lat, lon, city_id,
-               ROW_NUMBER() OVER (ORDER BY name) as station_numeric_id
-        FROM stations 
-        WHERE active = true
-    )
     SELECT 
-        ns.station_numeric_id as station_id,
-        COALESCE(ns.name, 'Unknown Station') as station_name,
-        COALESCE(ns.lat, 0) as latitude,
-        COALESCE(ns.lon, 0) as longitude,
+        r.scope_key as station_id,
+        COALESCE(s.name, 'Unknown Station') as station_name,
+        COALESCE(s.lat, 0) as latitude,
+        COALESCE(s.lon, 0) as longitude,
         COALESCE(c.name, 'Unknown City') as city_name,
         COALESCE(st.name, 'Unknown State') as state_name,
         COALESCE(co.name, 'Unknown Country') as country_name,
@@ -82,18 +76,36 @@ async def export_station_readings_csv(
         r.source,
         r.units_pm25
     FROM readings r
-    LEFT JOIN numbered_stations ns ON r.scope_key = ns.station_id
-    LEFT JOIN cities c ON ns.city_id = c.id
+    LEFT JOIN stations s ON r.scope_key = s.station_id
+    LEFT JOIN cities c ON s.city_id = c.id
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
         AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'
-    ORDER BY ns.station_numeric_id, r.ts_utc ASC
+        AND s.active = true
+    ORDER BY r.scope_key, r.ts_utc ASC
     LIMIT 50000
     """
     
     try:
         result = await db.execute(text(query))
+        rows = result.fetchall()
+        
+        # Create station_id to numeric_id mapping like dashboard API does
+        # Get unique stations and sort by name to create consistent mapping
+        unique_stations = {}
+        for row in rows:
+            if row.station_id not in unique_stations:
+                unique_stations[row.station_id] = {
+                    'name': row.station_name,
+                    'station_id': row.station_id
+                }
+        
+        # Sort stations by name and assign numeric IDs
+        sorted_stations = sorted(unique_stations.items(), key=lambda x: x[1]['name'])
+        station_id_map = {}
+        for i, (station_id, station_info) in enumerate(sorted_stations):
+            station_id_map[station_id] = i + 1  # 1-based indexing like dashboard
         
         # Create CSV content generator
         def generate_csv():
@@ -114,10 +126,11 @@ async def export_station_readings_csv(
             output.seek(0)
             output.truncate(0)
             
-            # Write filtered data rows (removed pm10, o3, no2, so2, co columns)
-            for row in result:
+            # Write filtered data rows with numeric station IDs
+            for row in rows:
+                numeric_id = station_id_map.get(row.station_id, 0)
                 data_row = [
-                    row.station_id or '',
+                    numeric_id,  # Use numeric ID instead of hex station_id
                     row.station_name or '',
                     row.latitude or '',
                     row.longitude or '',
@@ -336,17 +349,11 @@ async def export_station_readings_by_city_csv(
     
     # Station readings export filtered by city name
     query = f"""
-    WITH numbered_stations AS (
-        SELECT station_id, name, lat, lon, city_id,
-               ROW_NUMBER() OVER (ORDER BY name) as station_numeric_id
-        FROM stations 
-        WHERE active = true
-    )
     SELECT 
-        ns.station_numeric_id as station_id,
-        COALESCE(ns.name, 'Unknown Station') as station_name,
-        COALESCE(ns.lat, 0) as latitude,
-        COALESCE(ns.lon, 0) as longitude,
+        r.scope_key as station_id,
+        COALESCE(s.name, 'Unknown Station') as station_name,
+        COALESCE(s.lat, 0) as latitude,
+        COALESCE(s.lon, 0) as longitude,
         COALESCE(c.name, 'Unknown City') as city_name,
         COALESCE(st.name, 'Unknown State') as state_name,
         COALESCE(co.name, 'Unknown Country') as country_name,
@@ -367,14 +374,15 @@ async def export_station_readings_by_city_csv(
         r.source,
         r.units_pm25
     FROM readings r
-    LEFT JOIN numbered_stations ns ON r.scope_key = ns.station_id
-    LEFT JOIN cities c ON ns.city_id = c.id
+    LEFT JOIN stations s ON r.scope_key = s.station_id
+    LEFT JOIN cities c ON s.city_id = c.id
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
+        AND s.active = true
         {date_filter}
-    ORDER BY ns.station_numeric_id, r.ts_utc ASC
+    ORDER BY r.scope_key, r.ts_utc ASC
     LIMIT 50000
     """
     
@@ -388,6 +396,21 @@ async def export_station_readings_by_city_csv(
                 status_code=404, 
                 detail=f"No station data found for city '{city}' in the specified time period"
             )
+        
+        # Create station_id to numeric_id mapping like dashboard API does
+        unique_stations = {}
+        for row in rows:
+            if row.station_id not in unique_stations:
+                unique_stations[row.station_id] = {
+                    'name': row.station_name,
+                    'station_id': row.station_id
+                }
+        
+        # Sort stations by name and assign numeric IDs
+        sorted_stations = sorted(unique_stations.items(), key=lambda x: x[1]['name'])
+        station_id_map = {}
+        for i, (station_id, station_info) in enumerate(sorted_stations):
+            station_id_map[station_id] = i + 1  # 1-based indexing like dashboard
         
         # Create CSV content generator
         def generate_csv():
@@ -408,10 +431,11 @@ async def export_station_readings_by_city_csv(
             output.seek(0)
             output.truncate(0)
             
-            # Write data rows
+            # Write data rows with numeric station IDs
             for row in rows:
+                numeric_id = station_id_map.get(row.station_id, 0)
                 data_row = [
-                    row.station_id or '',
+                    numeric_id,  # Use numeric ID instead of hex station_id
                     row.station_name or '',
                     row.latitude or '',
                     row.longitude or '',
@@ -527,17 +551,11 @@ async def export_station_readings_by_city_pm25_csv(
     
     # PM2.5-only station readings export filtered by city name
     query = f"""
-    WITH numbered_stations AS (
-        SELECT station_id, name, lat, lon, city_id,
-               ROW_NUMBER() OVER (ORDER BY name) as station_numeric_id
-        FROM stations 
-        WHERE active = true
-    )
     SELECT 
-        ns.station_numeric_id as station_id,
-        COALESCE(ns.name, 'Unknown Station') as station_name,
-        COALESCE(ns.lat, 0) as latitude,
-        COALESCE(ns.lon, 0) as longitude,
+        r.scope_key as station_id,
+        COALESCE(s.name, 'Unknown Station') as station_name,
+        COALESCE(s.lat, 0) as latitude,
+        COALESCE(s.lon, 0) as longitude,
         COALESCE(c.name, 'Unknown City') as city_name,
         r.ts_utc as timestamp_utc,
         r.pm25,
@@ -545,13 +563,14 @@ async def export_station_readings_by_city_pm25_csv(
         r.source,
         r.units_pm25
     FROM readings r
-    LEFT JOIN numbered_stations ns ON r.scope_key = ns.station_id
-    LEFT JOIN cities c ON ns.city_id = c.id
+    LEFT JOIN stations s ON r.scope_key = s.station_id
+    LEFT JOIN cities c ON s.city_id = c.id
     WHERE r.scope_type = 'station'
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         AND r.pm25 IS NOT NULL
+        AND s.active = true
         {date_filter}
-    ORDER BY ns.station_numeric_id, r.ts_utc ASC
+    ORDER BY r.scope_key, r.ts_utc ASC
     LIMIT 50000
     """
     
@@ -565,6 +584,21 @@ async def export_station_readings_by_city_pm25_csv(
                 status_code=404, 
                 detail=f"No PM2.5 station data found for city '{city}' in the specified time period"
             )
+        
+        # Create station_id to numeric_id mapping like dashboard API does
+        unique_stations = {}
+        for row in rows:
+            if row.station_id not in unique_stations:
+                unique_stations[row.station_id] = {
+                    'name': row.station_name,
+                    'station_id': row.station_id
+                }
+        
+        # Sort stations by name and assign numeric IDs
+        sorted_stations = sorted(unique_stations.items(), key=lambda x: x[1]['name'])
+        station_id_map = {}
+        for i, (station_id, station_info) in enumerate(sorted_stations):
+            station_id_map[station_id] = i + 1  # 1-based indexing like dashboard
         
         # Create CSV content generator
         def generate_csv():
@@ -582,10 +616,11 @@ async def export_station_readings_by_city_pm25_csv(
             output.seek(0)
             output.truncate(0)
             
-            # Write data rows
+            # Write data rows with numeric station IDs
             for row in rows:
+                numeric_id = station_id_map.get(row.station_id, 0)
                 data_row = [
-                    row.station_id or '',
+                    numeric_id,  # Use numeric ID instead of hex station_id
                     row.station_name or '',
                     row.latitude or '',
                     row.longitude or '',
