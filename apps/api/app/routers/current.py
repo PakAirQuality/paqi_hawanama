@@ -8,7 +8,7 @@ from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
 
-from app.models.current import CurrentOut
+from app.models.current import CurrentOut, CityStationsResponse
 from app.services.airvisual_current import get_current_service
 
 logger = logging.getLogger(__name__)
@@ -17,135 +17,112 @@ router = APIRouter()
 
 
 @router.get(
-    "/cities/{country}/{state}/{city}/current",
-    response_model=CurrentOut,
+    "/cities/{city}/current",
+    response_model=CityStationsResponse,
     summary="Get current conditions for a city",
-    description="Retrieve current air quality and weather conditions for a specific city"
+    description="Retrieve current air quality data for all stations in a specific city"
 )
 async def city_current(
-    country: str = Path(
-        ...,
-        description="Country name (URL encoded)",
-        example="Pakistan"
-    ),
-    state: str = Path(
-        ...,
-        description="State or province name (URL encoded)",
-        example="Punjab"
-    ),
     city: str = Path(
         ...,
-        description="City name (URL encoded)",
-        example="Lahore"
-    ),
-    aqi: Literal["us", "cn", "both"] = Query(
-        "both",
-        description="Which AQI scales to include in response"
-    ),
-    tz: str = Query(
-        "Asia/Karachi",
-        description="IANA timezone for local timestamp conversion",
-        example="Asia/Karachi"
+        description="Select city from dropdown list",
+        example="Lahore",
+        enum=[
+            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
+            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
+            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
+            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
+            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
+            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
+            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
+            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
+            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
+        ]
     )
 ):
     """
-    Get current air quality and weather conditions for a city.
+    Get current air quality data for all stations in a city.
     
-    - **country**: Country name (required, URL encoded)
-    - **state**: State or province name (required, URL encoded)  
     - **city**: City name (required, URL encoded)
-    - **aqi**: AQI scales to include - "us" (US EPA), "cn" (China MEE), or "both" (default)
-    - **tz**: IANA timezone string for local timestamp conversion (default "Asia/Karachi")
     
-    Returns current conditions including:
-    - Air Quality Index for requested scales
-    - Weather conditions (temperature, humidity, pressure, wind)
-    - Pollutant concentrations (PM2.5, PM10, O3, NO2, SO2, CO)
-    - Timestamps in UTC and local time
-    
-    **Geographic Scope**: The response includes the geographic scope (country/state/city) 
-    for context and data attribution.
+    Returns simplified current conditions including:
+    - Station ID and name
+    - PM2.5 concentration (µg/m³)
+    - Air Quality Index (US EPA scale)
     
     **Error responses:**
     - `400`: Invalid parameters  
     - `404`: City not found in data source
-    - `502`: Upstream API error
-    - `503`: Service unavailable
+    - `500`: Internal server error
     """
     try:
-        # URL decode path parameters
-        country = unquote(country)
-        state = unquote(state)
+        # URL decode path parameter
         city = unquote(city)
         
-        # Validate non-empty parameters
-        if not all([country.strip(), state.strip(), city.strip()]):
+        # Validate non-empty parameter
+        if not city.strip():
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Country, state, and city path parameters must be non-empty"
+                detail="City path parameter must be non-empty"
             )
         
-        service = get_current_service()
-        result = await service.get_city_current(
-            country=country,
-            state=state,
-            city=city,
-            aqi_mode=aqi,
-            tz=tz
-        )
+        # Import database dependencies here to avoid circular imports
+        from app.core.database import get_database
+        from sqlalchemy import text
         
-        # Add timezone warning header if invalid timezone was provided
-        response = JSONResponse(content=result.model_dump(mode='json'))
-        
-        # Check if timezone conversion failed (ts_local equals ts_utc in UTC)
-        if (tz != "UTC" and tz != "Asia/Karachi" and 
-            result.ts_local.tzinfo.zone == "UTC" and result.ts_utc == result.ts_local):
-            response.headers["tz_warning"] = "invalid_tz_fallback_utc"
-        
-        return response
+        # Get database session
+        async for db in get_database():
+            # Query stations in the city with latest readings
+            query = text("""
+                SELECT 
+                    s.station_id,
+                    s.name as station_name,
+                    r.pm25,
+                    r.aqi_us
+                FROM stations s
+                JOIN cities c ON s.city_id = c.id
+                JOIN LATERAL (
+                    SELECT aqi_us, pm25
+                    FROM readings r_sub
+                    WHERE r_sub.scope_key = s.station_id
+                    AND r_sub.ts_utc >= NOW() - INTERVAL '24 hours'
+                    ORDER BY r_sub.ts_utc DESC
+                    LIMIT 1
+                ) r ON true
+                WHERE LOWER(c.name) = LOWER(:city_name)
+                AND r.aqi_us IS NOT NULL
+                ORDER BY s.name
+            """)
+            
+            result = await db.execute(query, {'city_name': city})
+            stations_data = result.fetchall()
+            
+            if not stations_data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="City not found or no stations with current data"
+                )
+            
+            # Format response
+            stations = []
+            for row in stations_data:
+                station = {
+                    "station_id": row.station_id,
+                    "station_name": row.station_name,
+                    "pm25_concentration": float(row.pm25) if row.pm25 is not None else None,
+                    "aqi": int(row.aqi_us) if row.aqi_us is not None else None
+                }
+                stations.append(station)
+            
+            return CityStationsResponse(
+                city=city,
+                stations=stations
+            )
         
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e)
-        )
-    
-    except RuntimeError as e:
-        if "client not available" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="AirVisual API service unavailable - check configuration"
-            )
-        
-        if "city_not_found" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="city_not_found"
-            )
-        
-        # Upstream API errors
-        if "upstream" in str(e).lower():
-            logger.error(f"Upstream error in city_current: {e}")
-            # Extract upstream details if available
-            error_detail = {"detail": "upstream_error"}
-            if "upstream_code" in str(e):
-                # Parse upstream code if present in error message
-                error_detail["upstream_code"] = "api_error"
-            if "upstream_status" in str(e):
-                error_detail["upstream_status"] = "error"
-            
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=error_detail,
-                headers={"upstream_error": "true"}
-            )
-        
-        # Other runtime errors
-        logger.error(f"Runtime error in city_current: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Upstream API error: {str(e)}",
-            headers={"upstream_error": "true"}
         )
     
     except Exception as e:

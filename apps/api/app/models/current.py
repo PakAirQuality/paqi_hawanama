@@ -118,3 +118,42 @@ class StationMeta(BaseModel):
                 "source_station_id": None
             }
         }
+
+
+class StationCurrent(BaseModel):
+    """Station current data in simplified format"""
+    station_id: str = Field(..., description="Station identifier")
+    station_name: str = Field(..., description="Station name")
+    pm25_concentration: Optional[float] = Field(None, description="PM2.5 concentration in µg/m³")
+    aqi: Optional[int] = Field(None, description="Air Quality Index (US EPA)")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "station_id": "9f1a0c2b8d6e3a41",
+                "station_name": "Lahore US Consulate",
+                "pm25_concentration": 32.6,
+                "aqi": 95
+            }
+        }
+
+
+class CityStationsResponse(BaseModel):
+    """Response for city stations with current data"""
+    city: str = Field(..., description="City name")
+    stations: list[StationCurrent] = Field(..., description="List of stations with current data")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "city": "Lahore",
+                "stations": [
+                    {
+                        "station_id": "9f1a0c2b8d6e3a41",
+                        "station_name": "Lahore US Consulate", 
+                        "pm25_concentration": 32.6,
+                        "aqi": 95
+                    }
+                ]
+            }
+        }

@@ -249,50 +249,62 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
 
 @router.get("/stations/{station_id}/current")
 async def get_station_current_data(
-    station_id: str,
+    station_id: int,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get current data for a specific station using station ID"""
+    """Get current data for a specific station using numeric station ID"""
     try:
-        # Get station details by station_id hash
-        stations_result = await db.execute(text("""
+        # First, find the station by numeric ID to get the hash-based station_id
+        station_lookup = await db.execute(text("""
+            SELECT station_id, name, lat, lon 
+            FROM stations 
+            WHERE active = true 
+            ORDER BY name
+        """))
+        
+        stations_list = station_lookup.fetchall()
+        
+        # Find the station at the given index (station_id - 1, since IDs are 1-based)
+        if station_id < 1 or station_id > len(stations_list):
+            raise HTTPException(status_code=404, detail="Station not found")
+        
+        target_station = stations_list[station_id - 1]  # Convert to 0-based index
+        hash_station_id = target_station.station_id
+        
+        # Get latest reading for this station using the same pattern as working endpoint
+        latest_reading = await db.execute(text("""
             WITH latest_readings AS (
                 SELECT DISTINCT ON (scope_key) 
                     scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa, wind_speed_ms, wind_dir_deg, ts_utc
                 FROM readings
                 WHERE scope_type = 'station' 
+                AND scope_key = :hash_station_id
                 AND ts_utc > NOW() - INTERVAL '48 hours'
                 ORDER BY scope_key, ts_utc DESC
             )
-            SELECT 
-                s.station_id, s.name, s.lat, s.lon,
-                lr.pm25, lr.aqi_us, lr.temp_c, lr.humidity, lr.pressure_hpa, lr.wind_speed_ms, lr.wind_dir_deg, lr.ts_utc
-            FROM stations s
-            LEFT JOIN latest_readings lr ON s.station_id = lr.scope_key
-            WHERE s.active = true AND s.station_id = :station_id
-        """), {"station_id": station_id})
+            SELECT * FROM latest_readings
+        """), {"hash_station_id": hash_station_id})
         
-        station_row = stations_result.fetchone()
-        if not station_row:
-            raise HTTPException(status_code=404, detail="Station not found")
+        reading_row = latest_reading.fetchone()
         
         # Determine main pollutant (simplified - use PM2.5 for now)
         main_pollutant = "PM2.5"
-        main_value = float(station_row.pm25) if station_row.pm25 else 0
+        main_value = float(reading_row.pm25) if reading_row and reading_row.pm25 else 0
+        aqi_value = int(reading_row.aqi_us) if reading_row and reading_row.aqi_us else 0
         
         return {
-            "station_id": str(station_numeric_id),
-            "name": station_row.name,
-            "aqi_us": int(station_row.aqi_us) if station_row.aqi_us else 0,
+            "station_id": str(station_id),  # Return the numeric ID as expected by frontend
+            "name": target_station.name,
+            "aqi_us": aqi_value,
             "main_pollutant": main_pollutant,
             "main_value": main_value,
             "main_units": "µg/m³",
-            "temp_c": float(station_row.temp_c) if station_row.temp_c else None,
-            "humidity": float(station_row.humidity) if station_row.humidity else None,
-            "wind_speed_kmh": float(station_row.wind_speed_ms * 3.6) if station_row.wind_speed_ms else None,  # Convert m/s to km/h
-            "wind_direction": float(station_row.wind_dir_deg) if station_row.wind_dir_deg else None,
-            "pressure_mbar": float(station_row.pressure_hpa) if station_row.pressure_hpa else None,   # hPa = mbar  
-            "last_update": station_row.ts_utc.isoformat() if station_row.ts_utc else None
+            "temp_c": float(reading_row.temp_c) if reading_row and reading_row.temp_c else None,
+            "humidity": float(reading_row.humidity) if reading_row and reading_row.humidity else None,
+            "wind_speed_kmh": float(reading_row.wind_speed_ms * 3.6) if reading_row and reading_row.wind_speed_ms else None,
+            "wind_direction": float(reading_row.wind_dir_deg) if reading_row and reading_row.wind_dir_deg else None,
+            "pressure_mbar": float(reading_row.pressure_hpa) if reading_row and reading_row.pressure_hpa else None,
+            "last_update": reading_row.ts_utc.isoformat() if reading_row and reading_row.ts_utc else None
         }
         
     except Exception as e:
@@ -302,22 +314,28 @@ async def get_station_current_data(
 
 @router.get("/stations/{station_id}/history")
 async def get_station_history_data(
-    station_id: str,
+    station_id: int,
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical data for a specific station using station ID"""
+    """Get historical data for a specific station using numeric station ID"""
     try:
-        # Verify station exists and is active
+        # Get station by numeric index using same pattern as current endpoint  
         station_lookup = await db.execute(text("""
-            SELECT station_id 
+            SELECT station_id, name 
             FROM stations 
-            WHERE station_id = :station_id AND active = true
-        """), {"station_id": station_id})
+            WHERE active = true 
+            ORDER BY name
+        """))
         
-        station_row = station_lookup.fetchone()
-        if not station_row:
+        stations_list = station_lookup.fetchall()
+        
+        # Find the station at the given index
+        if station_id < 1 or station_id > len(stations_list):
             raise HTTPException(status_code=404, detail="Station not found")
+        
+        target_station = stations_list[station_id - 1]  # Convert to 0-based index
+        hash_station_id = target_station.station_id
         
         # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
@@ -337,11 +355,11 @@ async def get_station_history_data(
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :station_id 
+                AND r.scope_key = :hash_station_id 
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"station_id": station_id})
+        """ % hours), {"hash_station_id": hash_station_id})
         
         history_rows = history_result.fetchall()
         history_data = [
@@ -363,14 +381,14 @@ async def get_station_history_data(
 
 @router.get("/stations/{station_id}/history/pm25")
 async def get_station_history_pm25_data(
-    station_id: str,
+    station_id: int,
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical PM2.5 concentration data for a specific station using station ID
+    """Get historical PM2.5 concentration data for a specific station using numeric station ID
     
     Args:
-        station_id: The hash-based station ID
+        station_id: The numeric station ID
         hours: Number of hours of history to fetch (default: 24)
         
     Returns:
@@ -381,16 +399,22 @@ async def get_station_history_pm25_data(
         using parameterized queries and proper error handling.
     """
     try:
-        # Verify station exists and is active
+        # Get station by numeric index using same pattern as other endpoints
         station_lookup = await db.execute(text("""
-            SELECT station_id 
+            SELECT station_id, name 
             FROM stations 
-            WHERE station_id = :station_id AND active = true
-        """), {"station_id": station_id})
+            WHERE active = true 
+            ORDER BY name
+        """))
         
-        station_row = station_lookup.fetchone()
-        if not station_row:
+        stations_list = station_lookup.fetchall()
+        
+        # Find the station at the given index
+        if station_id < 1 or station_id > len(stations_list):
             raise HTTPException(status_code=404, detail="Station not found")
+        
+        target_station = stations_list[station_id - 1]  # Convert to 0-based index
+        hash_station_id = target_station.station_id
         
         # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
@@ -410,11 +434,11 @@ async def get_station_history_pm25_data(
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :station_id 
+                AND r.scope_key = :hash_station_id 
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"station_id": station_id})
+        """ % hours), {"hash_station_id": hash_station_id})
         
         history_rows = history_result.fetchall()
         history_data = [
