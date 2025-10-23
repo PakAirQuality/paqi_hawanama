@@ -52,7 +52,7 @@ async def export_station_readings_csv(
     # Station readings export with metadata from JOINs
     query = f"""
     SELECT 
-        r.scope_key as station_id,
+        s.id as station_id,
         COALESCE(s.name, 'Unknown Station') as station_name,
         COALESCE(s.lat, 0) as latitude,
         COALESCE(s.lon, 0) as longitude,
@@ -82,7 +82,7 @@ async def export_station_readings_csv(
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
         AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'
-    ORDER BY r.scope_key, r.ts_utc ASC
+    ORDER BY s.id, r.ts_utc ASC
     LIMIT 50000
     """
     
@@ -331,7 +331,7 @@ async def export_station_readings_by_city_csv(
     # Station readings export filtered by city name
     query = f"""
     SELECT 
-        r.scope_key as station_id,
+        s.id as station_id,
         COALESCE(s.name, 'Unknown Station') as station_name,
         COALESCE(s.lat, 0) as latitude,
         COALESCE(s.lon, 0) as longitude,
@@ -362,7 +362,7 @@ async def export_station_readings_by_city_csv(
     WHERE r.scope_type = 'station'
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         {date_filter}
-    ORDER BY r.scope_key, r.ts_utc ASC
+    ORDER BY s.id, r.ts_utc ASC
     LIMIT 50000
     """
     
@@ -516,7 +516,7 @@ async def export_station_readings_by_city_pm25_csv(
     # PM2.5-only station readings export filtered by city name
     query = f"""
     SELECT 
-        r.scope_key as station_id,
+        s.id as station_id,
         COALESCE(s.name, 'Unknown Station') as station_name,
         COALESCE(s.lat, 0) as latitude,
         COALESCE(s.lon, 0) as longitude,
@@ -533,7 +533,7 @@ async def export_station_readings_by_city_pm25_csv(
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         AND r.pm25 IS NOT NULL
         {date_filter}
-    ORDER BY r.scope_key, r.ts_utc ASC
+    ORDER BY s.id, r.ts_utc ASC
     LIMIT 50000
     """
     
