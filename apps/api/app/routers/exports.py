@@ -51,11 +51,17 @@ async def export_station_readings_csv(
     
     # Station readings export with metadata from JOINs
     query = f"""
+    WITH numbered_stations AS (
+        SELECT station_id, name, lat, lon, city_id,
+               ROW_NUMBER() OVER (ORDER BY name) as station_numeric_id
+        FROM stations 
+        WHERE active = true
+    )
     SELECT 
-        s.id as station_id,
-        COALESCE(s.name, 'Unknown Station') as station_name,
-        COALESCE(s.lat, 0) as latitude,
-        COALESCE(s.lon, 0) as longitude,
+        ns.station_numeric_id as station_id,
+        COALESCE(ns.name, 'Unknown Station') as station_name,
+        COALESCE(ns.lat, 0) as latitude,
+        COALESCE(ns.lon, 0) as longitude,
         COALESCE(c.name, 'Unknown City') as city_name,
         COALESCE(st.name, 'Unknown State') as state_name,
         COALESCE(co.name, 'Unknown Country') as country_name,
@@ -76,13 +82,13 @@ async def export_station_readings_csv(
         r.source,
         r.units_pm25
     FROM readings r
-    LEFT JOIN stations s ON r.scope_key = s.station_id
-    LEFT JOIN cities c ON s.city_id = c.id
+    LEFT JOIN numbered_stations ns ON r.scope_key = ns.station_id
+    LEFT JOIN cities c ON ns.city_id = c.id
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
         AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'
-    ORDER BY s.id, r.ts_utc ASC
+    ORDER BY ns.station_numeric_id, r.ts_utc ASC
     LIMIT 50000
     """
     
@@ -330,11 +336,17 @@ async def export_station_readings_by_city_csv(
     
     # Station readings export filtered by city name
     query = f"""
+    WITH numbered_stations AS (
+        SELECT station_id, name, lat, lon, city_id,
+               ROW_NUMBER() OVER (ORDER BY name) as station_numeric_id
+        FROM stations 
+        WHERE active = true
+    )
     SELECT 
-        s.id as station_id,
-        COALESCE(s.name, 'Unknown Station') as station_name,
-        COALESCE(s.lat, 0) as latitude,
-        COALESCE(s.lon, 0) as longitude,
+        ns.station_numeric_id as station_id,
+        COALESCE(ns.name, 'Unknown Station') as station_name,
+        COALESCE(ns.lat, 0) as latitude,
+        COALESCE(ns.lon, 0) as longitude,
         COALESCE(c.name, 'Unknown City') as city_name,
         COALESCE(st.name, 'Unknown State') as state_name,
         COALESCE(co.name, 'Unknown Country') as country_name,
@@ -355,14 +367,14 @@ async def export_station_readings_by_city_csv(
         r.source,
         r.units_pm25
     FROM readings r
-    LEFT JOIN stations s ON r.scope_key = s.station_id
-    LEFT JOIN cities c ON s.city_id = c.id
+    LEFT JOIN numbered_stations ns ON r.scope_key = ns.station_id
+    LEFT JOIN cities c ON ns.city_id = c.id
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         {date_filter}
-    ORDER BY s.id, r.ts_utc ASC
+    ORDER BY ns.station_numeric_id, r.ts_utc ASC
     LIMIT 50000
     """
     
@@ -515,11 +527,17 @@ async def export_station_readings_by_city_pm25_csv(
     
     # PM2.5-only station readings export filtered by city name
     query = f"""
+    WITH numbered_stations AS (
+        SELECT station_id, name, lat, lon, city_id,
+               ROW_NUMBER() OVER (ORDER BY name) as station_numeric_id
+        FROM stations 
+        WHERE active = true
+    )
     SELECT 
-        s.id as station_id,
-        COALESCE(s.name, 'Unknown Station') as station_name,
-        COALESCE(s.lat, 0) as latitude,
-        COALESCE(s.lon, 0) as longitude,
+        ns.station_numeric_id as station_id,
+        COALESCE(ns.name, 'Unknown Station') as station_name,
+        COALESCE(ns.lat, 0) as latitude,
+        COALESCE(ns.lon, 0) as longitude,
         COALESCE(c.name, 'Unknown City') as city_name,
         r.ts_utc as timestamp_utc,
         r.pm25,
@@ -527,13 +545,13 @@ async def export_station_readings_by_city_pm25_csv(
         r.source,
         r.units_pm25
     FROM readings r
-    LEFT JOIN stations s ON r.scope_key = s.station_id
-    LEFT JOIN cities c ON s.city_id = c.id
+    LEFT JOIN numbered_stations ns ON r.scope_key = ns.station_id
+    LEFT JOIN cities c ON ns.city_id = c.id
     WHERE r.scope_type = 'station'
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         AND r.pm25 IS NOT NULL
         {date_filter}
-    ORDER BY s.id, r.ts_utc ASC
+    ORDER BY ns.station_numeric_id, r.ts_utc ASC
     LIMIT 50000
     """
     
