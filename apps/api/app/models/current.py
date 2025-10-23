@@ -157,3 +157,46 @@ class CityStationsResponse(BaseModel):
                 ]
             }
         }
+
+
+class HighestPM25Station(BaseModel):
+    """Station data for highest PM2.5 concentration ranking"""
+    station_id: str = Field(..., description="Station identifier")
+    station_name: str = Field(..., description="Station name")
+    pm25_concentration: float = Field(..., description="PM2.5 concentration in µg/m³")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "station_id": "c2af7d6fe582309c",
+                "station_name": "Badian Rd LHE",
+                "pm25_concentration": 265.0
+            }
+        }
+
+
+class CityTop10PM25Response(BaseModel):
+    """Response for top 10 highest PM2.5 stations in a city"""
+    city: str = Field(..., description="City name")
+    top_stations: list[HighestPM25Station] = Field(..., description="Top 10 stations with highest PM2.5", max_items=10)
+    total_stations: int = Field(..., description="Total number of active stations with data in the city")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "city": "Lahore",
+                "top_stations": [
+                    {
+                        "station_id": "c2af7d6fe582309c",
+                        "station_name": "Badian Rd LHE",
+                        "pm25_concentration": 265.0
+                    },
+                    {
+                        "station_id": "57adc452bd10dbdc",
+                        "station_name": "Barki, Lahore",
+                        "pm25_concentration": 208.2
+                    }
+                ],
+                "total_stations": 47
+            }
+        }

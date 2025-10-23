@@ -139,40 +139,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-@router.get("/debug")
-async def get_debug_info(db: AsyncSession = Depends(get_database)):
-    """Get debug information"""
-    try:
-        # Get latest readings
-        city_result = await db.execute(text("""
-            SELECT scope_key, ts_utc, pm25, aqi_us, ingested_at 
-            FROM readings 
-            WHERE scope_type = 'city' 
-            ORDER BY ingested_at DESC 
-            LIMIT 5
-        """))
-        
-        station_result = await db.execute(text("""
-            SELECT scope_key, ts_utc, pm25, aqi_us, ingested_at 
-            FROM readings 
-            WHERE scope_type = 'station' 
-            ORDER BY ingested_at DESC 
-            LIMIT 5
-        """))
-        
-        city_rows = city_result.fetchall()
-        station_rows = station_result.fetchall()
-        
-        return {
-            "latest_city_readings": [dict(row._mapping) for row in city_rows],
-            "latest_station_readings": [dict(row._mapping) for row in station_rows],
-            "timestamp": "2025-09-26T00:30:00Z"
-        }
-        
-    except Exception as e:
-        logger.error(f"Error getting debug info: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
-
 
 @router.get("/stations")
 async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
