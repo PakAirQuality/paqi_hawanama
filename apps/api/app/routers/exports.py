@@ -636,11 +636,11 @@ async def export_station_readings_by_city_pm25_csv(
             output = io.StringIO()
             writer = csv.writer(output)
             
-            # Write minimal header focused only on PM2.5 (removed pm25_units)
+            # Write minimal header focused only on PM2.5 (removed pm25_units and qc_state)
             header = [
                 'id', 'station_name', 'latitude', 'longitude',
-                'city_name', 'timestamp_utc', 'pm25_ugm3', 
-                'qc_state', 'source'
+                'city_name', 'timestamp_utc', 'timestamp_pk', 'pm25_ugm3', 
+                'source'
             ]
             writer.writerow(header)
             yield output.getvalue()
@@ -649,15 +649,22 @@ async def export_station_readings_by_city_pm25_csv(
             
             # Write data rows with complete time series (including nulls)
             for reading_data in all_readings:
+                # Calculate Pakistan time (UTC+5)
+                timestamp_utc = reading_data['timestamp_utc']
+                timestamp_pk = None
+                if timestamp_utc:
+                    from datetime import timedelta
+                    timestamp_pk = timestamp_utc + timedelta(hours=5)
+                
                 data_row = [
                     reading_data['numeric_id'],
                     reading_data['name'] or '',
                     reading_data['lat'] or '',
                     reading_data['lon'] or '',
                     reading_data['city_name'] or '',
-                    reading_data['timestamp_utc'].isoformat() if reading_data['timestamp_utc'] else '',
-                    float(reading_data['pm25']) if reading_data['pm25'] is not None else '',
-                    reading_data['qc_state'] or '',
+                    timestamp_utc.isoformat() if timestamp_utc else '',
+                    timestamp_pk.isoformat() if timestamp_pk else '',
+                    'null' if reading_data['pm25'] is None else float(reading_data['pm25']),
                     reading_data['source'] or ''
                 ]
                 writer.writerow(data_row)
