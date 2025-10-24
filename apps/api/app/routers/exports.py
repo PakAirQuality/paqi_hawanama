@@ -549,87 +549,116 @@ async def export_station_readings_by_city_pm25_csv(
     
     logger.info(f"Exporting PM2.5-only station readings CSV for city '{city}' with date filter: {date_filter}")
     
-    # PM2.5-only station readings export filtered by city name
-    query = f"""
+    # Get stations in the city first
+    stations_query = """
+    SELECT s.station_id, s.name, s.lat, s.lon, c.name as city_name
+    FROM stations s
+    LEFT JOIN cities c ON s.city_id = c.id
+    WHERE LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
+        AND s.active = true
+    ORDER BY s.name
+    """
+    
+    # PM2.5 readings with complete time series using recursive CTE
+    hours_back = days_back * 24
+    readings_query = f"""
+    WITH RECURSIVE hour_series AS (
+        SELECT 
+            date_trunc('hour', NOW() - INTERVAL '{hours_back} hours') + INTERVAL '1 hour' AS hour_utc
+        UNION ALL
+        SELECT 
+            hour_utc + INTERVAL '1 hour'
+        FROM hour_series
+        WHERE hour_utc < date_trunc('hour', NOW())
+    )
     SELECT 
-        r.scope_key as station_id,
-        COALESCE(s.name, 'Unknown Station') as station_name,
-        COALESCE(s.lat, 0) as latitude,
-        COALESCE(s.lon, 0) as longitude,
-        COALESCE(c.name, 'Unknown City') as city_name,
-        r.ts_utc as timestamp_utc,
+        :station_id as station_id,
+        hs.hour_utc as timestamp_utc,
         r.pm25,
         r.qc_state,
-        r.source,
-        r.units_pm25
-    FROM readings r
-    LEFT JOIN stations s ON r.scope_key = s.station_id
-    LEFT JOIN cities c ON s.city_id = c.id
-    WHERE r.scope_type = 'station'
-        AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
-        AND r.pm25 IS NOT NULL
-        AND s.active = true
-        {date_filter}
-    ORDER BY r.scope_key, r.ts_utc ASC
-    LIMIT 50000
+        r.source
+    FROM hour_series hs
+    LEFT JOIN readings r ON (
+        date_trunc('hour', r.ts_utc) = hs.hour_utc
+        AND r.scope_key = :station_id 
+        AND r.scope_type = 'station'
+    )
+    ORDER BY hs.hour_utc ASC
     """
     
     try:
-        result = await db.execute(text(query), {'city_name': city})
+        # Get stations in the city
+        stations_result = await db.execute(text(stations_query), {'city_name': city})
+        stations = stations_result.fetchall()
         
-        # Check if any results were found
-        rows = result.fetchall()
-        if not rows:
+        if not stations:
             raise HTTPException(
                 status_code=404, 
-                detail=f"No PM2.5 station data found for city '{city}' in the specified time period"
+                detail=f"No stations found for city '{city}'"
             )
         
-        # Create station_id to numeric_id mapping like dashboard API does
-        unique_stations = {}
-        for row in rows:
-            if row.station_id not in unique_stations:
-                unique_stations[row.station_id] = {
-                    'name': row.station_name,
-                    'station_id': row.station_id
-                }
-        
-        # Sort stations by name and assign numeric IDs
-        sorted_stations = sorted(unique_stations.items(), key=lambda x: x[1]['name'])
+        # Create station_id to numeric_id mapping
         station_id_map = {}
-        for i, (station_id, station_info) in enumerate(sorted_stations):
-            station_id_map[station_id] = i + 1  # 1-based indexing like dashboard
+        station_info = {}
+        for i, station in enumerate(stations):
+            station_id_map[station.station_id] = i + 1  # 1-based indexing like dashboard
+            station_info[station.station_id] = {
+                'name': station.name,
+                'lat': station.lat,
+                'lon': station.lon,
+                'city_name': station.city_name
+            }
+        
+        # Get all readings data for all stations
+        all_readings = []
+        for station in stations:
+            readings_result = await db.execute(text(readings_query), {'station_id': station.station_id})
+            readings = readings_result.fetchall()
+            
+            numeric_id = station_id_map[station.station_id]
+            info = station_info[station.station_id]
+            
+            for reading in readings:
+                all_readings.append({
+                    'numeric_id': numeric_id,
+                    'name': info['name'],
+                    'lat': info['lat'],
+                    'lon': info['lon'],
+                    'city_name': info['city_name'],
+                    'timestamp_utc': reading.timestamp_utc,
+                    'pm25': reading.pm25,
+                    'qc_state': reading.qc_state,
+                    'source': reading.source
+                })
         
         # Create CSV content generator
         def generate_csv():
             output = io.StringIO()
             writer = csv.writer(output)
             
-            # Write minimal header focused only on PM2.5
+            # Write minimal header focused only on PM2.5 (removed pm25_units)
             header = [
                 'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'timestamp_utc', 'pm25_ugm3', 
-                'qc_state', 'source', 'pm25_units'
+                'qc_state', 'source'
             ]
             writer.writerow(header)
             yield output.getvalue()
             output.seek(0)
             output.truncate(0)
             
-            # Write data rows with numeric station IDs
-            for row in rows:
-                numeric_id = station_id_map.get(row.station_id, 0)
+            # Write data rows with complete time series (including nulls)
+            for reading_data in all_readings:
                 data_row = [
-                    numeric_id,  # Use numeric ID instead of hex station_id
-                    row.station_name or '',
-                    row.latitude or '',
-                    row.longitude or '',
-                    row.city_name or '',
-                    row.timestamp_utc.isoformat() if row.timestamp_utc else '',
-                    row.pm25 or '',
-                    row.qc_state or '',
-                    row.source or '',
-                    row.units_pm25 or ''
+                    reading_data['numeric_id'],
+                    reading_data['name'] or '',
+                    reading_data['lat'] or '',
+                    reading_data['lon'] or '',
+                    reading_data['city_name'] or '',
+                    reading_data['timestamp_utc'].isoformat() if reading_data['timestamp_utc'] else '',
+                    float(reading_data['pm25']) if reading_data['pm25'] is not None else '',
+                    reading_data['qc_state'] or '',
+                    reading_data['source'] or ''
                 ]
                 writer.writerow(data_row)
                 yield output.getvalue()
