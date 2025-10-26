@@ -51,10 +51,20 @@ class TwitterAutomationService:
         last_error = None
         headers = {"User-Agent": "HawanamaAQI/1.0"}
         
+        # Pre-warm the service with a health check to avoid cold start issues
+        try:
+            logger.info("Pre-warming service with health check...")
+            with httpx.Client(timeout=30.0, headers=headers) as client:
+                health_url = HAWANAMA_API_URL.replace("/api/v1/cities/Lahore/top10-pm25", "/api/v1/health/")
+                client.get(health_url)
+                logger.info("Service pre-warmed successfully")
+        except Exception as e:
+            logger.warning(f"Pre-warm health check failed (continuing anyway): {e}")
+        
         for attempt in range(1, max_retries + 1):
             try:
                 logger.info(f"Fetching Lahore data (attempt {attempt}/{max_retries})")
-                with httpx.Client(timeout=45.0, headers=headers) as client:  # Increased timeout
+                with httpx.Client(timeout=120.0, headers=headers) as client:  # Much longer timeout for Cloud Run
                     response = client.get(HAWANAMA_API_URL)
                     response.raise_for_status()
                     data = response.json()
