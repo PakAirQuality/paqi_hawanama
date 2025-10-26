@@ -8,14 +8,13 @@ from datetime import datetime
 from typing import List, Dict, Optional
 from zoneinfo import ZoneInfo
 
-import httpx
 import tweepy
 from app.core.config import settings
+from app.core.database import get_database
 
 logger = logging.getLogger(__name__)
 
 # Constants
-HAWANAMA_API_URL = "https://hawanama-152782825429.asia-south1.run.app/api/v1/cities/Lahore/top10-pm25"
 TZ = ZoneInfo("Asia/Karachi")  # Lahore local time
 
 
@@ -46,40 +45,39 @@ class TwitterAutomationService:
             wait_on_rate_limit=True,
         )
         
-    def fetch_lahore_data(self, max_retries: int = 3) -> Dict:
-        """Fetch top 10 PM2.5 stations data from Hawanama API with retry logic."""
-        last_error = None
-        headers = {"User-Agent": "HawanamaAQI/1.0"}
-        
-        # Pre-warm the service with a health check to avoid cold start issues
+    async def fetch_lahore_data(self) -> Dict:
+        """Fetch top 10 PM2.5 stations data by calling the function directly (no HTTP)."""
         try:
-            logger.info("Pre-warming service with health check...")
-            with httpx.Client(timeout=30.0, headers=headers) as client:
-                health_url = HAWANAMA_API_URL.replace("/api/v1/cities/Lahore/top10-pm25", "/api/v1/health/")
-                client.get(health_url)
-                logger.info("Service pre-warmed successfully")
+            logger.info("Fetching Lahore data directly from database...")
+            
+            # Import the function we need
+            from app.routers.current import city_top10_pm25
+            
+            # Get database session
+            async for db in get_database():
+                # Call the function directly instead of HTTP request
+                result = await city_top10_pm25(city="Lahore", db=db)
+                
+                # Convert Pydantic model to dict
+                data = {
+                    "city": result.city,
+                    "top_stations": [
+                        {
+                            "station_id": station.station_id,
+                            "station_name": station.station_name,
+                            "pm25_concentration": station.pm25_concentration
+                        }
+                        for station in result.top_stations
+                    ],
+                    "total_stations": result.total_stations
+                }
+                
+                logger.info(f"Successfully fetched data for {len(data['top_stations'])} stations")
+                return data
+                
         except Exception as e:
-            logger.warning(f"Pre-warm health check failed (continuing anyway): {e}")
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                logger.info(f"Fetching Lahore data (attempt {attempt}/{max_retries})")
-                with httpx.Client(timeout=120.0, headers=headers) as client:  # Much longer timeout for Cloud Run
-                    response = client.get(HAWANAMA_API_URL)
-                    response.raise_for_status()
-                    data = response.json()
-                    logger.info(f"Successfully fetched data for {len(data.get('top_stations', []))} stations")
-                    return data
-            except Exception as e:
-                last_error = e
-                logger.warning(f"Data fetch attempt {attempt} failed: {e}")
-                if attempt < max_retries:
-                    import time
-                    time.sleep(1 * attempt)  # Brief backoff
-                    continue
-        
-        logger.error(f"Failed to fetch Lahore data after {max_retries} attempts: {last_error}")
-        raise RuntimeError(f"Data fetch failed after {max_retries} attempts: {last_error}")
+            logger.error(f"Failed to fetch Lahore data directly: {e}")
+            raise RuntimeError(f"Direct data fetch failed: {e}")
     
     def normalize_station_data(self, data: Dict) -> List[Dict]:
         """Normalize and clean station data."""
@@ -186,7 +184,7 @@ class TwitterAutomationService:
             logger.info("Starting Lahore PM2.5 Twitter automation")
             
             # Fetch and process data
-            raw_data = self.fetch_lahore_data()
+            raw_data = await self.fetch_lahore_data()
             stations = self.normalize_station_data(raw_data)
             
             if not stations:
