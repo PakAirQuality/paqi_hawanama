@@ -46,17 +46,30 @@ class TwitterAutomationService:
             wait_on_rate_limit=True,
         )
         
-    def fetch_lahore_data(self) -> Dict:
-        """Fetch top 10 PM2.5 stations data from Hawanama API."""
-        try:
-            headers = {"User-Agent": "HawanamaAQI/1.0"}
-            with httpx.Client(timeout=30.0, headers=headers) as client:
-                response = client.get(HAWANAMA_API_URL)
-                response.raise_for_status()
-                return response.json()
-        except Exception as e:
-            logger.error(f"Error fetching data from API: {e}")
-            raise
+    def fetch_lahore_data(self, max_retries: int = 3) -> Dict:
+        """Fetch top 10 PM2.5 stations data from Hawanama API with retry logic."""
+        last_error = None
+        headers = {"User-Agent": "HawanamaAQI/1.0"}
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"Fetching Lahore data (attempt {attempt}/{max_retries})")
+                with httpx.Client(timeout=45.0, headers=headers) as client:  # Increased timeout
+                    response = client.get(HAWANAMA_API_URL)
+                    response.raise_for_status()
+                    data = response.json()
+                    logger.info(f"Successfully fetched data for {len(data.get('top_stations', []))} stations")
+                    return data
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Data fetch attempt {attempt} failed: {e}")
+                if attempt < max_retries:
+                    import time
+                    time.sleep(1 * attempt)  # Brief backoff
+                    continue
+        
+        logger.error(f"Failed to fetch Lahore data after {max_retries} attempts: {last_error}")
+        raise RuntimeError(f"Data fetch failed after {max_retries} attempts: {last_error}")
     
     def normalize_station_data(self, data: Dict) -> List[Dict]:
         """Normalize and clean station data."""
@@ -113,19 +126,37 @@ class TwitterAutomationService:
             
         return tweet
     
-    def post_tweet(self, text: str) -> str:
-        """Post tweet and return tweet ID."""
+    def post_tweet(self, text: str, max_retries: int = 3) -> str:
+        """Post tweet and return tweet ID with timeout handling."""
         if not self.client:
             raise RuntimeError("Twitter client not initialized")
         
-        try:
-            response = self.client.create_tweet(text=text)
-            tweet_id = str(response.data["id"])
-            logger.info(f"Tweet posted successfully. ID: {tweet_id}")
-            return tweet_id
-        except tweepy.TweepyException as e:
-            logger.error(f"Failed to post tweet: {e}")
-            raise
+        last_error = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                logger.info(f"Attempting to post tweet (attempt {attempt}/{max_retries})")
+                # Set a longer timeout for the HTTP client used by tweepy
+                response = self.client.create_tweet(text=text)
+                tweet_id = str(response.data["id"])
+                logger.info(f"Tweet posted successfully. ID: {tweet_id}")
+                return tweet_id
+            except tweepy.TweepyException as e:
+                last_error = e
+                logger.warning(f"Tweet attempt {attempt} failed: {e}")
+                if attempt < max_retries:
+                    import time
+                    time.sleep(2 * attempt)  # Exponential backoff
+                    continue
+            except Exception as e:
+                last_error = e
+                logger.warning(f"Unexpected error on attempt {attempt}: {e}")
+                if attempt < max_retries:
+                    import time
+                    time.sleep(2 * attempt)
+                    continue
+        
+        logger.error(f"Failed to post tweet after {max_retries} attempts: {last_error}")
+        raise RuntimeError(f"Tweet failed after {max_retries} attempts: {last_error}")
     
     def content_hash(self, text: str) -> str:
         """Generate hash of tweet content for deduplication."""
