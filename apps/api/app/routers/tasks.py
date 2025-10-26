@@ -6,18 +6,10 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 from app.core.security import verify_twitter_endpoint_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Rate limiter for sensitive endpoints
-limiter = Limiter(key_func=get_remote_address)
-router.state.limiter = limiter
-router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Setup worker compatibility layer BEFORE importing worker tasks
 try:
@@ -171,7 +163,6 @@ async def run_full_pipeline():
 
 
 @router.post("/tasks/twitter-lahore-pm25")
-@limiter.limit("5/hour")  # Allow max 5 calls per hour to prevent abuse
 async def run_twitter_lahore_pm25(
     request: Request,
     _: bool = Depends(verify_twitter_endpoint_access)
