@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     IQAIR_API_KEY: Optional[str] = None
     OPENAQ_API_KEY: Optional[str] = None
     
+    # Twitter API Keys (matching existing .env file naming)
+    Bearer_token_twitter: Optional[str] = None
+    API_Key_twitter: Optional[str] = None
+    API_Key_Secret_twitter: Optional[str] = None
+    Access_Token_twitter: Optional[str] = None
+    Access_Token_Secret_twitter: Optional[str] = None
+    
+    # Security
+    TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
+    
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     

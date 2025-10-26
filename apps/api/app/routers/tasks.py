@@ -4,11 +4,20 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 """
 
 import logging
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from app.core.security import verify_twitter_endpoint_access
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+# Rate limiter for sensitive endpoints
+limiter = Limiter(key_func=get_remote_address)
+router.state.limiter = limiter
+router.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Setup worker compatibility layer BEFORE importing worker tasks
 try:
@@ -161,6 +170,50 @@ async def run_full_pipeline():
         )
 
 
+@router.post("/tasks/twitter-lahore-pm25")
+@limiter.limit("5/hour")  # Allow max 5 calls per hour to prevent abuse
+async def run_twitter_lahore_pm25(
+    request: Request,
+    _: bool = Depends(verify_twitter_endpoint_access)
+):
+    """
+    Trigger Twitter post for Lahore top 10 PM2.5 stations.
+    Posts current air quality data to Twitter.
+    """
+    try:
+        logger.info("Starting Twitter automation for Lahore PM2.5 via API endpoint")
+        from app.services.twitter_automation import TwitterAutomationService  # lazy import
+        
+        twitter_service = TwitterAutomationService()
+        result = await twitter_service.post_lahore_pm25_update(dry_run=False)
+        
+        if result["status"] == "success":
+            logger.info("Twitter automation completed successfully: %s", result)
+            return {
+                "status": "success",
+                "message": "Twitter post completed",
+                "details": result
+            }
+        else:
+            logger.warning("Twitter automation completed with status %s: %s", result["status"], result)
+            return {
+                "status": result["status"],
+                "message": result["message"],
+                "details": result
+            }
+            
+    except Exception as e:
+        error_msg = str(e) if str(e) else "Unknown error - no exception message"
+        logger.error("Twitter automation failed: %s", error_msg)
+        import traceback
+        logger.error("Twitter automation traceback: %s", traceback.format_exc())
+        
+        raise HTTPException(
+            status_code=500,
+            detail=f"Twitter automation failed: {error_msg}"
+        )
+
+
 @router.get("/tasks/status")
 async def get_task_status():
     """
@@ -190,6 +243,7 @@ async def get_task_status():
                 "POST /tasks/ingest-stations", 
                 "POST /tasks/ingest-cities",
                 "POST /tasks/full-pipeline",
+                "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
             ],
             "manifest_status": {

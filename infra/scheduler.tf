@@ -139,6 +139,88 @@ resource "google_cloud_scheduler_job" "city_ingestion" {
   }
 }
 
+# Twitter automation - Lahore PM2.5 updates at 11am, 5pm, 11pm PKT
+resource "google_cloud_scheduler_job" "twitter_lahore_11am" {
+  name        = "twitter-lahore-11am"
+  description = "Tweet Lahore PM2.5 at 11:00 AM PKT (6:00 AM UTC)"
+  schedule    = "0 6 * * *"  # 6:00 AM UTC = 11:00 AM PKT
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/twitter-lahore-pm25"
+    
+    headers = {
+      "Content-Type" = "application/json"
+    }
+    
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "1800s"  # 30 minutes max retry duration
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
+resource "google_cloud_scheduler_job" "twitter_lahore_5pm" {
+  name        = "twitter-lahore-5pm"
+  description = "Tweet Lahore PM2.5 at 5:00 PM PKT (12:00 PM UTC)"
+  schedule    = "0 12 * * *"  # 12:00 PM UTC = 5:00 PM PKT
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/twitter-lahore-pm25"
+    
+    headers = {
+      "Content-Type" = "application/json"
+    }
+    
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "1800s"  # 30 minutes max retry duration
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
+resource "google_cloud_scheduler_job" "twitter_lahore_11pm" {
+  name        = "twitter-lahore-11pm"
+  description = "Tweet Lahore PM2.5 at 11:00 PM PKT (6:00 PM UTC)"
+  schedule    = "0 18 * * *"  # 6:00 PM UTC = 11:00 PM PKT
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/twitter-lahore-pm25"
+    
+    headers = {
+      "Content-Type" = "application/json"
+    }
+    
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "1800s"  # 30 minutes max retry duration
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
 # Optional: Emergency full pipeline job (manual trigger via gcloud)
 resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
   name        = "full-pipeline-emergency"
