@@ -10,7 +10,6 @@ from zoneinfo import ZoneInfo
 
 import tweepy
 from app.core.config import settings
-from app.core.database import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -46,91 +45,89 @@ class TwitterAutomationService:
         )
         
     async def fetch_lahore_data(self) -> Dict:
-        """Fetch top 10 PM2.5 stations data by calling the function directly (no HTTP)."""
+        """Fetch Lahore city average air quality data by calling the function directly (no HTTP)."""
         try:
-            logger.info("Fetching Lahore data directly from database...")
+            logger.info("Fetching Lahore city average data directly from database...")
             
             # Import the function we need
-            from app.routers.current import city_top10_pm25
+            from app.routers.current import city_average
             
-            # Get database session
-            async for db in get_database():
-                # Call the function directly instead of HTTP request
-                result = await city_top10_pm25(city="Lahore", db=db)
-                
-                # Convert Pydantic model to dict
-                data = {
-                    "city": result.city,
-                    "top_stations": [
-                        {
-                            "station_id": station.station_id,
-                            "station_name": station.station_name,
-                            "pm25_concentration": station.pm25_concentration
-                        }
-                        for station in result.top_stations
-                    ],
-                    "total_stations": result.total_stations
-                }
-                
-                logger.info(f"Successfully fetched data for {len(data['top_stations'])} stations")
-                return data
+            # Call the function directly - it handles its own database session
+            result = await city_average(city="Lahore")
+            
+            # Convert Pydantic model to dict
+            data = {
+                "city": result.city,
+                "avg_pm25_concentration": result.avg_pm25_concentration,
+                "aqi": result.aqi,
+                "health_message": result.health_message,
+                "total_stations": result.total_stations
+            }
+            
+            logger.info(f"Successfully fetched city average data for {data['city']}: PM2.5={data['avg_pm25_concentration']}, AQI={data['aqi']}")
+            return data
                 
         except Exception as e:
-            logger.error(f"Failed to fetch Lahore data directly: {e}")
+            logger.error(f"Failed to fetch Lahore city average data directly: {e}")
             raise RuntimeError(f"Direct data fetch failed: {e}")
     
-    def normalize_station_data(self, data: Dict) -> List[Dict]:
-        """Normalize and clean station data."""
-        top_stations = data.get("top_stations", [])
-        if not isinstance(top_stations, list):
-            raise ValueError("API response missing 'top_stations' list")
+    def normalize_city_data(self, data: Dict) -> Dict:
+        """Normalize and validate city average data."""
+        if not isinstance(data, dict):
+            raise ValueError("API response must be a dictionary")
         
-        cleaned = []
-        for station in top_stations:
-            name = str(station.get("station_name", "—")).strip()
-            try:
-                pm25 = float(station.get("pm25_concentration", float("nan")))
-            except Exception:
-                pm25 = float("nan")
+        required_fields = ["city", "avg_pm25_concentration", "aqi", "health_message"]
+        for field in required_fields:
+            if field not in data:
+                raise ValueError(f"API response missing required field: {field}")
+        
+        try:
+            pm25 = float(data["avg_pm25_concentration"])
+            aqi = int(data["aqi"]) if data["aqi"] is not None else None
             
-            if name and pm25 == pm25:  # exclude NaN
-                cleaned.append({
-                    "station_name": name,
-                    "pm25_concentration": pm25
-                })
+            if pm25 != pm25:  # Check for NaN
+                raise ValueError("PM2.5 concentration is NaN")
+                
+        except (ValueError, TypeError) as e:
+            raise ValueError(f"Invalid PM2.5 or AQI data: {e}")
         
-        # Sort by PM2.5 concentration descending and keep top 10
-        cleaned.sort(key=lambda x: x["pm25_concentration"], reverse=True)
-        return cleaned[:10]
+        return {
+            "city": str(data["city"]).strip(),
+            "avg_pm25_concentration": pm25,
+            "aqi": aqi,
+            "health_message": str(data["health_message"]).strip(),
+            "total_stations": data.get("total_stations", 0)
+        }
     
-    def build_tweet_text(self, stations: List[Dict]) -> str:
-        """Build Twitter post text from station data."""
-        timestamp = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
-        header = f"Lahore PM2.5 • Top 10 (last 24h) • {timestamp}\n"
+    def build_tweet_text(self, city_data: Dict) -> str:
+        """
+        Build Twitter post text from city average data.
+        Format: 29-07-2025 15:00; PM2.5 conc. 38.1 μg/m³; 107 Air Quality Index (AQI); Unhealthy for #Sensitive Groups
+        """
+        timestamp = datetime.now(TZ).strftime("%d-%m-%Y %H:%M")
+        pm25 = city_data["avg_pm25_concentration"]
+        aqi = city_data["aqi"]
+        health_message = city_data["health_message"]
         
-        lines = []
-        for i, station in enumerate(stations, 1):
-            name = station["station_name"]
-            if len(name) > 22:
-                name = name[:19] + "..."
-            pm25 = station["pm25_concentration"]
-            lines.append(f"{i}) {name}: {pm25:.1f} µg/m³")
+        # Clean health message - remove emojis but keep hashtags
+        import re
+        # Remove emoji characters but keep text and hashtags
+        health_clean = re.sub(r'[^\w\s#]', '', health_message).strip()
+        # Clean up extra spaces
+        health_clean = re.sub(r'\s+', ' ', health_clean)
         
-        body = "\n".join(lines)
-        tail = "\n#AirQuality #PM25 #Lahore"
-        tweet = header + body + tail
+        tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_clean}"
         
         # Ensure within 280 character limit
         if len(tweet) > 280:
-            tweet = header + body  # Remove hashtags first
-        
-        while len(tweet) > 280 and lines:
-            lines.pop()  # Remove entries until it fits
-            body = "\n".join(lines)
-            tweet = header + body
-        
-        if len(tweet) > 280:
-            tweet = tweet[:279]  # Hard cap fallback
+            # Truncate health message if needed
+            max_health_len = 280 - len(f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); ")
+            if max_health_len > 0:
+                health_clean = health_clean[:max_health_len-3] + "..."
+                tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_clean}"
+            else:
+                # Fallback if even basic info is too long
+                tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} AQI"
             
         return tweet
     
@@ -172,7 +169,7 @@ class TwitterAutomationService:
     
     async def post_lahore_pm25_update(self, dry_run: bool = False) -> Dict:
         """
-        Main method to fetch data and post Twitter update.
+        Main method to fetch city average data and post Twitter update.
         
         Args:
             dry_run: If True, don't actually post to Twitter
@@ -181,21 +178,21 @@ class TwitterAutomationService:
             Dict with status and details
         """
         try:
-            logger.info("Starting Lahore PM2.5 Twitter automation")
+            logger.info("Starting Lahore city average Twitter automation")
             
             # Fetch and process data
             raw_data = await self.fetch_lahore_data()
-            stations = self.normalize_station_data(raw_data)
+            city_data = self.normalize_city_data(raw_data)
             
-            if not stations:
+            if not city_data or city_data["avg_pm25_concentration"] is None:
                 return {
                     "status": "skipped",
-                    "message": "No valid station data to post",
+                    "message": "No valid city average data to post",
                     "tweet_id": None
                 }
             
             # Build tweet
-            tweet_text = self.build_tweet_text(stations)
+            tweet_text = self.build_tweet_text(city_data)
             tweet_hash = self.content_hash(tweet_text)
             
             logger.info(f"Generated tweet ({len(tweet_text)} chars): {tweet_text}")
@@ -206,7 +203,7 @@ class TwitterAutomationService:
                     "message": "Dry run - tweet not posted",
                     "tweet_text": tweet_text,
                     "tweet_hash": tweet_hash,
-                    "stations_count": len(stations)
+                    "city_data": city_data
                 }
             
             # Post to Twitter
@@ -218,7 +215,7 @@ class TwitterAutomationService:
                 "tweet_id": tweet_id,
                 "tweet_text": tweet_text,
                 "tweet_hash": tweet_hash,
-                "stations_count": len(stations)
+                "city_data": city_data
             }
             
         except Exception as e:
