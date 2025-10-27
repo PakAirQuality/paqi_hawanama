@@ -8,8 +8,9 @@ from urllib.parse import unquote
 from fastapi import APIRouter, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
 
-from app.models.current import CurrentOut, CityStationsResponse, CityTop10PM25Response
+from app.models.current import CurrentOut, CityStationsResponse, CityTop10PM25Response, CityAverageResponse
 from app.services.airvisual_current import get_current_service
+from app.utils.normalization import pm25_to_aqi
 
 logger = logging.getLogger(__name__)
 
@@ -398,6 +399,128 @@ async def station_current(
     
     except Exception as e:
         logger.error(f"Unexpected error in station_current: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@router.get(
+    "/cities/{city}/average",
+    response_model=CityAverageResponse,
+    summary="Get average air quality for a city",
+    description="Calculate average PM2.5 concentration across all stations in a city and convert to AQI"
+)
+async def city_average(
+    city: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="Lahore",
+        enum=[
+            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
+            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
+            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
+            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
+            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
+            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
+            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
+            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
+            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
+        ]
+    )
+):
+    """
+    Calculate average PM2.5 concentration for all stations in a city and convert to AQI.
+    
+    - **city**: City name (required, URL encoded)
+    
+    Returns city-wide average air quality including:
+    - Average PM2.5 concentration across all active stations (µg/m³)
+    - AQI calculated from the average PM2.5 (US EPA 2024 scale)
+    - Total number of active stations used in calculation
+    
+    **Methodology:**
+    - Averages PM2.5 concentrations from all stations with recent data (last 24 hours)
+    - Converts average PM2.5 to AQI using EPA 2024 breakpoints
+    - Uses proper EPA truncation and rounding procedures
+    
+    **Use Cases:**
+    - City-wide air quality overview
+    - Regional air quality comparisons
+    - Public health assessments at city level
+    - Environmental policy monitoring
+    
+    **Error responses:**
+    - `400`: Invalid parameters  
+    - `404`: City not found or no stations with current data
+    - `500`: Internal server error
+    """
+    try:
+        # URL decode path parameter
+        city = unquote(city)
+        
+        # Validate non-empty parameter
+        if not city.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="City path parameter must be non-empty"
+            )
+        
+        # Import database dependencies here to avoid circular imports
+        from app.core.database import get_database
+        from sqlalchemy import text
+        
+        # Get database session
+        async for db in get_database():
+            # Query to get all PM2.5 readings for stations in the city
+            query = text("""
+                SELECT 
+                    r.pm25
+                FROM stations s
+                JOIN cities c ON s.city_id = c.id
+                JOIN LATERAL (
+                    SELECT pm25
+                    FROM readings r_sub
+                    WHERE r_sub.scope_key = s.station_id
+                    AND r_sub.ts_utc >= NOW() - INTERVAL '24 hours'
+                    ORDER BY r_sub.ts_utc DESC
+                    LIMIT 1
+                ) r ON true
+                WHERE LOWER(c.name) = LOWER(:city_name)
+                AND r.pm25 IS NOT NULL
+            """)
+            
+            result = await db.execute(query, {'city_name': city})
+            pm25_readings = result.fetchall()
+            
+            if not pm25_readings:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="City not found or no stations with current PM2.5 data"
+                )
+            
+            # Calculate average PM2.5
+            pm25_values = [float(row.pm25) for row in pm25_readings]
+            avg_pm25 = sum(pm25_values) / len(pm25_values)
+            
+            # Convert average PM2.5 to AQI using the corrected 2024 EPA formula
+            aqi_value = pm25_to_aqi(avg_pm25)
+            
+            return CityAverageResponse(
+                city=city,
+                avg_pm25_concentration=round(avg_pm25, 1),
+                aqi=aqi_value,
+                total_stations=len(pm25_readings)
+            )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in city_average: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error"

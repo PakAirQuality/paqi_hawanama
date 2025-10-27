@@ -3,6 +3,7 @@ Data normalization utilities for air quality data
 """
 
 import logging
+import math
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, Literal
 import zoneinfo
@@ -10,6 +11,44 @@ import zoneinfo
 from app.schemas.nearest import CurrentOut
 
 logger = logging.getLogger(__name__)
+
+
+def pm25_to_aqi(pm25: float, *, cap_at_500: bool = True) -> Optional[int]:
+    """
+    Convert PM2.5 (µg/m³) to US EPA AQI using 2024 breakpoints.
+    - Truncates PM2.5 to 1 decimal.
+    - Rounds AQI to nearest integer.
+    - If cap_at_500=True, caps at 500; otherwise allows AQI > 500 per EPA.
+    """
+    if pm25 is None or math.isnan(pm25):
+        return None
+    if pm25 < 0:
+        return 0
+
+    # EPA truncation (not rounding) to 1 decimal place
+    C = math.floor(pm25 * 10) / 10.0
+
+    # 2024 PM2.5 breakpoints: (C_lo, C_hi, I_lo, I_hi)
+    bps = [
+        (0.0,   9.0,    0,   50),
+        (9.1,  35.4,   51,  100),
+        (35.5, 55.4,  101,  150),
+        (55.5,125.4,  151,  200),
+        (125.5,225.4, 201,  300),
+        (225.5,325.4, 301,  500),  # top segment up to AQI 500
+    ]
+
+    for C_lo, C_hi, I_lo, I_hi in bps:
+        if C_lo <= C <= C_hi:
+            I = (I_hi - I_lo) / (C_hi - C_lo) * (C - C_lo) + I_lo
+            I = int(round(I))
+            return min(I, 500) if cap_at_500 else I
+
+    # C > 325.4: extend the last segment (allows AQI > 500 if not capped)
+    C_lo, C_hi, I_lo, I_hi = bps[-1]
+    I = (I_hi - I_lo) / (C_hi - C_lo) * (C - C_lo) + I_lo
+    I = int(round(I))
+    return min(I, 500) if cap_at_500 else I
 
 
 def to_local(ts_utc: datetime, tz_str: str) -> datetime:

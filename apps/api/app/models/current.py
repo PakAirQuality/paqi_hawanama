@@ -200,3 +200,21 @@ class CityTop10PM25Response(BaseModel):
                 "total_stations": 47
             }
         }
+
+
+class CityAverageResponse(BaseModel):
+    """Response for city average air quality data"""
+    city: str = Field(..., description="City name")
+    avg_pm25_concentration: Optional[float] = Field(None, description="Average PM2.5 concentration in µg/m³")
+    aqi: Optional[int] = Field(None, description="Air Quality Index calculated from average PM2.5 (US EPA)")
+    total_stations: int = Field(..., description="Total number of active stations used in calculation")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "city": "Lahore",
+                "avg_pm25_concentration": 89.4,
+                "aqi": 162,
+                "total_stations": 47
+            }
+        }
