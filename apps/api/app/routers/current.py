@@ -10,7 +10,7 @@ from fastapi.responses import JSONResponse
 
 from app.models.current import CurrentOut, CityStationsResponse, CityTop10PM25Response, CityAverageResponse
 from app.services.airvisual_current import get_current_service
-from app.utils.normalization import pm25_to_aqi
+from app.utils.normalization import pm25_to_aqi, get_aqi_label
 
 logger = logging.getLogger(__name__)
 
@@ -506,10 +506,14 @@ async def city_average(
             # Convert average PM2.5 to AQI using the corrected 2024 EPA formula
             aqi_value = pm25_to_aqi(avg_pm25)
             
+            # Get health message based on AQI
+            health_message = get_aqi_label(aqi_value)
+            
             return CityAverageResponse(
                 city=city,
                 avg_pm25_concentration=round(avg_pm25, 1),
                 aqi=aqi_value,
+                health_message=health_message,
                 total_stations=len(pm25_readings)
             )
         

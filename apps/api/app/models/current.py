@@ -207,6 +207,7 @@ class CityAverageResponse(BaseModel):
     city: str = Field(..., description="City name")
     avg_pm25_concentration: Optional[float] = Field(None, description="Average PM2.5 concentration in µg/m³")
     aqi: Optional[int] = Field(None, description="Air Quality Index calculated from average PM2.5 (US EPA)")
+    health_message: str = Field(..., description="Public health message with emoji based on AQI level")
     total_stations: int = Field(..., description="Total number of active stations used in calculation")
     
     class Config:
@@ -215,6 +216,7 @@ class CityAverageResponse(BaseModel):
                 "city": "Lahore",
                 "avg_pm25_concentration": 89.4,
                 "aqi": 162,
+                "health_message": "🔴 #Unhealthy",
                 "total_stations": 47
             }
         }

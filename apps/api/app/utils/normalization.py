@@ -51,6 +51,37 @@ def pm25_to_aqi(pm25: float, *, cap_at_500: bool = True) -> Optional[int]:
     return min(I, 500) if cap_at_500 else I
 
 
+def get_aqi_label(aqi: Optional[int]) -> str:
+    """
+    Get AQI label with emoji and hashtags based on AQI value.
+    
+    Args:
+        aqi: Air Quality Index value
+        
+    Returns:
+        AQI label string with emoji and hashtags
+    """
+    if aqi is None or not isinstance(aqi, int) or aqi < 0:
+        return "⚠️ AQI unavailable"
+    
+    if aqi > 800:
+        return "Beyond Index #Airpocalypse 🤯🤯🤯"
+    elif aqi > 500:
+        return "Beyond Index"
+    elif aqi > 300:
+        return "🟤 #Hazardous 😱"
+    elif aqi > 200:
+        return "🟣 Very #Unhealthy 😰"
+    elif aqi > 150:
+        return "🔴 #Unhealthy"
+    elif aqi > 100:
+        return "🟠 Unhealthy for #SensitiveGroups"
+    elif aqi > 50:
+        return "🟡 #Moderate"
+    else:
+        return "🟢 #Good ❤️"
+
+
 def to_local(ts_utc: datetime, tz_str: str) -> datetime:
     """
     Convert UTC timestamp to local time using timezone string
