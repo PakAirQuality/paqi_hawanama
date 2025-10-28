@@ -164,13 +164,15 @@ class HighestPM25Station(BaseModel):
     station_id: str = Field(..., description="Station identifier")
     station_name: str = Field(..., description="Station name")
     pm25_concentration: float = Field(..., description="PM2.5 concentration in µg/m³")
+    aqi: Optional[int] = Field(None, description="Air Quality Index (US EPA)")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "station_id": "c2af7d6fe582309c",
                 "station_name": "Badian Rd LHE",
-                "pm25_concentration": 265.0
+                "pm25_concentration": 265.0,
+                "aqi": 315
             }
         }
 
