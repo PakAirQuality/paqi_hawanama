@@ -144,7 +144,7 @@ async def city_average_history(
                 FROM readings r
                 JOIN city_stations cs ON cs.station_id = r.scope_key
                 WHERE r.scope_type = 'station'
-                  AND r.ts_utc >= date_trunc('hour', NOW() - make_interval(hours => :hours))
+                  AND r.ts_utc >= NOW() - make_interval(hours => :hours)
                 ORDER BY date_trunc('hour', r.ts_utc), r.scope_key, r.ts_utc DESC
             ),
             city_hourly AS (
