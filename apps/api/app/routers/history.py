@@ -89,6 +89,9 @@ async def station_history(
         logger.error(f"Error getting station PM2.5 history for station {station_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
+
+############## CITY AVERAGES API ############## 
+
 @router.get(
     "/cities/{city}/average/history",
     summary="Hourly city-average AQI & PM2.5 history",
@@ -118,14 +121,17 @@ async def city_average_history(
         raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
 
     try:
-        # 1) Build the hour series
-        # 2) For each station & hour, pick ONE value (latest within that hour)
-        # 3) Average those per-hour station values across stations (equal weight)
         history_result = await db.execute(text("""
-            WITH hour_series AS (
+            WITH bounds AS (
+                SELECT
+                    date_trunc('hour', NOW())                            AS cur_hour,
+                    date_trunc('hour', NOW()) - make_interval(hours => :hours) AS min_hour,
+                    date_trunc('hour', NOW()) + INTERVAL '1 hour'        AS max_hour_excl
+            ),
+            hour_series AS (
                 SELECT generate_series(
-                    date_trunc('hour', NOW() - make_interval(hours => :hours)),
-                    date_trunc('hour', NOW()),
+                    (SELECT min_hour FROM bounds),
+                    (SELECT cur_hour  FROM bounds),
                     INTERVAL '1 hour'
                 ) AS hour_utc
             ),
@@ -136,21 +142,23 @@ async def city_average_history(
                 WHERE LOWER(c.name) = LOWER(:city_name)
             ),
             station_hourly AS (
-                -- pick ONE reading per station per hour (latest within hour)
+                -- one reading per station per hour (latest within that hour)
                 SELECT DISTINCT ON (date_trunc('hour', r.ts_utc), r.scope_key)
                     date_trunc('hour', r.ts_utc) AS hour_utc,
                     r.scope_key                  AS station_id,
                     r.pm25                       AS pm25_station_hour
                 FROM readings r
                 JOIN city_stations cs ON cs.station_id = r.scope_key
+                JOIN bounds b ON TRUE
                 WHERE r.scope_type = 'station'
-                  AND r.ts_utc >= NOW() - make_interval(hours => :hours)
+                  AND r.ts_utc >= b.min_hour
+                  AND r.ts_utc <  b.max_hour_excl
                 ORDER BY date_trunc('hour', r.ts_utc), r.scope_key, r.ts_utc DESC
             ),
             city_hourly AS (
                 SELECT
                     sh.hour_utc,
-                    AVG(sh.pm25_station_hour) AS avg_pm25,   -- spatial avg (equal station weight)
+                    AVG(sh.pm25_station_hour) AS avg_pm25,
                     COUNT(*)                   AS stations_used
                 FROM station_hourly sh
                 GROUP BY 1
@@ -161,7 +169,7 @@ async def city_average_history(
                 ch.avg_pm25,
                 ch.stations_used
             FROM hour_series hs
-            LEFT JOIN city_hourly ch ON ch.hour_utc = hs.hour_utc
+            LEFT JOIN city_hourly ch USING (hour_utc)
             ORDER BY hs.hour_utc ASC;
         """), {"city_name": city, "hours": hours})
 
@@ -187,7 +195,7 @@ async def city_average_history(
                 avg_aqi = None
                 health_message = None
                 category = None
-            
+
             result.append({
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
                 "avg_pm25": avg_pm25,
@@ -196,12 +204,11 @@ async def city_average_history(
                 "health_message": health_message,
                 "stations_used": int(row.stations_used) if row.stations_used is not None else 0
             })
-        
+
         return result
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error getting city average history for %s: %s", city, e)
+        logger.error("Error getting city average history for %s: %s", city, e)
         raise HTTPException(status_code=500, detail="Internal server error")
-
