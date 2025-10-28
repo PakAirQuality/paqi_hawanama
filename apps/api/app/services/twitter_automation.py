@@ -4,9 +4,11 @@ Twitter automation service for posting Lahore air quality data.
 
 import hashlib
 import logging
-from datetime import datetime
+import json
+from datetime import datetime, timezone
 from typing import List, Dict, Optional
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 import tweepy
 from app.core.config import settings
@@ -15,13 +17,17 @@ logger = logging.getLogger(__name__)
 
 # Constants
 TZ = ZoneInfo("Asia/Karachi")  # Lahore local time
+STATE_DIR = Path("/tmp/lahore_twitter_state")
+STATE_DIR.mkdir(parents=True, exist_ok=True)
 
 
 class TwitterAutomationService:
-    """Service for automating Twitter posts about Lahore air quality."""
+    """Service for automating Twitter posts about Lahore air quality with AQI-based rules."""
     
     def __init__(self):
         self.client = None
+        self.monthly_post_limit = 480
+        self.state_file = STATE_DIR / f"state_{datetime.now(TZ).strftime('%Y-%m')}.json"
         self._init_twitter_client()
     
     def _init_twitter_client(self) -> None:
@@ -43,6 +49,160 @@ class TwitterAutomationService:
             access_token_secret=settings.Access_Token_Secret_twitter,
             wait_on_rate_limit=True,
         )
+    
+    def _load_state(self) -> Dict:
+        """Load posting state from JSON file."""
+        try:
+            if self.state_file.exists():
+                return json.loads(self.state_file.read_text())
+        except Exception as e:
+            logger.warning(f"State load failed: {e}")
+        return {
+            "last_posted_category": None,
+            "last_posted_at": None,
+            "last_hazardous_post_hour": None,
+            "last_tweet_hash": None
+        }
+
+    def _save_state(self, state: Dict) -> None:
+        """Save posting state to JSON file."""
+        try:
+            self.state_file.write_text(json.dumps(state, ensure_ascii=False))
+        except Exception as e:
+            logger.warning(f"State save failed: {e}")
+    
+    def _hour_key_from_ts(self, ts: Optional[str]) -> str:
+        """Create robust hour key from timestamp, handling naive vs tz-aware strings."""
+        if not ts:
+            return datetime.now(TZ).strftime("%Y-%m-%dT%H:00%z")
+        try:
+            dt = datetime.fromisoformat(ts)  # may be naive or aware
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc).astimezone(TZ)
+            else:
+                dt = dt.astimezone(TZ)
+            return dt.strftime("%Y-%m-%dT%H:00%z")
+        except Exception:
+            return datetime.now(TZ).strftime("%Y-%m-%dT%H:00%z")
+    
+    async def fetch_lahore_history(self, hours: int = 2) -> List[Dict]:
+        """Fetch Lahore city average history data from the API endpoint."""
+        try:
+            logger.info(f"Fetching Lahore city average history for last {hours} hours...")
+            
+            # Import the function we need
+            from app.routers.history import city_average_history
+            from app.core.database import get_database
+            
+            # Get database session and call the function directly
+            async for db in get_database():
+                result = await city_average_history(city="Lahore", hours=hours, db=db)
+                break
+            
+            logger.info(f"Successfully fetched {len(result)} history entries for Lahore")
+            return result
+                
+        except Exception as e:
+            logger.error(f"Failed to fetch Lahore history data: {e}")
+            raise RuntimeError(f"History data fetch failed: {e}")
+    
+    def get_aqi_category(self, aqi: int) -> str:
+        """Get AQI category from AQI value."""
+        if aqi is None:
+            return "Unknown"
+        elif aqi <= 50:
+            return "Good"
+        elif aqi <= 100:
+            return "Moderate"
+        elif aqi <= 150:
+            return "Unhealthy for Sensitive Groups"
+        elif aqi <= 200:
+            return "Unhealthy"
+        elif aqi <= 300:
+            return "Very Unhealthy"
+        elif aqi <= 500:
+            return "Hazardous"
+        else:
+            return "Beyond Index"
+    
+    def should_post_tweet(self, current_data: Dict, *, last_posted_category: Optional[str], last_hazardous_post_hour: Optional[str]) -> Dict:
+        """
+        Determine if a tweet should be posted based on PKT rules.
+        
+        Rules:
+        1. Post when AQI category changes vs. LAST POSTED category (not previous hour)
+        2. Post once per hour if category is Hazardous (≥301) or Beyond Index (>500)
+        3. Skip otherwise
+        
+        Returns: {'should_post': bool, 'reason': str, 'hazard_hour_gate': Optional[str]}
+        """
+        current_aqi = current_data.get("avg_aqi")
+        if current_aqi is None:
+            return {"should_post": False, "reason": "No current AQI data available", "hazard_hour_gate": None}
+
+        current_category = self.get_aqi_category(current_aqi)
+
+        # Compute the "hour key" for one-per-hour gating using robust timestamp handling
+        hour_key = self._hour_key_from_ts(current_data.get("timestamp_pk"))
+
+        # Rule 2: Hazardous or Beyond Index → at most once per hour
+        if current_aqi >= 301:
+            if last_hazardous_post_hour == hour_key:
+                return {"should_post": False, "reason": f"Hazardous+ but already posted this hour ({hour_key})", "hazard_hour_gate": hour_key}
+            return {"should_post": True, "reason": f"AQI {current_aqi} is {current_category} (≥301) - hourly post", "hazard_hour_gate": hour_key}
+
+        # Rule 1: Post when category changes vs LAST POSTED CATEGORY (not previous hour)
+        if last_posted_category is None:
+            return {"should_post": True, "reason": "First run - no last posted category", "hazard_hour_gate": None}
+        if current_category != last_posted_category:
+            return {"should_post": True, "reason": f"Category changed {last_posted_category} → {current_category}", "hazard_hour_gate": None}
+
+        return {"should_post": False, "reason": f"No category change ({current_category})", "hazard_hour_gate": None}
+    
+    async def get_monthly_post_count(self) -> int:
+        """
+        Get current month's post count from simple storage.
+        For now, we'll use a simple file-based counter.
+        """
+        try:
+            import os
+            from pathlib import Path
+            
+            # Create a simple counter file based on current month
+            current_month = datetime.now(TZ).strftime("%Y-%m")
+            counter_file = Path(f"/tmp/twitter_posts_{current_month}.txt")
+            
+            if counter_file.exists():
+                with open(counter_file, 'r') as f:
+                    return int(f.read().strip())
+            else:
+                return 0
+        except Exception as e:
+            logger.warning(f"Failed to read monthly post count: {e}")
+            return 0
+    
+    async def increment_monthly_post_count(self) -> int:
+        """Increment and return the monthly post count."""
+        try:
+            import os
+            from pathlib import Path
+            
+            current_month = datetime.now(TZ).strftime("%Y-%m")
+            counter_file = Path(f"/tmp/twitter_posts_{current_month}.txt")
+            
+            # Get current count
+            current_count = await self.get_monthly_post_count()
+            new_count = current_count + 1
+            
+            # Write new count
+            with open(counter_file, 'w') as f:
+                f.write(str(new_count))
+            
+            logger.info(f"Monthly post count incremented to {new_count}")
+            return new_count
+        except Exception as e:
+            logger.error(f"Failed to increment monthly post count: {e}")
+            return 0
         
     async def fetch_lahore_data(self) -> Dict:
         """Fetch Lahore city average air quality data by calling the function directly (no HTTP)."""
@@ -107,28 +267,18 @@ class TwitterAutomationService:
         timestamp = datetime.now(TZ).strftime("%d-%m-%Y %H:%M")
         pm25 = city_data["avg_pm25_concentration"]
         aqi = city_data["aqi"]
-        health_message = city_data["health_message"]
-        
-        # Clean health message - remove emojis but keep hashtags
-        import re
-        # Remove emoji characters but keep text and hashtags
-        health_clean = re.sub(r'[^\w\s#]', '', health_message).strip()
-        # Clean up extra spaces
-        health_clean = re.sub(r'\s+', ' ', health_clean)
-        
-        tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_clean}"
-        
-        # Ensure within 280 character limit
+        health_message = city_data["health_message"] or ""
+
+        tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_message}"
+
         if len(tweet) > 280:
-            # Truncate health message if needed
-            max_health_len = 280 - len(f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); ")
-            if max_health_len > 0:
-                health_clean = health_clean[:max_health_len-3] + "..."
-                tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_clean}"
-            else:
-                # Fallback if even basic info is too long
-                tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} AQI"
-            
+            # fall back: drop emojis/punctuation but keep hashtags/words, then truncate if still long
+            import re
+            health_slim = re.sub(r"[^\w\s#]", "", health_message)
+            tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_slim}"
+            if len(tweet) > 280:
+                keep = 280 - len(f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); ")
+                tweet = f"{timestamp}; PM2.5 conc. {pm25:.1f} μg/m³; {aqi} Air Quality Index (AQI); {health_slim[:max(0, keep-3)]}..."
         return tweet
     
     def post_tweet(self, text: str, max_retries: int = 3) -> str:
@@ -169,7 +319,13 @@ class TwitterAutomationService:
     
     async def post_lahore_pm25_update(self, dry_run: bool = False) -> Dict:
         """
-        Main method to fetch city average data and post Twitter update.
+        Main method with PKT rules implemented correctly.
+        
+        Rules:
+        1. Post when AQI category changes vs. LAST POSTED category (not previous hour)
+        2. Post once per hour if category is Hazardous (≥301) or Beyond Index (>500)
+        3. Skip otherwise
+        4. Safety rail: stop at 480 posts/month
         
         Args:
             dry_run: If True, don't actually post to Twitter
@@ -178,44 +334,109 @@ class TwitterAutomationService:
             Dict with status and details
         """
         try:
-            logger.info("Starting Lahore city average Twitter automation")
+            logger.info("Starting Lahore PKT rules Twitter automation")
             
-            # Fetch and process data
-            raw_data = await self.fetch_lahore_data()
-            city_data = self.normalize_city_data(raw_data)
-            
-            if not city_data or city_data["avg_pm25_concentration"] is None:
+            # Check monthly post limit first
+            monthly_count = await self.get_monthly_post_count()
+            if monthly_count >= self.monthly_post_limit:
                 return {
                     "status": "skipped",
-                    "message": "No valid city average data to post",
-                    "tweet_id": None
+                    "message": f"Monthly post limit reached ({monthly_count}/{self.monthly_post_limit})",
+                    "tweet_id": None,
+                    "monthly_count": monthly_count
                 }
             
-            # Build tweet
-            tweet_text = self.build_tweet_text(city_data)
+            # Load state
+            state = self._load_state()
+            last_posted_category = state.get("last_posted_category")
+            last_hazardous_post_hour = state.get("last_hazardous_post_hour")
+            
+            # Fetch last 2 hours to get "current" hour data
+            history_data = await self.fetch_lahore_history(hours=2)
+            if not history_data:
+                return {"status": "skipped", "message": "No history data available", "tweet_id": None}
+
+            current_data = history_data[-1]
+            # Validate data before proceeding
+            if current_data.get("avg_pm25") is None or current_data.get("avg_aqi") is None:
+                return {"status": "skipped", "message": "Current hour has no valid PM2.5/AQI", "tweet_id": None}
+
+            decision = self.should_post_tweet(
+                current_data,
+                last_posted_category=last_posted_category,
+                last_hazardous_post_hour=last_hazardous_post_hour
+            )
+            if not decision["should_post"]:
+                return {
+                    "status": "skipped",
+                    "message": decision["reason"],
+                    "tweet_id": None,
+                    "current_aqi": current_data.get("avg_aqi"),
+                    "monthly_count": monthly_count
+                }
+
+            # Build normalized data for tweet text
+            normalized_data = {
+                "city": "Lahore",
+                "avg_pm25_concentration": current_data.get("avg_pm25"),
+                "aqi": current_data.get("avg_aqi"),
+                "health_message": current_data.get("health_message", ""),
+                "total_stations": current_data.get("stations_used", 0),
+            }
+            pm25_val = normalized_data["avg_pm25_concentration"]
+            aqi_val = normalized_data["aqi"]
+            if pm25_val is None or aqi_val is None:
+                return {"status": "skipped", "message": "Invalid PM2.5/AQI", "tweet_id": None}
+
+            # Additional NaN guard for PM2.5
+            if pm25_val != pm25_val:  # Check for NaN
+                return {"status": "skipped", "message": "PM2.5 is NaN", "tweet_id": None}
+
+            tweet_text = self.build_tweet_text(normalized_data)
             tweet_hash = self.content_hash(tweet_text)
-            
+
+            # Content dedupe to avoid repeats outside Hazardous+
+            state_last_hash = state.get("last_tweet_hash")
+            if tweet_hash == state_last_hash and current_data.get("avg_aqi", 0) < 301:
+                return {"status": "skipped", "message": "Duplicate tweet content (non-Hazardous+)", "tweet_id": None}
+
             logger.info(f"Generated tweet ({len(tweet_text)} chars): {tweet_text}")
-            
+            logger.info(f"Posting reason: {decision['reason']}")
+
             if dry_run:
                 return {
                     "status": "dry_run",
                     "message": "Dry run - tweet not posted",
                     "tweet_text": tweet_text,
                     "tweet_hash": tweet_hash,
-                    "city_data": city_data
+                    "posting_reason": decision["reason"],
+                    "city_data": normalized_data,
+                    "monthly_count": monthly_count
                 }
-            
-            # Post to Twitter
+
             tweet_id = self.post_tweet(tweet_text)
-            
+            new_monthly_count = await self.increment_monthly_post_count()
+
+            # Update state AFTER successful post
+            state["last_posted_category"] = self.get_aqi_category(aqi_val)
+            state["last_posted_at"] = datetime.now(TZ).isoformat()
+            state["last_tweet_hash"] = tweet_hash
+            if decision["hazard_hour_gate"]:
+                state["last_hazardous_post_hour"] = decision["hazard_hour_gate"]
+            else:
+                # Reset hazardous hour gate when not hazardous
+                state["last_hazardous_post_hour"] = None
+            self._save_state(state)
+
             return {
                 "status": "success",
                 "message": "Tweet posted successfully",
                 "tweet_id": tweet_id,
                 "tweet_text": tweet_text,
                 "tweet_hash": tweet_hash,
-                "city_data": city_data
+                "posting_reason": decision["reason"],
+                "city_data": normalized_data,
+                "monthly_count": new_monthly_count
             }
             
         except Exception as e:

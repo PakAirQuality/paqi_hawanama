@@ -3,14 +3,11 @@ History API Router - provides historical air quality data
 """
 
 import logging
-from typing import Optional
-from urllib.parse import unquote
-from fastapi import APIRouter, HTTPException, Query, Path, status
-from fastapi.responses import JSONResponse
-
-from app.models.history import HistoryOut
-from app.services.airvisual_history import get_history_service
-from app.utils.history_params import parse_history_params
+from fastapi import APIRouter, HTTPException, Query, Path, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import text
+from app.core.database import get_database
+from app.utils.normalization import pm25_to_aqi, get_aqi_label, get_aqi_category
 
 logger = logging.getLogger(__name__)
 
@@ -18,316 +15,193 @@ router = APIRouter()
 
 
 @router.get(
-    "/cities/{country}/{state}/{city}/history",
-    response_model=HistoryOut,
-    summary="Get historical air quality data for a city",
-    description="Retrieve historical air quality and weather data for a specific city"
-)
-async def city_history(
-    country: str = Path(
-        ...,
-        description="Country name (URL encoded)",
-        example="Pakistan"
-    ),
-    state: str = Path(
-        ...,
-        description="State or province name (URL encoded)",
-        example="Punjab"
-    ),
-    city: str = Path(
-        ...,
-        description="City name (URL encoded)",
-        example="Lahore"
-    ),
-    from_: Optional[str] = Query(
-        None,
-        alias="from",
-        description="Start time (ISO 8601 UTC, e.g., '2025-09-24T10:00:00Z')",
-        example="2025-09-24T10:00:00Z"
-    ),
-    to: Optional[str] = Query(
-        None,
-        description="End time (ISO 8601 UTC, e.g., '2025-09-26T10:00:00Z')",
-        example="2025-09-26T10:00:00Z"
-    ),
-    pollutants: Optional[str] = Query(
-        None,
-        description="Comma-separated pollutants (pm25,pm10,o3,no2,so2,co)",
-        example="pm25,pm10"
-    ),
-    granularity: str = Query(
-        "hour",
-        description="Time granularity (only 'hour' supported)",
-        example="hour"
-    ),
-    aqi: str = Query(
-        "both",
-        description="AQI scales to include",
-        example="both"
-    ),
-    tz: str = Query(
-        "Asia/Karachi",
-        description="IANA timezone for local timestamps",
-        example="Asia/Karachi"
-    ),
-    fill: bool = Query(
-        False,
-        description="Fill missing hours with null values"
-    ),
-    include_rollups: bool = Query(
-        False,
-        description="Include statistical rollups"
-    )
-):
-    """
-    Get historical air quality data for a city.
-    
-    **Parameters:**
-    - **country**: Country name (required, URL encoded)
-    - **state**: State or province name (required, URL encoded)
-    - **city**: City name (required, URL encoded)
-    - **from**: Start time in ISO 8601 UTC format (optional, defaults to 48h ago)
-    - **to**: End time in ISO 8601 UTC format (optional, defaults to now)
-    - **pollutants**: Comma-separated pollutants to include (optional, defaults to all)
-    - **granularity**: Time granularity - only "hour" supported currently
-    - **aqi**: AQI scales - "us", "cn", or "both" (default: "both")
-    - **tz**: IANA timezone for local timestamps (default: "Asia/Karachi")
-    - **fill**: Fill missing hours with null values (default: false)
-    - **include_rollups**: Include statistical rollups (default: false)
-    
-    **Data Sources:**
-    - Primary: Database (unlimited historical range)
-    - Fallback: AirVisual API (~48h history) for recent data gaps
-    
-    **Response:**
-    - **scope**: Geographic scope (country/state/city)
-    - **rows**: Array of hourly data points with AQI, pollutants, weather
-    - **rollups**: Statistical summaries (if requested)
-    - **units**: Standard units for measurements
-    
-    **Time Range Limits:**
-    - Maximum span: 180 days per request
-    - If no from/to specified: defaults to last 48 hours
-    
-    **Error responses:**
-    - `400`: Invalid parameters or time range
-    - `404`: City not found
-    - `502`: Upstream API error
-    - `503`: Service unavailable
-    """
-    try:
-        # URL decode path parameters
-        country = unquote(country)
-        state = unquote(state)
-        city = unquote(city)
-        
-        # Parse and validate parameters
-        query = parse_history_params(
-            from_str=from_,
-            to_str=to,
-            pollutants_str=pollutants,
-            granularity=granularity,
-            aqi=aqi,
-            tz=tz,
-            fill=fill,
-            include_rollups=include_rollups
-        )
-        
-        # Get history data
-        service = get_history_service()
-        result = await service.get_city_history(country, state, city, query)
-        
-        # Create JSON response with proper datetime serialization
-        response_data = result.model_dump(mode='json')
-        response = JSONResponse(content=response_data)
-        
-        # Add timezone warning header if needed
-        if service.check_timezone_fallback(result, tz):
-            response.headers["X-TZ-Warning"] = "invalid_tz_fallback_utc"
-        
-        return response
-        
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    
-    except RuntimeError as e:
-        if "city_not_found" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="city_not_found"
-            )
-        
-        # Other runtime errors (likely upstream issues)
-        logger.error(f"Runtime error in city_history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to retrieve city history: {str(e)}",
-            headers={"upstream_error": "true"}
-        )
-    
-    except Exception as e:
-        logger.error(f"Unexpected error in city_history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
-
-
-@router.get(
     "/stations/{station_id}/history",
-    response_model=HistoryOut,
-    summary="Get historical air quality data for a station",
-    description="Retrieve historical air quality and weather data for a specific monitoring station"
+    summary="Get historical PM2.5 data for a station",
+    description="Get hourly historical PM2.5 data for a specific monitoring station using numeric ID"
 )
 async def station_history(
-    station_id: str = Path(
-        ...,
-        description="16-character station identifier (SHA1 hash)",
-        example="9f1a0c2b8d6e3a41",
-        regex="^[a-f0-9]{16}$"
-    ),
-    from_: Optional[str] = Query(
-        None,
-        alias="from",
-        description="Start time (ISO 8601 UTC, e.g., '2025-09-24T10:00:00Z')",
-        example="2025-09-24T10:00:00Z"
-    ),
-    to: Optional[str] = Query(
-        None,
-        description="End time (ISO 8601 UTC, e.g., '2025-09-26T10:00:00Z')",
-        example="2025-09-26T10:00:00Z"
-    ),
-    pollutants: Optional[str] = Query(
-        None,
-        description="Comma-separated pollutants (pm25,pm10,o3,no2,so2,co)",
-        example="pm25,pm10"
-    ),
-    granularity: str = Query(
-        "hour",
-        description="Time granularity (only 'hour' supported)",
-        example="hour"
-    ),
-    aqi: str = Query(
-        "both",
-        description="AQI scales to include",
-        example="both"
-    ),
-    tz: str = Query(
-        "Asia/Karachi",
-        description="IANA timezone for local timestamps",
-        example="Asia/Karachi"
-    ),
-    fill: bool = Query(
-        False,
-        description="Fill missing hours with null values"
-    ),
-    include_rollups: bool = Query(
-        False,
-        description="Include statistical rollups"
-    )
+    station_id: int = Path(..., description="Numeric station ID", example=1),
+    hours: int = Query(24, description="Number of hours to include (1–168)"),
+    db: AsyncSession = Depends(get_database),
 ):
-    """
-    Get historical air quality data for a monitoring station.
+    # Validate hours parameter
+    if hours < 1 or hours > 168:  # Max 1 week
+        raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
     
-    **Parameters:**
-    - **station_id**: 16-character station identifier (required, SHA1 hash format)
-    - **from**: Start time in ISO 8601 UTC format (optional, defaults to 48h ago)
-    - **to**: End time in ISO 8601 UTC format (optional, defaults to now)
-    - **pollutants**: Comma-separated pollutants to include (optional, defaults to all)
-    - **granularity**: Time granularity - only "hour" supported currently
-    - **aqi**: AQI scales - "us", "cn", or "both" (default: "both")
-    - **tz**: IANA timezone for local timestamps (default: "Asia/Karachi")
-    - **fill**: Fill missing hours with null values (default: false)
-    - **include_rollups**: Include statistical rollups (default: false)
-    
-    **Station Resolution:**
-    The station_id is resolved to geographic location and metadata for data retrieval.
-    
-    **Data Sources:**
-    - Primary: Database (unlimited historical range)
-    - Fallback: AirVisual API (~48h history) for recent data gaps (plan permitting)
-    
-    **Response:**
-    - **scope**: Station's geographic scope (country/state/city)
-    - **rows**: Array of hourly data points with AQI, pollutants, weather
-    - **rollups**: Statistical summaries (if requested)
-    - **units**: Standard units for measurements
-    
-    **Time Range Limits:**
-    - Maximum span: 180 days per request
-    - If no from/to specified: defaults to last 48 hours
-    
-    **Plan Limitations:**
-    If the API plan doesn't support station history and there's no database coverage,
-    an empty result is returned with `X-Upstream-Note: station_history_unavailable_on_plan` header.
-    
-    **Error responses:**
-    - `400`: Invalid station_id format or parameters
-    - `404`: Station not found in registry
-    - `502`: Upstream API error
-    - `503`: Service unavailable
-    
-    **Note:** Unlike current endpoints, history endpoints don't return 501 for plan limitations.
-    Instead, they return available data (database-only) with informational headers.
-    """
     try:
-        # Parse and validate parameters
-        query = parse_history_params(
-            from_str=from_,
-            to_str=to,
-            pollutants_str=pollutants,
-            granularity=granularity,
-            aqi=aqi,
-            tz=tz,
-            fill=fill,
-            include_rollups=include_rollups
-        )
+        # Get station by numeric index using same pattern as dashboard endpoints
+        station_lookup = await db.execute(text("""
+            SELECT station_id, name 
+            FROM stations 
+            WHERE active = true 
+            ORDER BY name
+        """))
         
-        # Get history data
-        service = get_history_service()
-        result = await service.get_station_history(station_id, query)
+        stations_list = station_lookup.fetchall()
         
-        # Create JSON response with proper datetime serialization
-        response_data = result.model_dump(mode='json')
-        response = JSONResponse(content=response_data)
+        # Find the station at the given index (station_id - 1, since IDs are 1-based)
+        if station_id < 1 or station_id > len(stations_list):
+            raise HTTPException(status_code=404, detail="Station not found")
         
-        # Add timezone warning header if needed
-        if service.check_timezone_fallback(result, tz):
-            response.headers["X-TZ-Warning"] = "invalid_tz_fallback_utc"
+        target_station = stations_list[station_id - 1]  # Convert to 0-based index
+        hash_station_id = target_station.station_id
         
-        # Add upstream limitation note if present
-        if hasattr(result, 'upstream_note') and result.upstream_note:
-            response.headers["X-Upstream-Note"] = result.upstream_note
-        
-        return response
-        
-    except ValueError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=str(e)
-        )
-    
-    except RuntimeError as e:
-        if "station_not_found" in str(e):
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="station_not_found"
+        # Get historical PM2.5 readings using the same pattern as dashboard endpoints
+        history_result = await db.execute(text("""
+            WITH hour_series AS (
+                SELECT generate_series(
+                    date_trunc('hour', NOW() - INTERVAL '%s hours'),
+                    date_trunc('hour', NOW()),
+                    INTERVAL '1 hour'
+                ) AS hour_utc
             )
+            SELECT 
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
+                r.pm25,
+                r.aqi_us,
+                :station_name AS station_name,
+                :station_id AS station_id
+            FROM hour_series hs
+            LEFT JOIN readings r ON (
+                date_trunc('hour', r.ts_utc) = hs.hour_utc
+                AND r.scope_key = :hash_station_id 
+                AND r.scope_type = 'station'
+            )
+            ORDER BY hs.hour_utc ASC
+        """ % hours), {"hash_station_id": hash_station_id, "station_name": target_station.name, "station_id": station_id})
         
-        # Other runtime errors (likely upstream issues)
-        logger.error(f"Runtime error in station_history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Failed to retrieve station history: {str(e)}",
-            headers={"upstream_error": "true"}
-        )
-    
+        history_rows = history_result.fetchall()
+        
+        return [
+            {
+                "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
+                "pm25": float(row.pm25) if row.pm25 is not None else None,
+                "aqi": float(row.aqi_us) if row.aqi_us is not None else None,
+                "station_name": row.station_name,
+                "station_id": row.station_id
+            }
+            for row in history_rows
+        ]
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Unexpected error in station_history: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error"
-        )
+        logger.error(f"Error getting station PM2.5 history for station {station_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+@router.get(
+    "/cities/{city}/average/history",
+    summary="Hourly city-average AQI & PM2.5 history",
+    description="Get hourly historical city-wide average PM2.5 and AQI data"
+)
+async def city_average_history(
+    city: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="Lahore",
+        enum=[
+            "Abbottabad","Bahawalpur","Bhopalwala","Chak Jhumra","Daska Kalan",
+            "Dera Ismail Khan","Eminabad","Faisalabad","Gujranwala","Haripur",
+            "Hundal","Hyderabad","Islamabad","Jhang","Jhelum","Kahna Nau",
+            "Karachi","Kasur","Khairpur Mir's","Kharan","Khurrianwala",
+            "Kot Malik Barkhurdar","Kotli Loharan","Kotri","Ladhewala Waraich",
+            "Lahore","Lodhran","Malam Jabba","Malir Cantonment","Mandi Bahauddin",
+            "Mirpur Khas","Multan","Murree","Pasrur","Pattoki","Peshawar",
+            "Pindi Bhattian","Qadirpur Ran","Quetta","Rahim Yar Khan","Raiwind",
+            "Rawalpindi","Rojhan","Sambrial","Sheikhupura","Sialkot","Skardu","Sukkur"
+        ]
+    ),
+    hours: int = Query(24, description="Number of hours to include (1–168)"),
+    db: AsyncSession = Depends(get_database),
+):
+    if hours < 1 or hours > 168:
+        raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
+
+    try:
+        # 1) Build the hour series
+        # 2) For each station & hour, pick ONE value (latest within that hour)
+        # 3) Average those per-hour station values across stations (equal weight)
+        history_result = await db.execute(text("""
+            WITH hour_series AS (
+                SELECT generate_series(
+                    date_trunc('hour', NOW() - make_interval(hours => :hours)),
+                    date_trunc('hour', NOW()),
+                    INTERVAL '1 hour'
+                ) AS hour_utc
+            ),
+            city_stations AS (
+                SELECT s.station_id
+                FROM stations s
+                JOIN cities c ON s.city_id = c.id
+                WHERE LOWER(c.name) = LOWER(:city_name)
+            ),
+            station_hourly AS (
+                -- pick ONE reading per station per hour (latest within hour)
+                SELECT DISTINCT ON (date_trunc('hour', r.ts_utc), r.scope_key)
+                    date_trunc('hour', r.ts_utc) AS hour_utc,
+                    r.scope_key                  AS station_id,
+                    r.pm25                       AS pm25_station_hour
+                FROM readings r
+                JOIN city_stations cs ON cs.station_id = r.scope_key
+                WHERE r.scope_type = 'station'
+                  AND r.ts_utc >= NOW() - make_interval(hours => :hours)
+                ORDER BY date_trunc('hour', r.ts_utc), r.scope_key, r.ts_utc DESC
+            ),
+            city_hourly AS (
+                SELECT
+                    sh.hour_utc,
+                    AVG(sh.pm25_station_hour) AS avg_pm25,   -- spatial avg (equal station weight)
+                    COUNT(*)                   AS stations_used
+                FROM station_hourly sh
+                GROUP BY 1
+            )
+            SELECT 
+                hs.hour_utc,
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
+                ch.avg_pm25,
+                ch.stations_used
+            FROM hour_series hs
+            LEFT JOIN city_hourly ch ON ch.hour_utc = hs.hour_utc
+            ORDER BY hs.hour_utc ASC;
+        """), {"city_name": city, "hours": hours})
+
+        rows = history_result.fetchall()
+
+        if not rows:
+            city_check = await db.execute(
+                text("SELECT 1 FROM cities WHERE LOWER(name) = LOWER(:city_name)"),
+                {"city_name": city}
+            )
+            if not city_check.fetchone():
+                raise HTTPException(status_code=404, detail="City not found")
+
+        result = []
+        for row in rows:
+            if row.avg_pm25 is not None:
+                avg_pm25 = float(row.avg_pm25)
+                avg_aqi = pm25_to_aqi(avg_pm25)
+                health_message = get_aqi_label(avg_aqi)
+                category = get_aqi_category(avg_aqi)
+            else:
+                avg_pm25 = None
+                avg_aqi = None
+                health_message = None
+                category = None
+            
+            result.append({
+                "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
+                "avg_pm25": avg_pm25,
+                "avg_aqi": avg_aqi,
+                "category": category,
+                "health_message": health_message,
+                "stations_used": int(row.stations_used) if row.stations_used is not None else 0
+            })
+        
+        return result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting city average history for %s: %s", city, e)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
