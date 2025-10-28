@@ -92,6 +92,8 @@ async def station_history(
 
 #### city average api ###
 
+#### city average api ###
+
 @router.get(
     "/cities/{city}/average/history",
     summary="Hourly city-average AQI & PM2.5 history",
@@ -121,13 +123,10 @@ async def city_average_history(
         raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
 
     try:
-        # Build exactly `hours` bins ending at the last fully completed hour (UTC)
-        # For each bin, pick the *latest* reading per station inside [bin, bin+1h),
-        # then average across stations.
         history_result = await db.execute(text("""
             WITH bounds AS (
                 SELECT
-                    date_trunc('hour', NOW()) - INTERVAL '1 hour' AS end_hr_utc,  -- last full hour
+                    date_trunc('hour', NOW()) - INTERVAL '1 hour' AS end_hr_utc,  -- last complete hour (UTC)
                     :hours::int AS h
             ),
             hour_series AS (
@@ -138,7 +137,7 @@ async def city_average_history(
                        ) AS hour_utc
             ),
             city_stations AS (
-                -- IMPORTANT: readings.scope_key stores stations.station_id (char/varchar).
+                -- station_id is CHAR(16) -> cast to text to match readings.scope_key (text)
                 SELECT s.station_id::text AS scope_key
                 FROM stations s
                 JOIN cities c ON c.id = s.city_id
@@ -147,7 +146,7 @@ async def city_average_history(
                   AND LOWER(c.name) = LOWER(:city_name)
             ),
             station_hourly AS (
-                -- Per (hour_bin, station), latest reading within that hour
+                -- For each hour bin and station in this city, pick the latest reading in [bin, bin+1h)
                 SELECT
                     hs.hour_utc,
                     r.scope_key::text AS scope_key,
@@ -157,13 +156,17 @@ async def city_average_history(
                         ORDER BY r.ts_utc DESC
                     ) AS rn
                 FROM hour_series hs
-                JOIN city_stations cs ON TRUE
                 JOIN readings r
                   ON r.scope_type = 'station'
-                 AND r.scope_key::text = cs.scope_key
                  AND r.ts_utc >= hs.hour_utc
                  AND r.ts_utc <  hs.hour_utc + INTERVAL '1 hour'
-                -- If you want QC filtering, add: AND r.qc_state = 'OK'
+                 AND EXISTS (
+                       SELECT 1
+                       FROM city_stations cs
+                       WHERE cs.scope_key = r.scope_key::text
+                 )
+                -- Optional QC gate (uncomment if needed):
+                -- AND r.qc_state = 'OK'
             ),
             city_hourly AS (
                 SELECT
@@ -176,7 +179,7 @@ async def city_average_history(
             )
             SELECT
                 hs.hour_utc,
-                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,  -- display PKT (+05:00)
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,  -- PKT for display
                 ch.avg_pm25,
                 COALESCE(ch.stations_used, 0) AS stations_used
             FROM hour_series hs
@@ -186,9 +189,10 @@ async def city_average_history(
 
         rows = history_result.fetchall()
 
+        # If no rows, check if city exists at all (avoids silent 500s from empty joins)
         if not rows:
             city_check = await db.execute(
-                text("SELECT 1 FROM cities WHERE LOWER(name) = LOWER(:city_name)"),
+                text("SELECT 1 FROM cities WHERE active = TRUE AND LOWER(name) = LOWER(:city_name)"),
                 {"city_name": city}
             )
             if not city_check.fetchone():
@@ -221,5 +225,5 @@ async def city_average_history(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error getting city average history for %s: %s", city, e)
+        logger.exception("Error getting city average history for %s", city)
         raise HTTPException(status_code=500, detail="Internal server error")
