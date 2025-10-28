@@ -280,6 +280,152 @@ async def city_top10_stations(
 
 
 @router.get(
+    "/cities/{city}/top3-stations",
+    response_model=CityTop10PM25Response,
+    summary="Get top 3 highest PM2.5 stations in a city",
+    description="Retrieve the 3 stations with highest PM2.5 concentrations and AQI in a specific city"
+)
+async def city_top3_stations(
+    city: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="Lahore",
+        enum=[
+            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
+            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
+            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
+            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
+            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
+            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
+            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
+            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
+            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
+        ]
+    )
+):
+    """
+    Get the top 3 stations with highest PM2.5 concentrations in a city.
+    
+    - **city**: City name (required, URL encoded)
+    
+    Returns the 3 most polluted stations including:
+    - Station ID and name
+    - PM2.5 concentration (µg/m³) - ranked highest to lowest
+    - AQI value for each station
+    - Total number of active stations in the city
+    
+    **Use Cases:**
+    - Quick identification of worst pollution hotspots
+    - Social media alerts and bot notifications
+    - Emergency response prioritization
+    - Public health warnings for specific areas
+    
+    **Error responses:**
+    - `400`: Invalid parameters  
+    - `404`: City not found or no stations with current data
+    - `500`: Internal server error
+    """
+    try:
+        # URL decode path parameter
+        city = unquote(city)
+        
+        # Validate non-empty parameter
+        if not city.strip():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="City path parameter must be non-empty"
+            )
+        
+        # Import database dependencies here to avoid circular imports
+        from app.core.database import get_database
+        from sqlalchemy import text
+        
+        # Get database session
+        async for db in get_database():
+            # Query to get top 3 stations with PM2.5 and AQI data, ordered by highest concentration
+            query = text("""
+                SELECT 
+                    s.station_id,
+                    s.name as station_name,
+                    r.pm25,
+                    r.aqi_us
+                FROM stations s
+                JOIN cities c ON s.city_id = c.id
+                JOIN LATERAL (
+                    SELECT pm25, aqi_us
+                    FROM readings r_sub
+                    WHERE r_sub.scope_key = s.station_id
+                    AND r_sub.ts_utc >= NOW() - INTERVAL '24 hours'
+                    ORDER BY r_sub.ts_utc DESC
+                    LIMIT 1
+                ) r ON true
+                WHERE LOWER(c.name) = LOWER(:city_name)
+                AND r.pm25 IS NOT NULL
+                ORDER BY r.pm25 DESC
+                LIMIT 3
+            """)
+            
+            result = await db.execute(query, {'city_name': city})
+            top_stations_data = result.fetchall()
+            
+            # Also get total count of stations with data in this city
+            count_query = text("""
+                SELECT COUNT(DISTINCT s.station_id) as total_count
+                FROM stations s
+                JOIN cities c ON s.city_id = c.id
+                JOIN LATERAL (
+                    SELECT pm25, aqi_us
+                    FROM readings r_sub
+                    WHERE r_sub.scope_key = s.station_id
+                    AND r_sub.ts_utc >= NOW() - INTERVAL '24 hours'
+                    ORDER BY r_sub.ts_utc DESC
+                    LIMIT 1
+                ) r ON true
+                WHERE LOWER(c.name) = LOWER(:city_name)
+                AND r.pm25 IS NOT NULL
+            """)
+            
+            count_result = await db.execute(count_query, {'city_name': city})
+            total_count = count_result.fetchone().total_count
+            
+            if not top_stations_data:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="City not found or no stations with current PM2.5 data"
+                )
+            
+            # Format response
+            top_stations = []
+            for row in top_stations_data:
+                station = {
+                    "station_id": row.station_id,
+                    "station_name": row.station_name,
+                    "pm25_concentration": float(row.pm25),
+                    "aqi": int(row.aqi_us) if row.aqi_us is not None else None
+                }
+                top_stations.append(station)
+            
+            return CityTop10PM25Response(
+                city=city,
+                top_stations=top_stations,
+                total_stations=total_count
+            )
+        
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+    
+    except Exception as e:
+        logger.error(f"Unexpected error in city_top3_stations: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Internal server error"
+        )
+
+
+@router.get(
     "/stations/{station_id}/current",
     response_model=CurrentOut,
     summary="Get current conditions for a station",
