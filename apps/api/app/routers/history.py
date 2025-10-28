@@ -124,48 +124,58 @@ async def city_average_history(
         history_result = await db.execute(text("""
             WITH bounds AS (
                 SELECT
-                    date_trunc('hour', NOW())                            AS cur_hour,
-                    date_trunc('hour', NOW()) - make_interval(hours => :hours) AS min_hour,
-                    date_trunc('hour', NOW()) + INTERVAL '1 hour'        AS max_hour_excl
+                    date_trunc('hour', NOW())                            AS cur_hr_utc,
+                    date_trunc('hour', NOW()) - make_interval(hours => :hours) AS min_hr_utc
             ),
             hour_series AS (
+                -- The exact hour buckets we intend to return (UTC)
                 SELECT generate_series(
-                    (SELECT min_hour FROM bounds),
-                    (SELECT cur_hour  FROM bounds),
+                    (SELECT min_hr_utc FROM bounds),
+                    (SELECT cur_hr_utc FROM bounds),
                     INTERVAL '1 hour'
                 ) AS hour_utc
             ),
             city_stations AS (
-                SELECT s.station_id
+                -- IMPORTANT: match the key used in readings.scope_key (hash/hex vs int).
+                -- If readings.scope_key stores the hashed key, keep s.station_id here only if station_id == that hash.
+                -- Otherwise switch to s.hash_station_id (or whatever column matches readings.scope_key).
+                SELECT s.station_id AS scope_key
                 FROM stations s
                 JOIN cities c ON s.city_id = c.id
-                WHERE LOWER(c.name) = LOWER(:city_name)
+                WHERE s.active = TRUE
+                AND LOWER(c.name) = LOWER(:city_name)
             ),
             station_hourly AS (
-                -- one reading per station per hour (latest within that hour)
-                SELECT DISTINCT ON (date_trunc('hour', r.ts_utc), r.scope_key)
-                    date_trunc('hour', r.ts_utc) AS hour_utc,
-                    r.scope_key                  AS station_id,
-                    r.pm25                       AS pm25_station_hour
-                FROM readings r
-                JOIN city_stations cs ON cs.station_id = r.scope_key
-                JOIN bounds b ON TRUE
-                WHERE r.scope_type = 'station'
-                  AND r.ts_utc >= b.min_hour
-                  AND r.ts_utc <  b.max_hour_excl
-                ORDER BY date_trunc('hour', r.ts_utc), r.scope_key, r.ts_utc DESC
+                -- For each (hour_bin, station), pick the latest reading in that hour: [hour_bin, hour_bin+1h)
+                SELECT
+                    hs.hour_utc,
+                    r.scope_key,
+                    r.pm25,
+                    row_number() OVER (
+                        PARTITION BY hs.hour_utc, r.scope_key
+                        ORDER BY r.ts_utc DESC
+                    ) AS rn
+                FROM hour_series hs
+                JOIN city_stations cs
+                ON TRUE
+                JOIN readings r
+                ON r.scope_type = 'station'
+                AND r.scope_key  = cs.scope_key
+                AND r.ts_utc    >= hs.hour_utc
+                AND r.ts_utc    <  hs.hour_utc + INTERVAL '1 hour'
             ),
             city_hourly AS (
                 SELECT
                     sh.hour_utc,
-                    AVG(sh.pm25_station_hour) AS avg_pm25,
-                    COUNT(*)                   AS stations_used
+                    AVG(sh.pm25) AS avg_pm25,
+                    COUNT(*)     AS stations_used
                 FROM station_hourly sh
-                GROUP BY 1
+                WHERE sh.rn = 1          -- latest within the hour per station
+                GROUP BY sh.hour_utc
             )
-            SELECT 
+            SELECT
                 hs.hour_utc,
-                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,   -- PKT for display
                 ch.avg_pm25,
                 ch.stations_used
             FROM hour_series hs
