@@ -1,35 +1,30 @@
 """
-History API Router - provides historical air quality data
+Dashboard API Router - provides dashboard endpoints for frontend
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Query, Path, Depends
+from typing import List, Dict, Any
+from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
+
 from app.core.database import get_database
-from app.utils.normalization import pm25_to_aqi, get_aqi_label, get_aqi_category
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-@router.get(
-    "/stations/{station_id}/history",
-    summary="Get historical PM2.5 data for a station",
-    description="Get hourly historical PM2.5 data for a specific monitoring station using numeric ID"
-)
-async def station_history(
-    station_id: int = Path(..., description="Numeric station ID", example=1),
-    hours: int = Query(24, description="Number of hours to include (1–168)"),
-    db: AsyncSession = Depends(get_database),
+
+@router.get("/stations/{station_id}/history")
+async def get_station_history_data(
+    station_id: int,
+    hours: int = 24,
+    db: AsyncSession = Depends(get_database)
 ):
-    # Validate hours parameter
-    if hours < 1 or hours > 168:  # Max 1 week
-        raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
-    
+    """Get historical data for a specific station using numeric station ID"""
     try:
-        # Get station by numeric index using same pattern as dashboard endpoints
+        # Get station by numeric index using same pattern as current endpoint  
         station_lookup = await db.execute(text("""
             SELECT station_id, name 
             FROM stations 
@@ -39,28 +34,28 @@ async def station_history(
         
         stations_list = station_lookup.fetchall()
         
-        # Find the station at the given index (station_id - 1, since IDs are 1-based)
+        # Find the station at the given index
         if station_id < 1 or station_id > len(stations_list):
             raise HTTPException(status_code=404, detail="Station not found")
         
         target_station = stations_list[station_id - 1]  # Convert to 0-based index
         hash_station_id = target_station.station_id
         
-        # Get historical PM2.5 readings using the same pattern as dashboard endpoints
+        # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
-            WITH hour_series AS (
-                SELECT generate_series(
-                    date_trunc('hour', NOW() - INTERVAL '%s hours'),
-                    date_trunc('hour', NOW()),
-                    INTERVAL '1 hour'
-                ) AS hour_utc
+            WITH RECURSIVE hour_series AS (
+                SELECT 
+                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                UNION ALL
+                SELECT 
+                    hour_utc + INTERVAL '1 hour'
+                FROM hour_series
+                WHERE hour_utc < date_trunc('hour', NOW())
             )
             SELECT 
+                hs.hour_utc,
                 hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
-                r.pm25,
-                r.aqi_us,
-                :station_name AS station_name,
-                :station_id AS station_id
+                r.aqi_us
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
@@ -68,162 +63,102 @@ async def station_history(
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"hash_station_id": hash_station_id, "station_name": target_station.name, "station_id": station_id})
+        """ % hours), {"hash_station_id": hash_station_id})
         
         history_rows = history_result.fetchall()
-        
-        return [
+        history_data = [
             {
+                "timestamp_utc": row.hour_utc.isoformat() + "Z",
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "pm25": float(row.pm25) if row.pm25 is not None else None,
-                "aqi": float(row.aqi_us) if row.aqi_us is not None else None,
-                "station_name": row.station_name,
-                "station_id": row.station_id
+                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
+                "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None
             }
             for row in history_rows
         ]
         
-    except HTTPException:
-        raise
+        return history_data
+        
     except Exception as e:
-        logger.error(f"Error getting station PM2.5 history for station {station_id}: {e}")
+        logger.error(f"Error getting station history: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-#### city average api ###
-
-#### city average api ###
-
-@router.get(
-    "/cities/{city}/average/history",
-    summary="Hourly city-average AQI & PM2.5 history",
-    description="Get hourly historical city-wide average PM2.5 and AQI data"
-)
-async def city_average_history(
-    city: str = Path(
-        ...,
-        description="Select city from dropdown list",
-        example="Lahore",
-        enum=[
-            "Abbottabad","Bahawalpur","Bhopalwala","Chak Jhumra","Daska Kalan",
-            "Dera Ismail Khan","Eminabad","Faisalabad","Gujranwala","Haripur",
-            "Hundal","Hyderabad","Islamabad","Jhang","Jhelum","Kahna Nau",
-            "Karachi","Kasur","Khairpur Mir's","Kharan","Khurrianwala",
-            "Kot Malik Barkhurdar","Kotli Loharan","Kotri","Ladhewala Waraich",
-            "Lahore","Lodhran","Malam Jabba","Malir Cantonment","Mandi Bahauddin",
-            "Mirpur Khas","Multan","Murree","Pasrur","Pattoki","Peshawar",
-            "Pindi Bhattian","Qadirpur Ran","Quetta","Rahim Yar Khan","Raiwind",
-            "Rawalpindi","Rojhan","Sambrial","Sheikhupura","Sialkot","Skardu","Sukkur"
-        ]
-    ),
-    hours: int = Query(24, description="Number of hours to include (1–168)"),
-    db: AsyncSession = Depends(get_database),
+@router.get("/stations/{station_id}/history/pm25")
+async def get_station_history_pm25_data(
+    station_id: int,
+    hours: int = 24,
+    db: AsyncSession = Depends(get_database)
 ):
-    if hours < 1 or hours > 168:
-        raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
-
+    """Get historical PM2.5 concentration data for a specific station using numeric station ID
+    
+    Args:
+        station_id: The numeric station ID
+        hours: Number of hours of history to fetch (default: 24)
+        
+    Returns:
+        List of historical PM2.5 readings with timestamp and pm25 value
+        
+    Note:
+        This endpoint follows the same safe pattern as the AQI history endpoint,
+        using parameterized queries and proper error handling.
+    """
     try:
+        # Get station by numeric index using same pattern as other endpoints
+        station_lookup = await db.execute(text("""
+            SELECT station_id, name 
+            FROM stations 
+            WHERE active = true 
+            ORDER BY name
+        """))
+        
+        stations_list = station_lookup.fetchall()
+        
+        # Find the station at the given index
+        if station_id < 1 or station_id > len(stations_list):
+            raise HTTPException(status_code=404, detail="Station not found")
+        
+        target_station = stations_list[station_id - 1]  # Convert to 0-based index
+        hash_station_id = target_station.station_id
+        
+        # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
-            WITH bounds AS (
-                SELECT
-                    date_trunc('hour', NOW()) - INTERVAL '1 hour' AS end_hr_utc,  -- last complete hour (UTC)
-                    :hours::int AS h
-            ),
-            hour_series AS (
-                SELECT generate_series(
-                           (SELECT end_hr_utc - make_interval(hours => h - 1) FROM bounds),
-                           (SELECT end_hr_utc FROM bounds),
-                           INTERVAL '1 hour'
-                       ) AS hour_utc
-            ),
-            city_stations AS (
-                -- station_id is CHAR(16) -> cast to text to match readings.scope_key (text)
-                SELECT s.station_id::text AS scope_key
-                FROM stations s
-                JOIN cities c ON c.id = s.city_id
-                WHERE s.active = TRUE
-                  AND c.active = TRUE
-                  AND LOWER(c.name) = LOWER(:city_name)
-            ),
-            station_hourly AS (
-                -- For each hour bin and station in this city, pick the latest reading in [bin, bin+1h)
-                SELECT
-                    hs.hour_utc,
-                    r.scope_key::text AS scope_key,
-                    r.pm25,
-                    row_number() OVER (
-                        PARTITION BY hs.hour_utc, r.scope_key
-                        ORDER BY r.ts_utc DESC
-                    ) AS rn
-                FROM hour_series hs
-                JOIN readings r
-                  ON r.scope_type = 'station'
-                 AND r.ts_utc >= hs.hour_utc
-                 AND r.ts_utc <  hs.hour_utc + INTERVAL '1 hour'
-                 AND EXISTS (
-                       SELECT 1
-                       FROM city_stations cs
-                       WHERE cs.scope_key = r.scope_key::text
-                 )
-                -- Optional QC gate (uncomment if needed):
-                -- AND r.qc_state = 'OK'
-            ),
-            city_hourly AS (
-                SELECT
-                    sh.hour_utc,
-                    AVG(sh.pm25) AS avg_pm25,
-                    COUNT(*) FILTER (WHERE sh.rn = 1) AS stations_used
-                FROM station_hourly sh
-                WHERE sh.rn = 1
-                GROUP BY sh.hour_utc
+            WITH RECURSIVE hour_series AS (
+                SELECT 
+                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                UNION ALL
+                SELECT 
+                    hour_utc + INTERVAL '1 hour'
+                FROM hour_series
+                WHERE hour_utc < date_trunc('hour', NOW())
             )
-            SELECT
+            SELECT 
                 hs.hour_utc,
-                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,  -- PKT for display
-                ch.avg_pm25,
-                COALESCE(ch.stations_used, 0) AS stations_used
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
+                r.pm25
             FROM hour_series hs
-            LEFT JOIN city_hourly ch USING (hour_utc)
-            ORDER BY hs.hour_utc ASC;
-        """), {"city_name": city, "hours": hours})
-
-        rows = history_result.fetchall()
-
-        # If no rows, check if city exists at all (avoids silent 500s from empty joins)
-        if not rows:
-            city_check = await db.execute(
-                text("SELECT 1 FROM cities WHERE active = TRUE AND LOWER(name) = LOWER(:city_name)"),
-                {"city_name": city}
+            LEFT JOIN readings r ON (
+                date_trunc('hour', r.ts_utc) = hs.hour_utc
+                AND r.scope_key = :hash_station_id 
+                AND r.scope_type = 'station'
             )
-            if not city_check.fetchone():
-                raise HTTPException(status_code=404, detail="City not found")
-
-        result = []
-        for row in rows:
-            if row.avg_pm25 is not None:
-                avg_pm25 = float(row.avg_pm25)
-                avg_aqi = pm25_to_aqi(avg_pm25)
-                health_message = get_aqi_label(avg_aqi)
-                category = get_aqi_category(avg_aqi)
-            else:
-                avg_pm25 = None
-                avg_aqi = None
-                health_message = None
-                category = None
-
-            result.append({
+            ORDER BY hs.hour_utc ASC
+        """ % hours), {"hash_station_id": hash_station_id})
+        
+        history_rows = history_result.fetchall()
+        history_data = [
+            {
+                "timestamp_utc": row.hour_utc.isoformat() + "Z",
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "avg_pm25": avg_pm25,
-                "avg_aqi": avg_aqi,
-                "category": category,
-                "health_message": health_message,
-                "stations_used": int(row.stations_used) if row.stations_used is not None else 0
-            })
-
-        return result
-
-    except HTTPException:
-        raise
+                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
+                "pm25": float(row.pm25) if row.pm25 is not None else None
+            }
+            for row in history_rows
+        ]
+        
+        return history_data
+        
     except Exception as e:
-        logger.exception("Error getting city average history for %s", city)
+        logger.error(f"Error getting station PM2.5 history: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+

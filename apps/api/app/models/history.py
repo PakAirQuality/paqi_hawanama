@@ -201,3 +201,76 @@ class HistoryQuery(BaseModel):
                 "include_rollups": False
             }
         }
+
+
+class CityAverageHistoryPoint(BaseModel):
+    """Single historical data point for city average"""
+    timestamp_utc: datetime = Field(..., description="UTC timestamp")
+    timestamp_local: datetime = Field(..., description="Local timestamp")
+    avg_pm25_concentration: Optional[float] = Field(None, description="Average PM2.5 concentration across all city stations")
+    aqi: Optional[int] = Field(None, description="Air Quality Index calculated from average PM2.5")
+    category: str = Field(..., description="AQI category (e.g., Good, Moderate, Unhealthy)")
+    stations_count: int = Field(..., description="Number of stations with data for this hour")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "timestamp_utc": "2025-10-27T14:00:00Z",
+                "timestamp_local": "2025-10-27T19:00:00+05:00",
+                "avg_pm25_concentration": 89.4,
+                "aqi": 162,
+                "category": "Unhealthy",
+                "stations_count": 47
+            }
+        }
+
+
+class CityAverageHistoryResponse(BaseModel):
+    """Response for city average historical air quality data"""
+    city: str = Field(..., description="City name")
+    country: str = Field(..., description="Country name")
+    state: str = Field(..., description="State/Province name")
+    from_time: datetime = Field(..., description="Start time of data period (UTC)")
+    to_time: datetime = Field(..., description="End time of data period (UTC)")
+    timezone: str = Field(default="Asia/Karachi", description="Timezone for local timestamps")
+    data_points: List[CityAverageHistoryPoint] = Field(..., description="Historical average data points")
+    summary: Dict[str, Union[float, int, str]] = Field(..., description="Summary statistics for the period")
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "city": "Lahore",
+                "country": "Pakistan", 
+                "state": "Punjab",
+                "from_time": "2025-10-26T14:00:00Z",
+                "to_time": "2025-10-27T14:00:00Z",
+                "timezone": "Asia/Karachi",
+                "data_points": [
+                    {
+                        "timestamp_utc": "2025-10-26T14:00:00Z",
+                        "timestamp_local": "2025-10-26T19:00:00+05:00",
+                        "avg_pm25_concentration": 89.4,
+                        "aqi": 162,
+                        "category": "Unhealthy",
+                        "stations_count": 47
+                    },
+                    {
+                        "timestamp_utc": "2025-10-26T15:00:00Z",
+                        "timestamp_local": "2025-10-26T20:00:00+05:00",
+                        "avg_pm25_concentration": 92.1,
+                        "aqi": 167,
+                        "category": "Unhealthy",
+                        "stations_count": 45
+                    }
+                ],
+                "summary": {
+                    "hours_with_data": 24,
+                    "avg_pm25_mean": 89.4,
+                    "avg_pm25_max": 142.3,
+                    "avg_pm25_min": 45.2,
+                    "aqi_mean": 162,
+                    "aqi_max": 205,
+                    "total_data_points": 24
+                }
+            }
+        }

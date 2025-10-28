@@ -69,17 +69,17 @@ def get_aqi_label(aqi: Optional[int]) -> str:
     elif aqi > 500:
         return "Beyond Index"
     elif aqi > 300:
-        return "🟤 #Hazardous 😱"
+        return "#Hazardous 😱"
     elif aqi > 200:
-        return "🟣 Very #Unhealthy 😰"
+        return "Very #Unhealthy 😰"
     elif aqi > 150:
-        return "🔴 #Unhealthy"
+        return "#Unhealthy"
     elif aqi > 100:
-        return "🟠 Unhealthy for #SensitiveGroups"
+        return "Unhealthy for #SensitiveGroups"
     elif aqi > 50:
-        return "🟡 #Moderate"
+        return "#Moderate"
     else:
-        return "🟢 #Good ❤️"
+        return "#Good ❤️"
 
 
 def get_aqi_category(aqi: Optional[int]) -> str:

@@ -1,7 +1,7 @@
 {
   "hosting": [
     {
-      "site": "hawanama-frontend",
+      "site": "hawanama-2", 
       "source": "apps/web-next",
       "frameworksBackend": { "region": "asia-south1" },
       "rewrites": [
