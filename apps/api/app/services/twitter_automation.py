@@ -264,7 +264,9 @@ class TwitterAutomationService:
         Build Twitter post text from city average data.
         Format: 29-07-2025 15:00; PM2.5 conc. 38.1 μg/m³; 107 Air Quality Index (AQI); Unhealthy for #Sensitive Groups
         """
-        timestamp = datetime.now(TZ).strftime("%d-%m-%Y %H:%M")
+        # Get current time but round down to the nearest hour (:00)
+        current_time = datetime.now(TZ)
+        timestamp = current_time.strftime("%d-%m-%Y %H:00")
         pm25 = city_data["avg_pm25_concentration"]
         aqi = city_data["aqi"]
         health_message = city_data["health_message"] or ""
