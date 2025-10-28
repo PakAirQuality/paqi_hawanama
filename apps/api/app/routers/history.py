@@ -92,6 +92,7 @@ async def station_history(
 
 ############## CITY AVERAGES API ############## 
 
+
 @router.get(
     "/cities/{city}/average/history",
     summary="Hourly city-average AQI & PM2.5 history",
@@ -121,14 +122,18 @@ async def city_average_history(
         raise HTTPException(status_code=400, detail="Hours must be between 1 and 168")
 
     try:
+        # 1) Build the hour series
+        # 2) For each station & hour, pick ONE value (latest within that hour)
+        # 3) Average those per-hour station values across stations (equal weight)
         history_result = await db.execute(text("""
             WITH bounds AS (
                 SELECT
-                    date_trunc('hour', NOW())                            AS cur_hr_utc,
-                    date_trunc('hour', NOW()) - make_interval(hours => :hours) AS min_hr_utc
+                    date_trunc('hour', NOW())                                AS cur_hr_utc,
+                    -- We want exactly `:hours` bins ending at cur_hr_utc
+                    date_trunc('hour', NOW()) - make_interval(hours => :hours - 1) AS min_hr_utc
             ),
             hour_series AS (
-                -- The exact hour buckets we intend to return (UTC)
+                -- Exact hour buckets we will return (UTC)
                 SELECT generate_series(
                     (SELECT min_hr_utc FROM bounds),
                     (SELECT cur_hr_utc FROM bounds),
@@ -136,52 +141,50 @@ async def city_average_history(
                 ) AS hour_utc
             ),
             city_stations AS (
-                -- IMPORTANT: match the key used in readings.scope_key (hash/hex vs int).
-                -- If readings.scope_key stores the hashed key, keep s.station_id here only if station_id == that hash.
-                -- Otherwise switch to s.hash_station_id (or whatever column matches readings.scope_key).
-                SELECT s.station_id AS scope_key
+                -- Use the same key format as readings.scope_key; cast to text to be robust
+                SELECT s.station_id::text AS scope_key
                 FROM stations s
                 JOIN cities c ON s.city_id = c.id
                 WHERE s.active = TRUE
                 AND LOWER(c.name) = LOWER(:city_name)
             ),
             station_hourly AS (
-                -- For each (hour_bin, station), pick the latest reading in that hour: [hour_bin, hour_bin+1h)
+                -- For each (hour_bin, station), latest reading within [hour_bin, hour_bin+1h)
                 SELECT
                     hs.hour_utc,
-                    r.scope_key,
+                    r.scope_key::text AS scope_key,
                     r.pm25,
                     row_number() OVER (
                         PARTITION BY hs.hour_utc, r.scope_key
                         ORDER BY r.ts_utc DESC
                     ) AS rn
                 FROM hour_series hs
-                JOIN city_stations cs
-                ON TRUE
+                JOIN city_stations cs ON TRUE
                 JOIN readings r
                 ON r.scope_type = 'station'
-                AND r.scope_key  = cs.scope_key
-                AND r.ts_utc    >= hs.hour_utc
-                AND r.ts_utc    <  hs.hour_utc + INTERVAL '1 hour'
+                AND r.scope_key::text = cs.scope_key
+                AND r.ts_utc >= hs.hour_utc
+                AND r.ts_utc <  hs.hour_utc + INTERVAL '1 hour'
             ),
             city_hourly AS (
                 SELECT
                     sh.hour_utc,
-                    AVG(sh.pm25) AS avg_pm25,
-                    COUNT(*)     AS stations_used
+                    AVG(sh.pm25)              AS avg_pm25,
+                    COUNT(*) FILTER (WHERE sh.rn = 1) AS stations_used
                 FROM station_hourly sh
-                WHERE sh.rn = 1          -- latest within the hour per station
+                WHERE sh.rn = 1
                 GROUP BY sh.hour_utc
             )
             SELECT
                 hs.hour_utc,
-                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,   -- PKT for display
+                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,  -- PKT display
                 ch.avg_pm25,
                 ch.stations_used
             FROM hour_series hs
             LEFT JOIN city_hourly ch USING (hour_utc)
             ORDER BY hs.hour_utc ASC;
         """), {"city_name": city, "hours": hours})
+
 
         rows = history_result.fetchall()
 
@@ -205,7 +208,7 @@ async def city_average_history(
                 avg_aqi = None
                 health_message = None
                 category = None
-
+            
             result.append({
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
                 "avg_pm25": avg_pm25,
@@ -214,11 +217,12 @@ async def city_average_history(
                 "health_message": health_message,
                 "stations_used": int(row.stations_used) if row.stations_used is not None else 0
             })
-
+        
         return result
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Error getting city average history for %s: %s", city, e)
+        logger.error(f"Error getting city average history for %s: %s", city, e)
         raise HTTPException(status_code=500, detail="Internal server error")
+
