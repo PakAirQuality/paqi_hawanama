@@ -82,6 +82,35 @@ def get_aqi_label(aqi: Optional[int]) -> str:
         return "🟢 #Good ❤️"
 
 
+def get_aqi_category(aqi: Optional[int]) -> str:
+    """
+    Get AQI category name without emojis or hashtags.
+    
+    Args:
+        aqi: Air Quality Index value
+        
+    Returns:
+        AQI category string (e.g., "Good", "Moderate", "Unhealthy")
+    """
+    if aqi is None or not isinstance(aqi, int) or aqi < 0:
+        return "Unknown"
+    
+    if aqi > 500:
+        return "Beyond Index"
+    elif aqi > 300:
+        return "Hazardous"
+    elif aqi > 200:
+        return "Very Unhealthy"
+    elif aqi > 150:
+        return "Unhealthy"
+    elif aqi > 100:
+        return "Unhealthy for Sensitive Groups"
+    elif aqi > 50:
+        return "Moderate"
+    else:
+        return "Good"
+
+
 def to_local(ts_utc: datetime, tz_str: str) -> datetime:
     """
     Convert UTC timestamp to local time using timezone string
