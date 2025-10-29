@@ -47,7 +47,7 @@ class TwitterAutomationService:
             consumer_secret=settings.API_Key_Secret_twitter,
             access_token=settings.Access_Token_twitter,
             access_token_secret=settings.Access_Token_Secret_twitter,
-            wait_on_rate_limit=True,
+            wait_on_rate_limit=False,  # Never block the service on rate limits
         )
     
     def _load_state(self) -> Dict:
@@ -284,7 +284,7 @@ class TwitterAutomationService:
         return tweet
     
     def post_tweet(self, text: str, max_retries: int = 3) -> str:
-        """Post tweet and return tweet ID with timeout handling."""
+        """Post tweet and return tweet ID with non-blocking rate limit handling."""
         if not self.client:
             raise RuntimeError("Twitter client not initialized")
         
@@ -292,24 +292,35 @@ class TwitterAutomationService:
         for attempt in range(1, max_retries + 1):
             try:
                 logger.info(f"Attempting to post tweet (attempt {attempt}/{max_retries})")
-                # Set a longer timeout for the HTTP client used by tweepy
                 response = self.client.create_tweet(text=text)
                 tweet_id = str(response.data["id"])
                 logger.info(f"Tweet posted successfully. ID: {tweet_id}")
                 return tweet_id
+            except tweepy.TooManyRequests as e:
+                # Rate limit hit - return immediately without blocking
+                logger.warning(f"Twitter rate limit exceeded: {e}")
+                raise RuntimeError(f"Twitter rate limit exceeded - service will not be blocked: {e}")
+            except tweepy.Forbidden as e:
+                # Twitter API access forbidden
+                logger.error(f"Twitter API access forbidden: {e}")
+                raise RuntimeError(f"Twitter API access forbidden: {e}")
             except tweepy.TweepyException as e:
                 last_error = e
                 logger.warning(f"Tweet attempt {attempt} failed: {e}")
+                # Check if this is a rate limit error that wasn't caught above
+                if "rate limit" in str(e).lower():
+                    logger.warning("Rate limit detected in TweepyException - returning immediately")
+                    raise RuntimeError(f"Twitter rate limit exceeded: {e}")
                 if attempt < max_retries:
                     import time
-                    time.sleep(2 * attempt)  # Exponential backoff
+                    time.sleep(2 * attempt)  # Exponential backoff for non-rate-limit errors
                     continue
             except Exception as e:
                 last_error = e
                 logger.warning(f"Unexpected error on attempt {attempt}: {e}")
                 if attempt < max_retries:
                     import time
-                    time.sleep(2 * attempt)
+                    time.sleep(1)  # Brief pause for unexpected errors
                     continue
         
         logger.error(f"Failed to post tweet after {max_retries} attempts: {last_error}")
