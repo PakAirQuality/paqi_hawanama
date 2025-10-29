@@ -33,6 +33,9 @@ class Settings(BaseSettings):
     # Security
     TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
     
+    # LLM/AI Services
+    GEMINI_API_KEY: Optional[str] = None
+    
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 60
     

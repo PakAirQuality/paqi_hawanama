@@ -139,23 +139,27 @@ resource "google_cloud_scheduler_job" "city_ingestion" {
   }
 }
 
-# Twitter automation - Lahore AQI-based posting (HOURLY with smart rules)
-# Posts when AQI category changes OR if Hazardous/Beyond Index
-# Safety limit: 480 posts/month
+# Hawanama Bot - Smart Budget Model (500 posts/month)
+# Base Schedule: Data-only + LLM posts at fixed times (~330/month)
+# Smart Triggers: Category changes, volatility, hotspots, airpocalypse (~170/month)
 
-resource "google_cloud_scheduler_job" "twitter_lahore_hourly" {
-  name        = "twitter-lahore-aqi-hourly"
-  description = "Hourly Lahore AQI check with smart posting rules"
+resource "google_cloud_scheduler_job" "hawanama_bot_hourly" {
+  name        = "hawanama-bot-execution"
+  description = "Hourly Hawanama Bot with Smart Budget Model - LLM + Twitter integration"
   schedule    = "30 * * * *"  # Every hour at :30 (after data ingestion at :15)
   time_zone   = "UTC"
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/twitter-lahore-pm25"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/bot/execute"
     
     headers = {
       "Content-Type" = "application/json"
     }
+    
+    body = base64encode(jsonencode({
+      dry_run = false
+    }))
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
@@ -164,6 +168,40 @@ resource "google_cloud_scheduler_job" "twitter_lahore_hourly" {
 
   retry_config {
     retry_count = 2
+    max_retry_duration = "1800s"  # 30 minutes max retry duration
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
+# Emergency Hawanama Bot Test (manual trigger via gcloud)
+resource "google_cloud_scheduler_job" "hawanama_bot_test" {
+  name        = "hawanama-bot-test"
+  description = "Test Hawanama Bot execution (paused by default) - dry run mode"
+  schedule    = "0 0 1 1 *"  # January 1st (effectively disabled)
+  time_zone   = "UTC"
+  paused      = true  # Start in paused state
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/bot/execute"
+    
+    headers = {
+      "Content-Type" = "application/json"
+    }
+    
+    body = base64encode(jsonencode({
+      dry_run = true,
+      force_post = true
+    }))
+    
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 1
     max_retry_duration = "1800s"  # 30 minutes max retry duration
     min_backoff_duration = "60s"
     max_backoff_duration = "300s"

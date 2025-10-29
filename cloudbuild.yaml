@@ -1,4 +1,5 @@
 steps:
+  # Build the API service with Hawanama Bot integration
   - name: 'gcr.io/cloud-builders/docker'
     args:
       - 'build'
@@ -6,6 +7,19 @@ steps:
       - 'apps/api/Dockerfile'
       - '-t'
       - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
+      - '-t'
+      - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:$BUILD_ID'
+      - '--build-arg'
+      - 'HAWANAMA_BOT_ENABLED=true'
       - '.'
+    env:
+      - 'DOCKER_BUILDKIT=1'
+
 images:
   - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
+  - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:$BUILD_ID'
+
+# Build options for faster builds
+options:
+  machineType: 'E2_HIGHCPU_8'
+  diskSizeGb: 100

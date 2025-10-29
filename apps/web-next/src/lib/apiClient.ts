@@ -110,7 +110,9 @@ export const apiClient = {
 
   async getAQICategories(signal?: AbortSignal): Promise<AQICategory[]> {
     const response = await fetch(`${BASE_URL}/v1/meta/aqi-categories`, { signal })
-    if (!response.ok) throw new Error('Failed to fetch AQI categories')
+    if (!response.ok) {
+      throw new Error(`Failed to fetch AQI categories: ${response.status} ${response.statusText}`)
+    }
     
     const data = await response.json()
     // Convert backend format to frontend format
@@ -122,6 +124,7 @@ export const apiClient = {
       { min: categories.unhealthy.range[0], max: categories.unhealthy.range[1], label: 'Unhealthy', color: categories.unhealthy.color, text_color: '#ffffff' },
       { min: categories.very_unhealthy.range[0], max: categories.very_unhealthy.range[1], label: 'Very Unhealthy', color: categories.very_unhealthy.color, text_color: '#ffffff' },
       { min: categories.hazardous.range[0], max: categories.hazardous.range[1], label: 'Hazardous', color: categories.hazardous.color, text_color: '#ffffff' },
+      { min: 501, max: 999999, label: 'Beyond Index', color: categories.hazardous.color, text_color: '#ffffff' },
     ]
   },
 }
