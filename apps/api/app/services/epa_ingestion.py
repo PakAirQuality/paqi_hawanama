@@ -13,12 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 logger = logging.getLogger(__name__)
 
 def station_id_for_punjab(source_station_id: str) -> str:
-    return f"punjab:{source_station_id}"
+    # Generate a shorter station ID using hash since db field is limited
+    import hashlib
+    hash_obj = hashlib.sha256(f"punjab:{source_station_id}".encode())
+    return f"pb_{hash_obj.hexdigest()[:12]}"
 
 def get_settings():
     return dict(
         api_base="https://aqipunjab.com/api",
-        api_key="***REMOVED***",  # Public API key
+        api_key="***REMOVED***",  # Working API key
         tz="Asia/Karachi",
         country_id_pk=1,  # Pakistan country ID (adjust if needed)
         log_level="INFO",
@@ -36,14 +39,18 @@ def fetch_stations(api_base: str, api_key: str) -> List[Dict[str, Any]]:
         "X-API-Key": api_key,
         "X-Platform": "web",
         "Origin": "https://aqipunjab.com",
-        "Referer": "https://aqipunjab.com/",
+        "Referer": "https://aqipunjab.com/"
     }
+    logger.info("Using API key: %s...", api_key[:10])
+    logger.info("Request headers: %s", headers)
+    
     data = http_get(f"{api_base}/stations", headers=headers)
+    
     if data.get("success") and data.get("data"):
         stations = data["data"][0]
         logger.info("Fetched %d stations", len(stations))
         return stations
-    logger.warning("Unexpected stations payload")
+    logger.warning("Unexpected stations payload: %s", data)
     return []
 
 def fetch_station_24h(api_base: str, api_key: str, station_code: str, district: str) -> Optional[Dict[str, Any]]:
@@ -53,9 +60,11 @@ def fetch_station_24h(api_base: str, api_key: str, station_code: str, district: 
         "X-API-Key": api_key,
         "X-Platform": "web",
         "Origin": "https://aqipunjab.com",
-        "Referer": "https://aqipunjab.com/",
+        "Referer": "https://aqipunjab.com/"
     }
-    data = http_get(f"{api_base}/historical/24hours", headers=headers, params={"station": station_code, "district": district})
+    params = {"station": station_code, "district": district}
+    data = http_get(f"{api_base}/historical/24hours", headers=headers, params=params)
+    
     if data.get("success"):
         return data.get("data")
     return None
@@ -78,16 +87,15 @@ async def upsert_station(db: AsyncSession, *, provider_id: int, country_id: int,
     station_id = station_id_for_punjab(source_station_id)
     await db.execute(text("""
         INSERT INTO stations (
-          station_id, country_id, name, lat, lon, geom,
+          station_id, country_id, name, lat, lon,
           provider_id, source_station_id, timezone, active
         )
         VALUES (
           :station_id, :country_id, :name, :lat, :lon,
-          ST_SetSRID(ST_MakePoint(:lon,:lat), 4326),
           :provider_id, :source_station_id, :tz, true
         )
-        ON CONFLICT (station_id) DO UPDATE
-        SET name=EXCLUDED.name, active=true
+        ON CONFLICT (provider_id, source_station_id) DO UPDATE
+        SET name=EXCLUDED.name, lat=EXCLUDED.lat, lon=EXCLUDED.lon, active=true, station_id=EXCLUDED.station_id
     """), dict(
         station_id=station_id, country_id=country_id, name=name,
         lat=lat, lon=lon, provider_id=provider_id,
@@ -108,7 +116,7 @@ async def upsert_reading(db: AsyncSession, *, station_id: str, ts_utc: datetime,
         VALUES (
           'station', :scope_key, :ts_utc,
           :pm25, :pm10, :o3, :no2, :so2, :co,
-          :aqi_us, :main_us, :raw::jsonb, 'punjab', now()
+          :aqi_us, :main_us, CAST(:raw AS jsonb), 'punjab', now()
         )
         ON CONFLICT (scope_type, scope_key, ts_utc) DO UPDATE
         SET pm25=EXCLUDED.pm25, pm10=EXCLUDED.pm10, o3=EXCLUDED.o3,
@@ -150,10 +158,10 @@ async def collect_once(db: AsyncSession) -> Dict[str, Any]:
             errors.append(f"no data {code}")
             continue
 
-        meta = data.get("station_metadata") or {}
-        lat = meta.get("lat") or meta.get("latitude")
-        lon = meta.get("lon") or meta.get("longitude")
-        name = meta.get("station_name") or code
+        # Use coordinates from stations list since station_metadata in 24h endpoint might be null
+        lat = float(st.get("lat"))
+        lon = float(st.get("lon"))
+        name = st.get("station_name") or code
         if lat is None or lon is None:
             fail += 1
             errors.append(f"missing coords {code}")

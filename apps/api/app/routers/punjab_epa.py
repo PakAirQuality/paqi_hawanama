@@ -336,11 +336,39 @@ async def export_readings_csv(
         
         query = f"""
         WITH station_lookup AS (
-            SELECT s.source_station_id, s.lat, s.lon, s.station_id,
-                   LEFT(s.source_station_id, 13) as truncated_name
+            SELECT s.source_station_id, s.lat, s.lon, s.station_id
             FROM stations s
             JOIN providers p ON s.provider_id = p.id
             WHERE p.code = 'punjab'
+        ),
+        truncated_mappings AS (
+            SELECT DISTINCT
+                truncated_name,
+                source_station_id,
+                lat, 
+                lon
+            FROM (
+                SELECT 
+                    'DC Office DG' as truncated_name, 'DC Office DG Khan' as source_station_id, 30.05179263 as lat, 70.62966164 as lon
+                UNION ALL SELECT 'Drug Testing', 'Drug Testing Laboratory Rawalpindi', 33.54226391, 73.01392022
+                UNION ALL SELECT 'IUB (Baghdad', 'IUB (Baghdad Campus) Bahawalpur', 29.37683258, 71.7626724
+                UNION ALL SELECT 'IUB (Khawaja', 'IUB (Khawaja Fareed Campus) Bahawalpur', 29.39770812, 71.69163577
+                UNION ALL SELECT 'ARID Universi', 'ARID University Rawalpindi', 33.65061773, 73.08067117
+                UNION ALL SELECT 'GCU Faisalaba', 'GCU Faisalabad', 31.41624606, 73.07000253
+                UNION ALL SELECT 'NTU Faisalaba', 'NTU Faisalabad', 31.46211283, 73.1485473
+                UNION ALL SELECT 'DC Office Raw', 'DC Office Rawalpindi', 33.5846246, 73.0689157
+                UNION ALL SELECT 'DC Office Sar', 'DC Office Sargodha', 32.07161054, 72.67279476
+                UNION ALL SELECT 'DC Office Sia', 'DC Office Sialkot', 32.50525591, 74.53303398
+                UNION ALL SELECT 'DHQ Sheikhupu', 'DHQ Sheikhupura', 31.71190727, 73.97887263
+                UNION ALL SELECT 'Kahna Nau Hos', 'Kahna Nau Hospital-LHR', 31.37096864, 74.36509796
+                UNION ALL SELECT 'Govt. Teachin', 'Govt. Teaching Hospital Shahdara-LHR', 31.63812639, 74.28518245
+                UNION ALL SELECT 'Safari Park-L', 'Safari Park-LHR', 31.38231477, 74.21817282
+                UNION ALL SELECT 'Punjab Univer', 'Punjab University-LHR', 31.47965946, 74.26608654
+                UNION ALL SELECT 'DC Office Fai', 'DC Office Faisalabad', 31.42544876, 73.08115579
+                UNION ALL SELECT 'M. Nawaz Shar', 'M. Nawaz Sharif University of Engineering & Technology Multan', 30.02910958, 71.5415115
+                UNION ALL SELECT 'DC Office Guj', 'DC Office Gujranwala', 32.17468002, 74.19513106
+                UNION ALL SELECT 'GCW Gujranwal', 'GCW Gujranwala', 32.25587013, 74.15945324
+            ) mapping_table
         )
         SELECT 
             r.scope_key as station_id,
@@ -349,19 +377,19 @@ async def export_readings_csv(
             (r.raw->>'health_index') as health_index_punjab,
             r.pm25, r.pm10, r.no2, r.so2, r.co, r.o3,
             COALESCE(s.source_station_id, 
-                     sl.source_station_id,
+                     tm.source_station_id,
                      CASE 
                          WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
                          ELSE r.scope_key 
                      END) as station_code,
-            COALESCE(s.lat, sl.lat) as latitude,
-            COALESCE(s.lon, sl.lon) as longitude
+            COALESCE(s.lat, tm.lat) as latitude,
+            COALESCE(s.lon, tm.lon) as longitude
         FROM readings r 
         LEFT JOIN stations s ON r.scope_key = s.station_id
-        LEFT JOIN station_lookup sl ON (r.scope_key LIKE 'pk:%' AND SUBSTRING(r.scope_key FROM 4) = sl.truncated_name)
+        LEFT JOIN truncated_mappings tm ON (r.scope_key LIKE 'pk:%' AND SUBSTRING(r.scope_key FROM 4) = tm.truncated_name)
         WHERE r.source = 'punjab'
         {time_filter}
-        ORDER BY COALESCE(s.source_station_id, sl.source_station_id,
+        ORDER BY COALESCE(s.source_station_id, tm.source_station_id,
                          CASE 
                              WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
                              ELSE r.scope_key 

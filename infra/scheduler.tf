@@ -208,6 +208,34 @@ resource "google_cloud_scheduler_job" "hawanama_bot_test" {
   }
 }
 
+# 4. Punjab EPA Ingestion - Every hour at :45 (offset from main ingestion)
+resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
+  name        = "punjab-epa-ingestion"
+  description = "Punjab EPA data ingestion every hour at :45"
+  schedule    = "45 * * * *"  # Every hour at :45 (1:45, 2:45, 3:45, etc.)
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/punjab/ingest/hourly"
+    
+    headers = {
+      "Content-Type" = "application/json"
+    }
+    
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "1800s"  # 30 minutes max retry duration
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
 # Optional: Emergency full pipeline job (manual trigger via gcloud)
 resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
   name        = "full-pipeline-emergency"
