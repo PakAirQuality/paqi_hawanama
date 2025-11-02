@@ -370,30 +370,36 @@ async def export_readings_csv(
                 UNION ALL SELECT 'GCW Gujranwal', 'GCW Gujranwala', 32.25587013, 74.15945324
             ) mapping_table
         )
-        SELECT DISTINCT
+        SELECT 
             r.scope_key as station_id,
             r.ts_utc as timestamp,
-            r.aqi_us as punjab_aqi,
-            (r.raw->>'health_index') as health_index_punjab,
-            r.pm25, r.pm10, r.no2, r.so2, r.co, r.o3,
-            COALESCE(s.source_station_id, 
+            MAX(r.aqi_us) as punjab_aqi,
+            MAX(r.raw->>'health_index') as health_index_punjab,
+            MAX(r.pm25) as pm25, 
+            MAX(r.pm10) as pm10, 
+            MAX(r.no2) as no2, 
+            MAX(r.so2) as so2, 
+            MAX(r.co) as co, 
+            MAX(r.o3) as o3,
+            MAX(COALESCE(s.source_station_id, 
                      tm.source_station_id,
                      CASE 
                          WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
                          ELSE r.scope_key 
-                     END) as station_code,
-            COALESCE(s.lat, tm.lat) as latitude,
-            COALESCE(s.lon, tm.lon) as longitude
+                     END)) as station_code,
+            MAX(COALESCE(s.lat, tm.lat)) as latitude,
+            MAX(COALESCE(s.lon, tm.lon)) as longitude
         FROM readings r 
         LEFT JOIN stations s ON r.scope_key = s.station_id
         LEFT JOIN truncated_mappings tm ON (r.scope_key LIKE 'pk:%' AND SUBSTRING(r.scope_key FROM 4) = tm.truncated_name)
         WHERE r.source = 'punjab'
         {time_filter}
-        ORDER BY COALESCE(s.source_station_id, tm.source_station_id,
+        GROUP BY r.scope_key, r.ts_utc
+        ORDER BY MAX(COALESCE(s.source_station_id, tm.source_station_id,
                          CASE 
                              WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
                              ELSE r.scope_key 
-                         END) ASC, r.ts_utc ASC
+                         END)) ASC, r.ts_utc ASC
         LIMIT {limit}
         """
         
