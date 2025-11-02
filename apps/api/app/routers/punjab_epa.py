@@ -341,14 +341,22 @@ async def export_readings_csv(
             r.aqi_us as punjab_aqi,
             (r.raw->>'health_index') as health_index_punjab,
             r.pm25, r.pm10, r.no2, r.so2, r.co, r.o3,
-            s.source_station_id as station_code,
+            COALESCE(s.source_station_id, 
+                     CASE 
+                         WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
+                         ELSE r.scope_key 
+                     END) as station_code,
             s.lat as latitude,
             s.lon as longitude
         FROM readings r 
         LEFT JOIN stations s ON r.scope_key = s.station_id
         WHERE r.source = 'punjab'
         {time_filter}
-        ORDER BY s.source_station_id ASC, r.ts_utc ASC
+        ORDER BY COALESCE(s.source_station_id, 
+                         CASE 
+                             WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
+                             ELSE r.scope_key 
+                         END) ASC, r.ts_utc ASC
         LIMIT {limit}
         """
         
