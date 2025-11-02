@@ -370,7 +370,7 @@ async def export_readings_csv(
                 UNION ALL SELECT 'GCW Gujranwal', 'GCW Gujranwala', 32.25587013, 74.15945324
             ) mapping_table
         )
-        SELECT 
+        SELECT DISTINCT
             r.scope_key as station_id,
             r.ts_utc as timestamp,
             r.aqi_us as punjab_aqi,
