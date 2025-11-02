@@ -335,6 +335,13 @@ async def export_readings_csv(
         time_filter = f"AND r.ts_utc >= NOW() - INTERVAL '{hours} hours'" if hours else ""
         
         query = f"""
+        WITH station_lookup AS (
+            SELECT s.source_station_id, s.lat, s.lon, s.station_id,
+                   LEFT(s.source_station_id, 13) as truncated_name
+            FROM stations s
+            JOIN providers p ON s.provider_id = p.id
+            WHERE p.code = 'punjab'
+        )
         SELECT 
             r.scope_key as station_id,
             r.ts_utc as timestamp,
@@ -342,17 +349,19 @@ async def export_readings_csv(
             (r.raw->>'health_index') as health_index_punjab,
             r.pm25, r.pm10, r.no2, r.so2, r.co, r.o3,
             COALESCE(s.source_station_id, 
+                     sl.source_station_id,
                      CASE 
                          WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
                          ELSE r.scope_key 
                      END) as station_code,
-            s.lat as latitude,
-            s.lon as longitude
+            COALESCE(s.lat, sl.lat) as latitude,
+            COALESCE(s.lon, sl.lon) as longitude
         FROM readings r 
         LEFT JOIN stations s ON r.scope_key = s.station_id
+        LEFT JOIN station_lookup sl ON (r.scope_key LIKE 'pk:%' AND SUBSTRING(r.scope_key FROM 4) = sl.truncated_name)
         WHERE r.source = 'punjab'
         {time_filter}
-        ORDER BY COALESCE(s.source_station_id, 
+        ORDER BY COALESCE(s.source_station_id, sl.source_station_id,
                          CASE 
                              WHEN r.scope_key LIKE 'pk:%' THEN SUBSTRING(r.scope_key FROM 4)
                              ELSE r.scope_key 
