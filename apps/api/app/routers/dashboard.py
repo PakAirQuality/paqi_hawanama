@@ -26,6 +26,8 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
                     COUNT(*) as total_stations,
                     COUNT(CASE WHEN s.active = true THEN 1 END) as active_stations
                 FROM stations s
+                LEFT JOIN providers p ON s.provider_id = p.id
+                WHERE COALESCE(p.code, '') != 'punjab'
             ),
             latest_readings AS (
                 SELECT 
@@ -35,6 +37,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
                     AVG(r.aqi_us) as avg_aqi
                 FROM readings r 
                 WHERE r.scope_type = 'station' 
+                AND r.source != 'punjab'
                 AND r.pm25 IS NOT NULL 
                 AND r.ts_utc > NOW() - INTERVAL '24 hours'
             ),
@@ -142,7 +145,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
 
 @router.get("/stations")
 async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
-    """Get stations data for map display"""
+    """Get Stations from IQAir API for Map Display"""
     try:
         # Get stations with latest readings - only get most recent reading per station
         result = await db.execute(text("""
@@ -180,7 +183,9 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
             FROM stations s
             LEFT JOIN cities c ON s.city_id = c.id
             LEFT JOIN latest_readings lr ON s.station_id = lr.scope_key
+            LEFT JOIN providers p ON s.provider_id = p.id
             WHERE s.active = true
+            AND COALESCE(p.code, '') != 'punjab'
             ORDER BY s.name
         """))
         
@@ -220,12 +225,14 @@ async def get_station_current_data(
 ):
     """Get current data for a specific station using numeric station ID"""
     try:
-        # First, find the station by numeric ID to get the hash-based station_id
+        # First, find the station by numeric ID to get the hash-based station_id (exclude Punjab EPA)
         station_lookup = await db.execute(text("""
-            SELECT station_id, name, lat, lon 
-            FROM stations 
-            WHERE active = true 
-            ORDER BY name
+            SELECT s.station_id, s.name, s.lat, s.lon 
+            FROM stations s
+            LEFT JOIN providers p ON s.provider_id = p.id
+            WHERE s.active = true 
+            AND COALESCE(p.code, '') != 'punjab'
+            ORDER BY s.name
         """))
         
         stations_list = station_lookup.fetchall()
@@ -286,12 +293,14 @@ async def get_station_history_data(
 ):
     """Get historical data for a specific station using numeric station ID"""
     try:
-        # Get station by numeric index using same pattern as current endpoint  
+        # Get station by numeric index using same pattern as current endpoint (exclude Punjab EPA)
         station_lookup = await db.execute(text("""
-            SELECT station_id, name 
-            FROM stations 
-            WHERE active = true 
-            ORDER BY name
+            SELECT s.station_id, s.name 
+            FROM stations s
+            LEFT JOIN providers p ON s.provider_id = p.id
+            WHERE s.active = true 
+            AND COALESCE(p.code, '') != 'punjab'
+            ORDER BY s.name
         """))
         
         stations_list = station_lookup.fetchall()
@@ -365,12 +374,14 @@ async def get_station_history_pm25_data(
         using parameterized queries and proper error handling.
     """
     try:
-        # Get station by numeric index using same pattern as other endpoints
+        # Get station by numeric index using same pattern as other endpoints (exclude Punjab EPA)
         station_lookup = await db.execute(text("""
-            SELECT station_id, name 
-            FROM stations 
-            WHERE active = true 
-            ORDER BY name
+            SELECT s.station_id, s.name 
+            FROM stations s
+            LEFT JOIN providers p ON s.provider_id = p.id
+            WHERE s.active = true 
+            AND COALESCE(p.code, '') != 'punjab'
+            ORDER BY s.name
         """))
         
         stations_list = station_lookup.fetchall()

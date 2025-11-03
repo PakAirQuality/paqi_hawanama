@@ -39,3 +39,7 @@ __pycache__/
 node_modules/
 .env.local
 .env
+
+# Database explorer with credentials
+prod_db_explorer/
+**/prod_db_explorer/

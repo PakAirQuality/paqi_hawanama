@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.core.database import get_database
@@ -98,7 +98,22 @@ async def get_cities(
 
 @router.get("/cities/{city_slug}")
 async def get_city(
-    city_slug: str,
+    city_slug: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="lahore",
+        enum=[
+            "abbottabad", "bahawalpur", "bhopalwala", "chak-jhumra", "daska-kalan", 
+            "dera-ismail-khan", "eminabad", "faisalabad", "gujranwala", "haripur", 
+            "hundal", "hyderabad", "islamabad", "jhang", "jhelum", "kahna-nau", 
+            "karachi", "kasur", "khairpur-mirs", "kharan", "khurrianwala", 
+            "kot-malik-barkhurdar", "kotli-loharan", "kotri", "ladhewala-waraich", 
+            "lahore", "lodhran", "malam-jabba", "malir-cantonment", "mandi-bahauddin", 
+            "mirpur-khas", "multan", "murree", "pasrur", "pattoki", "peshawar", 
+            "pindi-bhattian", "qadirpur-ran", "quetta", "rahim-yar-khan", "raiwind", 
+            "rawalpindi", "rojhan", "sambrial", "sheikhupura", "sialkot", "skardu", "sukkur"
+        ]
+    ),
     db: AsyncSession = Depends(get_database)
 ):
     """Get detailed city information with stations and aggregated data"""
@@ -319,7 +334,22 @@ async def get_city(
 
 @router.get("/cities/{city_slug}/historical")
 async def get_city_historical(
-    city_slug: str,
+    city_slug: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="lahore",
+        enum=[
+            "abbottabad", "bahawalpur", "bhopalwala", "chak-jhumra", "daska-kalan", 
+            "dera-ismail-khan", "eminabad", "faisalabad", "gujranwala", "haripur", 
+            "hundal", "hyderabad", "islamabad", "jhang", "jhelum", "kahna-nau", 
+            "karachi", "kasur", "khairpur-mirs", "kharan", "khurrianwala", 
+            "kot-malik-barkhurdar", "kotli-loharan", "kotri", "ladhewala-waraich", 
+            "lahore", "lodhran", "malam-jabba", "malir-cantonment", "mandi-bahauddin", 
+            "mirpur-khas", "multan", "murree", "pasrur", "pattoki", "peshawar", 
+            "pindi-bhattian", "qadirpur-ran", "quetta", "rahim-yar-khan", "raiwind", 
+            "rawalpindi", "rojhan", "sambrial", "sheikhupura", "sialkot", "skardu", "sukkur"
+        ]
+    ),
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):

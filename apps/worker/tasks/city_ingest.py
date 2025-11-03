@@ -18,7 +18,7 @@ import logging
 import os
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
 # --- PATH SHIM: allows `python tasks/run_city_now.py` to import `services.*` ---
@@ -74,6 +74,18 @@ def _state_aliases(state: Optional[str]) -> List[str]:
 
 def _scope_key(country: str, state: str, city: str) -> str:
     return f"{country.lower()}|{state.lower()}|{city.lower()}"
+
+# ---------- Time helpers (copied from station worker) ----------
+def _norm_hour(dt: datetime) -> datetime:
+    """Floor to the exact hour (UTC-aware in/out)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
+
+def _approx_one_hour(a: datetime, b: datetime) -> bool:
+    """True if a - b ≈ 1h (tolerates small jitters)."""
+    return abs((a - b) - timedelta(hours=1)) <= timedelta(minutes=10)
+# ----------------------------------------------------------------------
 
 class _AsyncRateLimiter:
     """
@@ -507,6 +519,7 @@ class CityIngestionTask:
     def _normalize_city_readings(self, parsed: Dict[str, Any], scope_key: str) -> List[Dict[str, Any]]:
         """
         Normalize IQAir city parsed payload into multiple readings from both current and history.pollution.
+        Includes lag handling to prevent duplicates between current and historical data.
         Returns a list of readings for all available timestamps.
         """
         readings = []
@@ -515,14 +528,16 @@ class CityIngestionTask:
             # Get raw response for fallback data
             raw_response = parsed.get("raw_response", {})
             
-            # Process current reading first
+            # Process current reading first and extract its timestamp
             current = parsed.get("current", {}) or {}
+            current_ts = None
             if current:
                 reading = self._normalize_single_city_reading(current, scope_key, raw_response, is_current=True)
                 if reading:
                     readings.append(reading)
+                    current_ts = reading["ts_utc"]
             
-            # Process historical readings from history.pollution
+            # Process historical readings from history.pollution with lag handling
             history = raw_response.get("history", {}) if raw_response else {}
             pollution_history = history.get("pollution", []) if history else []
             weather_history = history.get("weather", []) if history else []
@@ -534,27 +549,48 @@ class CityIngestionTask:
                 if ts:
                     weather_by_ts[ts] = w
             
-            # Process each historical pollution reading
+            # Process each historical pollution reading with lag handling
             for pollution_entry in pollution_history:
                 ts_str = pollution_entry.get("ts")
                 if not ts_str:
                     continue
-                    
+                
+                # Parse original timestamp
+                try:
+                    if ts_str.endswith("Z"):
+                        original_ts = datetime.fromisoformat(ts_str[:-1]).replace(tzinfo=timezone.utc)
+                    else:
+                        original_ts = datetime.fromisoformat(ts_str.replace("Z", "")).replace(tzinfo=timezone.utc)
+                except Exception:
+                    continue
+                
+                # Skip the history entry that corresponds to "current - 1h" (lag handling)
+                if current_ts and _approx_one_hour(current_ts, original_ts):
+                    logger.debug("Skipping historical entry at %s (overlaps with current at %s)", original_ts, current_ts)
+                    continue
+                
+                # Shift forward by +1h (correct the IQAir lag) - same as station worker
+                corrected_ts = _norm_hour(original_ts + timedelta(hours=1))
+                
                 # Find matching weather data for this timestamp
                 weather_entry = weather_by_ts.get(ts_str, {})
                 
-                # Create combined reading entry
+                # Create combined reading entry with corrected timestamp
                 combined_reading = {
-                    "pollution": pollution_entry,
+                    "pollution": pollution_entry.copy(),
                     "weather": weather_entry
                 }
+                # Update the timestamp in pollution data to corrected one
+                combined_reading["pollution"]["ts"] = corrected_ts.isoformat().replace("+00:00", "Z")
                 
                 reading = self._normalize_single_city_reading(combined_reading, scope_key, raw_response, is_current=False)
                 if reading:
+                    # Ensure the corrected timestamp is used
+                    reading["ts_utc"] = corrected_ts
                     readings.append(reading)
             
-            logger.debug("Normalized %d readings for city %s (%d current + %d historical)", 
-                        len(readings), scope_key, 1 if current else 0, len(pollution_history))
+            logger.debug("Normalized %d readings for city %s (%d current + %d historical after lag handling)", 
+                        len(readings), scope_key, 1 if current else 0, len([r for r in readings if not getattr(r, 'is_current', True)]))
             
             return readings
             
@@ -591,8 +627,8 @@ class CityIngestionTask:
                     else:
                         return None
 
-            # Floor to hour for consistency
-            ts_utc = ts_utc.replace(minute=0, second=0, microsecond=0)
+            # Floor to hour for consistency using station worker's helper
+            ts_utc = _norm_hour(ts_utc)
 
             # Map main pollutant codes
             pollutant_mapping = {"p1": "pm10", "p2": "pm25", "o3": "o3", "n2": "no2", "s2": "so2", "co": "co"}
@@ -665,12 +701,106 @@ class CityIngestionTask:
             logger.warning("Failed to normalize single city reading for %s: %s", scope_key, e)
             return None
 
+    # ---------- NEW: in-memory deduplication (copied from station worker) ----------
+    def _dedupe_readings_in_memory(self, readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        In-memory deduplication by (scope_key, ts_utc). Merges non-null values when duplicates found.
+        """
+        by_key: Dict[tuple, Dict[str, Any]] = {}
+
+        def merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
+            """Prefer non-null values from b to fill a"""
+            for k, v in b.items():
+                if k in ("scope_type", "scope_key", "ts_utc"):
+                    continue
+                if a.get(k) is None and v is not None:
+                    a[k] = v
+            return a
+
+        for reading in readings:
+            # Normalize timestamp defensively
+            reading["ts_utc"] = _norm_hour(reading["ts_utc"])
+            key = (reading["scope_key"], reading["ts_utc"])
+            if key in by_key:
+                by_key[key] = merge(by_key[key], reading)
+                logger.debug("Merged duplicate reading for %s at %s", reading["scope_key"], reading["ts_utc"])
+            else:
+                by_key[key] = reading
+        
+        logger.info("Deduplication: %d → %d readings", len(readings), len(by_key))
+        return list(by_key.values())
+
+    # ---------- NEW: drop rows that already exist in DB (copied from station worker) ----------
+    async def _drop_existing_readings(self, readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Check database and filter out readings that already exist.
+        """
+        if not readings:
+            return readings
+
+        # Group readings by scope_key for efficient range queries
+        grouped: Dict[str, List[Dict[str, Any]]] = {}
+        for r in readings:
+            grouped.setdefault(r["scope_key"], []).append(r)
+
+        keep: List[Dict[str, Any]] = []
+        from sqlalchemy import text  # import here to avoid global dependency
+        
+        async with AsyncSessionLocal() as sess:
+            for scope_key, grp in grouped.items():
+                # Compute a loose window to minimize roundtrips
+                ts_vals = sorted([_norm_hour(x["ts_utc"]) for x in grp])
+                min_ts, max_ts = ts_vals[0], ts_vals[-1]
+
+                q = text("""
+                    SELECT ts_utc
+                    FROM readings
+                    WHERE scope_key = :scope_key
+                      AND scope_type = 'city'
+                      AND ts_utc >= :min_ts
+                      AND ts_utc <= :max_ts
+                """)
+                rs = await sess.execute(q, {"scope_key": scope_key, "min_ts": min_ts, "max_ts": max_ts})
+                existing = { _norm_hour(row[0].astimezone(timezone.utc)) for row in rs.fetchall() }
+
+                for r in grp:
+                    tsn = _norm_hour(r["ts_utc"])
+                    if tsn not in existing:
+                        keep.append(r)
+                    else:
+                        logger.debug("Skipping existing reading for %s at %s", r["scope_key"], tsn)
+        
+        logger.info("Existence check: %d → %d new readings", len(readings), len(keep))
+        return keep
+    # ---------------------------------------------------------------------------------
+
     async def _bulk_write_readings(self, rows: List[Dict[str, Any]]) -> None:
+        """
+        Apply deduplication and existence filtering before bulk writing to database.
+        """
         try:
+            if not rows:
+                logger.info("No readings to write.")
+                return
+            
+            logger.info("Starting bulk write with %d raw readings", len(rows))
+            
+            # Apply in-memory deduplication first
+            deduplicated_rows = self._dedupe_readings_in_memory(rows)
+            
+            # Filter out readings that already exist in database
+            new_rows = await self._drop_existing_readings(deduplicated_rows)
+            
+            if not new_rows:
+                logger.info("No new readings to insert after deduplication and existence check.")
+                return
+            
+            # Bulk insert the remaining new readings
             async with AsyncSessionLocal() as sess:
-                n = await self.db_service.upsert_readings_bulk(sess, rows)
+                n = await self.db_service.upsert_readings_bulk(sess, new_rows)
                 await sess.commit()
-                logger.info("Upserted %d city readings.", n)
+                logger.info("Successfully upserted %d new city readings.", n)
+                
         except Exception as e:
             logger.error("Bulk write failed: %s", e)
             raise
