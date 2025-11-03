@@ -20,6 +20,8 @@ import {
   ResponsiveContainer,
   Cell,
   Tooltip,
+  CartesianGrid,
+  ReferenceLine,
 } from 'recharts'
 
 // Compact rectangular AQI box component for city page with black text - responsive sizing
@@ -285,17 +287,18 @@ export default function CityClient({ citySlug }: CityClientProps) {
                       <ResponsiveContainer width="100%" height={200}>
                         <BarChart
                           data={chartData}
-                          margin={{ top: 15, right: 50, bottom: 30, left: 15 }}
+                          margin={{ top: 10, right: 15, bottom: 30, left: 10 }}
                           barCategoryGap="30%"
                           onClick={() => {}} // Disable click events
                           onMouseMove={() => {}} // Disable mouse tracking
                         >
+                          <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" horizontal={true} vertical={false} />
                           <XAxis
                             dataKey="chartPosition"
                             type="number"
                             domain={[0, chartData.length - 1]}
-                            axisLine={false}
-                            tickLine={false}
+                            axisLine={{ stroke: '#d1d5db' }}
+                            tickLine={{ stroke: '#d1d5db' }}
                             stroke="#9ca3af"
                             tick={{ fontSize: 10 }}
                             tickCount={5}
@@ -313,11 +316,13 @@ export default function CityClient({ citySlug }: CityClientProps) {
                             axisLine={false}
                             tickLine={false}
                             stroke="#9ca3af"
-                            tick={{ fontSize: 11, dx: 15 }}
+                            tick={{ fontSize: 11, dx: 5 }}
                             tickFormatter={(value) => Math.round(value)}
-                            width={60}
+                            width={40}
                             domain={[0, 'dataMax + 10']}
                           />
+                          
+                          <ReferenceLine y={0} stroke="#374151" strokeWidth={1} />
 
                           <Tooltip
                             contentStyle={{

@@ -1,4 +1,4 @@
-import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer } from 'recharts'
+import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, ReferenceLine } from 'recharts'
 import type { StationHistory, AQICategory } from '@/lib/apiClient'
 import { getAQICategory } from '@/lib/aqi'
 
@@ -24,10 +24,11 @@ export function HistoryMiniChart({ data, categories }: HistoryMiniChartProps) {
     <div className="h-32">
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={chartData} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#e5e5e5" horizontal={true} vertical={false} />
           <XAxis 
             dataKey="timeLabel" 
-            axisLine={false}
-            tickLine={false}
+            axisLine={{ stroke: '#d1d5db' }}
+            tickLine={{ stroke: '#d1d5db' }}
             tick={{ fontSize: 10, fill: '#6B7280' }}
             interval={0}
             angle={-45}
@@ -40,6 +41,7 @@ export function HistoryMiniChart({ data, categories }: HistoryMiniChartProps) {
             tick={{ fontSize: 11, fill: '#6B7280' }}
             domain={[0, 'dataMax']}
           />
+          <ReferenceLine y={0} stroke="#374151" strokeWidth={1} />
           <Bar 
             dataKey="aqi" 
             radius={[2, 2, 0, 0]}
