@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import get_database
-from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, tasks, bot, punjab_epa
+from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, tasks, bot, punjab_epa, openaq_network
 
 app = FastAPI(
     title="Hawanama API",
@@ -33,6 +33,7 @@ app.include_router(exports.router, prefix=f"{settings.API_V1_STR}/exports", tags
 app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}", tags=["tasks"])
 app.include_router(bot.router, prefix=f"{settings.API_V1_STR}", tags=["bot"])
 app.include_router(punjab_epa.router, prefix=f"{settings.API_V1_STR}/punjab", tags=["punjab-epa"])
+app.include_router(openaq_network.router, prefix=f"{settings.API_V1_STR}", tags=["openaq"])
 
 # Add direct stations endpoint for frontend compatibility
 @app.get(f"{settings.API_V1_STR}/stations")
