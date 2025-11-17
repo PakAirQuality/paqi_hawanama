@@ -25,10 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import get_database
 
 # How this network should appear to OpenAQ
-NETWORK_NAME = "PAQI AirVisual Network"
+NETWORK_NAME = "PAQI"
 ORGANIZATION = "Pakistan Air Quality Initiative (PAQI)"
 PROVIDER_LABEL = "PAQI"
-HARDWARE_TYPE = "IQAir"
+HARDWARE_TYPE = "IQAIR Airvisual Outdoor"
 
 # How to identify the 210 PAQI stations in your DB
 # You can switch this to providers.code if you prefer.

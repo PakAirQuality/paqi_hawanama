@@ -11,14 +11,24 @@ from app.core.config import settings
 security = HTTPBearer(auto_error=False)
 
 
-async def verify_tasks_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
+async def verify_tasks_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
     """
     Verify that the request has a valid authorization token for tasks endpoints.
     
     This protects tasks endpoints from unauthorized access while allowing
     Google Cloud Scheduler to invoke them with proper OIDC tokens.
     """
-    # If no credentials provided, check for Cloud Scheduler headers
+    # Check if this is a Cloud Scheduler request first
+    is_scheduler = await verify_cloud_scheduler_request(request)
+    
+    if is_scheduler:
+        # For Cloud Scheduler, we trust the OIDC token validation done by Cloud Run
+        return True
+    
+    # For non-scheduler requests, require authorization token
     if not credentials:
         raise HTTPException(
             status_code=401,

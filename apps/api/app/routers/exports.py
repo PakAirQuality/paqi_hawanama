@@ -8,28 +8,87 @@ Provides CSV export functionality for:
 These endpoints return streaming CSV responses for bulk data download.
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.core.database import get_database
+from app.core.security import verify_tasks_token
 from typing import Optional
 import logging
 import io
 import csv
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Export limits and constants
+MAX_DAYS_BACK = 30
+MAX_EXPORT_ROWS = 50_000
+DEFAULT_DAYS_BACK = 1  # Swagger-friendly default
+PM25_MAX_DAYS = 30  # Smaller limit for full hourly series
+
+def parse_date_yyyy_mm_dd(date_str: str) -> datetime:
+    """Parse YYYY-MM-DD date string to UTC datetime at start of day"""
+    return datetime.strptime(date_str, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+
+def validate_and_compute_time_range(
+    days_back: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None
+) -> tuple[datetime, datetime]:
+    """
+    Validate inputs and compute start_ts/end_ts for queries.
+    Returns (start_ts, end_ts) where end_ts is exclusive upper bound.
+    """
+    if start_date and end_date:
+        # Use explicit date range, ignore days_back
+        try:
+            start_ts = parse_date_yyyy_mm_dd(start_date)
+            end_ts = parse_date_yyyy_mm_dd(end_date) + timedelta(days=1)  # exclusive upper bound
+            
+            if start_ts >= end_ts:
+                raise HTTPException(status_code=400, detail="start_date must be before end_date")
+                
+            # Limit date range to MAX_DAYS_BACK
+            if (end_ts - start_ts).days > MAX_DAYS_BACK:
+                raise HTTPException(
+                    status_code=400, 
+                    detail=f"Date range cannot exceed {MAX_DAYS_BACK} days"
+                )
+                
+            return start_ts, end_ts
+            
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
+    else:
+        # Use days_back approach
+        if days_back is None:
+            days_back = DEFAULT_DAYS_BACK
+        if days_back < 1:
+            raise HTTPException(status_code=400, detail="days_back must be >= 1")
+        if days_back > MAX_DAYS_BACK:
+            days_back = MAX_DAYS_BACK  # Clamp to maximum
+            
+        now = datetime.now(timezone.utc)
+        start_ts = now - timedelta(days=days_back)
+        end_ts = now
+        
+        return start_ts, end_ts
+
 @router.get("/station-readings-csv")
 async def export_station_readings_csv(
+    request: Request,
     db: AsyncSession = Depends(get_database),
-    days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)")
+    days_back: Optional[int] = Query(DEFAULT_DAYS_BACK, description=f"Number of days back from now (default: {DEFAULT_DAYS_BACK}, max: {MAX_DAYS_BACK})"),
+    _: bool = Depends(verify_tasks_token)
 ):
     """
     Export all station-level readings as CSV.
+    
+    **Authentication Required**: This endpoint requires a valid API token via Authorization header.
     
     Returns a streaming CSV file with all station readings including:
     - Station information (ID, name, location)
@@ -38,19 +97,21 @@ async def export_station_readings_csv(
     - Quality control flags and timestamps
     
     Parameters:
-    - days_back: Number of days of historical data to include (default: 30, max: 365)
+    - days_back: Number of days of historical data to include (default: 1, max: 30)
+    
+    **Usage:**
+    ```bash
+    curl -H "Authorization: Bearer YOUR_API_TOKEN" \
+         "https://hawanama.org/api/v1/exports/station-readings-csv?days_back=7"
+    ```
     """
-    # Validate input
-    if days_back and (days_back < 1 or days_back > 365):
-        raise HTTPException(status_code=400, detail="days_back must be between 1 and 365")
+    # Compute time range with validation
+    start_ts, end_ts = validate_and_compute_time_range(days_back=days_back)
     
-    if days_back is None:
-        days_back = 30
+    logger.info(f"Exporting station readings CSV from {start_ts} to {end_ts}")
     
-    logger.info(f"Exporting station readings CSV for last {days_back} days")
-    
-    # Station readings export with metadata from JOINs
-    query = f"""
+    # Station readings export with metadata from JOINs - fully parameterized
+    query = text("""
     SELECT 
         r.scope_key as station_id,
         COALESCE(s.name, 'Unknown Station') as station_name,
@@ -73,22 +134,31 @@ async def export_station_readings_csv(
         r.heatindex_c as heat_index_celsius,
         r.weather_icon,
         r.qc_state,
-        r.source,
+        COALESCE(p.code, r.source) as provider_code,
+        COALESCE(p.display_name, r.source) as provider_name,
         r.units_pm25
     FROM readings r
     LEFT JOIN stations s ON r.scope_key = s.station_id
+    LEFT JOIN providers p ON s.provider_id = p.id
     LEFT JOIN cities c ON s.city_id = c.id
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
-        AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'
+        AND r.ts_utc >= :start_ts
+        AND r.ts_utc < :end_ts
         AND s.active = true
     ORDER BY r.scope_key, r.ts_utc ASC
-    LIMIT 50000
-    """
+    LIMIT :max_rows
+    """)
+    
+    params = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "max_rows": MAX_EXPORT_ROWS,
+    }
     
     try:
-        result = await db.execute(text(query))
+        result = await db.execute(query, params)
         rows = result.fetchall()
         
         # Create station_id to numeric_id mapping like dashboard API does
@@ -112,21 +182,21 @@ async def export_station_readings_csv(
             output = io.StringIO()
             writer = csv.writer(output)
             
-            # Write filtered header (removed pm10, o3, no2, so2, co columns)
+            # Write filtered header with provider information
             header = [
                 'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'state_name', 'country_name', 'timestamp_utc',
                 'pm25_ugm3', 'aqi_us', 'aqi_cn', 'main_pollutant_us', 'main_pollutant_cn',
                 'temperature_celsius', 'humidity_percent', 'pressure_hpa',
                 'wind_speed_ms', 'wind_direction_degrees', 'heat_index_celsius',
-                'weather_icon', 'qc_state', 'source', 'pm25_units'
+                'weather_icon', 'qc_state', 'provider_code', 'provider_name', 'pm25_units'
             ]
             writer.writerow(header)
             yield output.getvalue()
             output.seek(0)
             output.truncate(0)
             
-            # Write filtered data rows with numeric station IDs
+            # Write filtered data rows with numeric station IDs and provider info
             for row in rows:
                 numeric_id = station_id_map.get(row.station_id, 0)
                 data_row = [
@@ -151,7 +221,8 @@ async def export_station_readings_csv(
                     row.heat_index_celsius or '',
                     row.weather_icon or '',
                     row.qc_state or '',
-                    row.source or '',
+                    row.provider_code or '',
+                    row.provider_name or '',
                     row.units_pm25 or ''
                 ]
                 writer.writerow(data_row)
@@ -159,9 +230,10 @@ async def export_station_readings_csv(
                 output.seek(0)
                 output.truncate(0)
         
-        # Generate filename with timestamp
+        # Generate filename with timestamp and actual date range
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"hawanama_station_readings_{days_back}days_{timestamp}.csv"
+        date_range = f"{start_ts.strftime('%Y%m%d')}_to_{end_ts.strftime('%Y%m%d')}"
+        filename = f"hawanama_station_readings_{date_range}_{timestamp}.csv"
         
         # Return streaming response
         return StreamingResponse(
@@ -177,8 +249,10 @@ async def export_station_readings_csv(
 
 @router.get("/city-readings-csv")
 async def export_city_readings_csv(
+    request: Request,
     db: AsyncSession = Depends(get_database),
-    days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)")
+    days_back: Optional[int] = Query(DEFAULT_DAYS_BACK, description=f"Number of days back from now (default: {DEFAULT_DAYS_BACK}, max: {MAX_DAYS_BACK})"),
+    _: bool = Depends(verify_tasks_token)
 ):
     """
     Export all city-level readings as CSV.
@@ -190,19 +264,15 @@ async def export_city_readings_csv(
     - Quality control flags and timestamps
     
     Parameters:
-    - days_back: Number of days of historical data to include (default: 30, max: 365)
+    - days_back: Number of days of historical data to include (default: 1, max: 30)
     """
-    # Validate input
-    if days_back and (days_back < 1 or days_back > 365):
-        raise HTTPException(status_code=400, detail="days_back must be between 1 and 365")
+    # Compute time range with validation
+    start_ts, end_ts = validate_and_compute_time_range(days_back=days_back)
     
-    if days_back is None:
-        days_back = 30
+    logger.info(f"Exporting city readings CSV from {start_ts} to {end_ts}")
     
-    logger.info(f"Exporting city readings CSV for last {days_back} days")
-    
-    # Query to get all city readings with city metadata (filtered columns)
-    query = f"""
+    # Query to get all city readings with city metadata - fully parameterized
+    query = text("""
     SELECT 
         r.scope_key,
         (STRING_TO_ARRAY(r.scope_key, '|'))[3] as city_name,
@@ -222,12 +292,20 @@ async def export_city_readings_csv(
         r.units_pm25
     FROM readings r
     WHERE r.scope_type = 'city'
-        AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'
+        AND r.ts_utc >= :start_ts
+        AND r.ts_utc < :end_ts
     ORDER BY r.scope_key, r.ts_utc ASC
-    """
+    LIMIT :max_rows
+    """)
+    
+    params = {
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "max_rows": MAX_EXPORT_ROWS,
+    }
     
     try:
-        result = await db.execute(text(query))
+        result = await db.execute(query, params)
         
         # Create CSV content generator
         def generate_csv():
@@ -271,9 +349,10 @@ async def export_city_readings_csv(
                 output.seek(0)
                 output.truncate(0)
         
-        # Generate filename with timestamp
+        # Generate filename with timestamp and actual date range
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"hawanama_city_readings_{days_back}days_{timestamp}.csv"
+        date_range = f"{start_ts.strftime('%Y%m%d')}_to_{end_ts.strftime('%Y%m%d')}"
+        filename = f"hawanama_city_readings_{date_range}_{timestamp}.csv"
         
         # Return streaming response
         return StreamingResponse(
@@ -289,6 +368,7 @@ async def export_city_readings_csv(
 
 @router.get("/station-readings-by-city-csv/{city}")
 async def export_station_readings_by_city_csv(
+    request: Request,
     city: str = Path(
         ...,
         description="Select city from dropdown list",
@@ -306,9 +386,10 @@ async def export_station_readings_by_city_csv(
         ]
     ),
     db: AsyncSession = Depends(get_database),
-    days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)"),
-    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format (e.g., 2024-01-01)", example="2024-01-01"),
-    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format (e.g., 2024-12-31)", example="2024-12-31")
+    days_back: Optional[int] = Query(DEFAULT_DAYS_BACK, description=f"Number of days back from now (default: {DEFAULT_DAYS_BACK}, max: {MAX_DAYS_BACK})"),
+    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format (overrides days_back)", example="2024-01-01"),
+    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format (requires start_date)", example="2024-12-31"),
+    _: bool = Depends(verify_tasks_token)
 ):
     """
     Export station-level readings for a specific city as CSV.
@@ -321,34 +402,21 @@ async def export_station_readings_by_city_csv(
     
     Parameters:
     - city: Name of the city to filter stations (required, selected from dropdown)
-    - days_back: Number of days of historical data to include (default: 30, max: 365)
+    - days_back: Number of days of historical data to include (default: 1, max: 30)
     - start_date: Start date in YYYY-MM-DD format (overrides days_back if provided)
-    - end_date: End date in YYYY-MM-DD format (overrides days_back if provided)
+    - end_date: End date in YYYY-MM-DD format (requires start_date)
     """
-    # Validate input
-    if days_back and (days_back < 1 or days_back > 365):
-        raise HTTPException(status_code=400, detail="days_back must be between 1 and 365")
+    # Compute time range with validation
+    start_ts, end_ts = validate_and_compute_time_range(
+        days_back=days_back, 
+        start_date=start_date, 
+        end_date=end_date
+    )
     
-    if days_back is None:
-        days_back = 30
+    logger.info(f"Exporting station readings CSV for city '{city}' from {start_ts} to {end_ts}")
     
-    # Build date filter
-    date_filter = ""
-    if start_date and end_date:
-        try:
-            # Validate date format
-            datetime.strptime(start_date, '%Y-%m-%d')
-            datetime.strptime(end_date, '%Y-%m-%d')
-            date_filter = f"AND r.ts_utc >= '{start_date}' AND r.ts_utc <= '{end_date} 23:59:59'"
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-    else:
-        date_filter = f"AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'"
-    
-    logger.info(f"Exporting station readings CSV for city '{city}' with date filter: {date_filter}")
-    
-    # Station readings export filtered by city name
-    query = f"""
+    # Station readings export filtered by city name - fully parameterized with provider info
+    query = text("""
     SELECT 
         r.scope_key as station_id,
         COALESCE(s.name, 'Unknown Station') as station_name,
@@ -371,23 +439,33 @@ async def export_station_readings_by_city_csv(
         r.heatindex_c as heat_index_celsius,
         r.weather_icon,
         r.qc_state,
-        r.source,
+        COALESCE(p.code, r.source) as provider_code,
+        COALESCE(p.display_name, r.source) as provider_name,
         r.units_pm25
     FROM readings r
     LEFT JOIN stations s ON r.scope_key = s.station_id
+    LEFT JOIN providers p ON s.provider_id = p.id
     LEFT JOIN cities c ON s.city_id = c.id
     LEFT JOIN states st ON c.state_id = st.id
     LEFT JOIN countries co ON st.country_id = co.id
     WHERE r.scope_type = 'station'
         AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
+        AND r.ts_utc >= :start_ts
+        AND r.ts_utc < :end_ts
         AND s.active = true
-        {date_filter}
     ORDER BY r.scope_key, r.ts_utc ASC
-    LIMIT 50000
-    """
+    LIMIT :max_rows
+    """)
+    
+    params = {
+        "city_name": city,
+        "start_ts": start_ts,
+        "end_ts": end_ts,
+        "max_rows": MAX_EXPORT_ROWS,
+    }
     
     try:
-        result = await db.execute(text(query), {'city_name': city})
+        result = await db.execute(query, params)
         
         # Check if any results were found
         rows = result.fetchall()
@@ -417,21 +495,21 @@ async def export_station_readings_by_city_csv(
             output = io.StringIO()
             writer = csv.writer(output)
             
-            # Write header
+            # Write header with provider information
             header = [
                 'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'state_name', 'country_name', 'timestamp_utc',
                 'pm25_ugm3', 'aqi_us', 'aqi_cn', 'main_pollutant_us', 'main_pollutant_cn',
                 'temperature_celsius', 'humidity_percent', 'pressure_hpa',
                 'wind_speed_ms', 'wind_direction_degrees', 'heat_index_celsius',
-                'weather_icon', 'qc_state', 'source', 'pm25_units'
+                'weather_icon', 'qc_state', 'provider_code', 'provider_name', 'pm25_units'
             ]
             writer.writerow(header)
             yield output.getvalue()
             output.seek(0)
             output.truncate(0)
             
-            # Write data rows with numeric station IDs
+            # Write data rows with numeric station IDs and provider info
             for row in rows:
                 numeric_id = station_id_map.get(row.station_id, 0)
                 data_row = [
@@ -456,7 +534,8 @@ async def export_station_readings_by_city_csv(
                     row.heat_index_celsius or '',
                     row.weather_icon or '',
                     row.qc_state or '',
-                    row.source or '',
+                    row.provider_code or '',
+                    row.provider_name or '',
                     row.units_pm25 or ''
                 ]
                 writer.writerow(data_row)
@@ -490,6 +569,7 @@ async def export_station_readings_by_city_csv(
 
 @router.get("/station-readings-by-city-pm25-csv/{city}")
 async def export_station_readings_by_city_pm25_csv(
+    request: Request,
     city: str = Path(
         ...,
         description="Select city from dropdown list",
@@ -507,9 +587,10 @@ async def export_station_readings_by_city_pm25_csv(
         ]
     ),
     db: AsyncSession = Depends(get_database),
-    days_back: Optional[int] = Query(30, description="Number of days back from now to include (default: 30, max: 365)"),
-    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format (e.g., 2024-01-01)", example="2024-01-01"),
-    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format (e.g., 2024-12-31)", example="2024-12-31")
+    days_back: Optional[int] = Query(DEFAULT_DAYS_BACK, description=f"Number of days back from now (default: {DEFAULT_DAYS_BACK}, max: {MAX_DAYS_BACK})"),
+    start_date: Optional[str] = Query(None, description="Start date in YYYY-MM-DD format (overrides days_back)", example="2024-01-01"),
+    end_date: Optional[str] = Query(None, description="End date in YYYY-MM-DD format (requires start_date)", example="2024-12-31"),
+    _: bool = Depends(verify_tasks_token)
 ):
     """
     Export PM2.5-only station readings for a specific city as CSV.
@@ -527,68 +608,48 @@ async def export_station_readings_by_city_pm25_csv(
     - start_date: Start date in YYYY-MM-DD format (overrides days_back if provided)
     - end_date: End date in YYYY-MM-DD format (overrides days_back if provided)
     """
-    # Validate input
-    if days_back and (days_back < 1 or days_back > 365):
-        raise HTTPException(status_code=400, detail="days_back must be between 1 and 365")
+    # Compute time range with validation
+    start_ts, end_ts = validate_and_compute_time_range(
+        days_back=days_back, 
+        start_date=start_date, 
+        end_date=end_date
+    )
     
-    if days_back is None:
-        days_back = 30
+    logger.info(f"Exporting PM2.5-only station readings CSV for city '{city}' from {start_ts} to {end_ts}")
     
-    # Build date filter
-    date_filter = ""
-    if start_date and end_date:
-        try:
-            # Validate date format
-            datetime.strptime(start_date, '%Y-%m-%d')
-            datetime.strptime(end_date, '%Y-%m-%d')
-            date_filter = f"AND r.ts_utc >= '{start_date}' AND r.ts_utc <= '{end_date} 23:59:59'"
-        except ValueError:
-            raise HTTPException(status_code=400, detail="Invalid date format. Use YYYY-MM-DD")
-    else:
-        date_filter = f"AND r.ts_utc >= CURRENT_TIMESTAMP - INTERVAL '{days_back} days'"
-    
-    logger.info(f"Exporting PM2.5-only station readings CSV for city '{city}' with date filter: {date_filter}")
-    
-    # Get stations in the city first
-    stations_query = """
-    SELECT s.station_id, s.name, s.lat, s.lon, c.name as city_name
+    # Get stations in the city first - fully parameterized with provider info
+    stations_query = text("""
+    SELECT s.station_id, s.name, s.lat, s.lon, c.name as city_name,
+           COALESCE(p.code, 'unknown') as provider_code,
+           COALESCE(p.display_name, 'Unknown Provider') as provider_name
     FROM stations s
     LEFT JOIN cities c ON s.city_id = c.id
+    LEFT JOIN providers p ON s.provider_id = p.id
     WHERE LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
         AND s.active = true
     ORDER BY s.name
-    """
+    """)
     
-    # PM2.5 readings with complete time series using recursive CTE
-    hours_back = days_back * 24
-    readings_query = f"""
-    WITH RECURSIVE hour_series AS (
-        SELECT 
-            date_trunc('hour', NOW() - INTERVAL '{hours_back} hours') + INTERVAL '1 hour' AS hour_utc
-        UNION ALL
-        SELECT 
-            hour_utc + INTERVAL '1 hour'
-        FROM hour_series
-        WHERE hour_utc < date_trunc('hour', NOW())
-    )
+    # PM2.5 readings with complete time series - fully parameterized
+    readings_query = text("""
     SELECT 
-        :station_id as station_id,
-        hs.hour_utc as timestamp_utc,
+        r.scope_key as station_id,
+        r.ts_utc as timestamp_utc,
         r.pm25,
         r.qc_state,
         r.source
-    FROM hour_series hs
-    LEFT JOIN readings r ON (
-        date_trunc('hour', r.ts_utc) = hs.hour_utc
-        AND r.scope_key = :station_id 
+    FROM readings r
+    WHERE r.scope_key = :station_id 
         AND r.scope_type = 'station'
-    )
-    ORDER BY hs.hour_utc ASC
-    """
+        AND r.ts_utc >= :start_ts
+        AND r.ts_utc < :end_ts
+    ORDER BY r.ts_utc ASC
+    LIMIT :max_rows
+    """)
     
     try:
         # Get stations in the city
-        stations_result = await db.execute(text(stations_query), {'city_name': city})
+        stations_result = await db.execute(stations_query, {'city_name': city})
         stations = stations_result.fetchall()
         
         if not stations:
@@ -606,13 +667,21 @@ async def export_station_readings_by_city_pm25_csv(
                 'name': station.name,
                 'lat': station.lat,
                 'lon': station.lon,
-                'city_name': station.city_name
+                'city_name': station.city_name,
+                'provider_code': station.provider_code,
+                'provider_name': station.provider_name
             }
         
         # Get all readings data for all stations
         all_readings = []
         for station in stations:
-            readings_result = await db.execute(text(readings_query), {'station_id': station.station_id})
+            readings_params = {
+                'station_id': station.station_id,
+                'start_ts': start_ts,
+                'end_ts': end_ts,
+                'max_rows': MAX_EXPORT_ROWS
+            }
+            readings_result = await db.execute(readings_query, readings_params)
             readings = readings_result.fetchall()
             
             numeric_id = station_id_map[station.station_id]
@@ -625,6 +694,8 @@ async def export_station_readings_by_city_pm25_csv(
                     'lat': info['lat'],
                     'lon': info['lon'],
                     'city_name': info['city_name'],
+                    'provider_code': info['provider_code'],
+                    'provider_name': info['provider_name'],
                     'timestamp_utc': reading.timestamp_utc,
                     'pm25': reading.pm25,
                     'qc_state': reading.qc_state,
@@ -636,11 +707,11 @@ async def export_station_readings_by_city_pm25_csv(
             output = io.StringIO()
             writer = csv.writer(output)
             
-            # Write minimal header focused only on PM2.5 (removed pm25_units and qc_state)
+            # Write minimal header focused only on PM2.5 with provider info
             header = [
                 'id', 'station_name', 'latitude', 'longitude',
                 'city_name', 'timestamp_utc', 'timestamp_pk', 'pm25_ugm3', 
-                'source'
+                'provider_code', 'provider_name', 'qc_state'
             ]
             writer.writerow(header)
             yield output.getvalue()
@@ -665,7 +736,9 @@ async def export_station_readings_by_city_pm25_csv(
                     timestamp_utc.isoformat() if timestamp_utc else '',
                     timestamp_pk.isoformat() if timestamp_pk else '',
                     'null' if reading_data['pm25'] is None else float(reading_data['pm25']),
-                    reading_data['source'] or ''
+                    reading_data['provider_code'] or '',
+                    reading_data['provider_name'] or '',
+                    reading_data['qc_state'] or ''
                 ]
                 writer.writerow(data_row)
                 yield output.getvalue()
@@ -677,10 +750,8 @@ async def export_station_readings_by_city_pm25_csv(
         safe_city_name = "".join(c for c in city if c.isalnum() or c in (' ', '-', '_')).rstrip()
         safe_city_name = safe_city_name.replace(' ', '_')
         
-        if start_date and end_date:
-            filename = f"hawanama_station_pm25_{safe_city_name}_{start_date}_to_{end_date}_{timestamp}.csv"
-        else:
-            filename = f"hawanama_station_pm25_{safe_city_name}_{days_back}days_{timestamp}.csv"
+        date_range = f"{start_ts.strftime('%Y%m%d')}_to_{end_ts.strftime('%Y%m%d')}"
+        filename = f"hawanama_station_pm25_{safe_city_name}_{date_range}_{timestamp}.csv"
         
         # Return streaming response
         return StreamingResponse(
