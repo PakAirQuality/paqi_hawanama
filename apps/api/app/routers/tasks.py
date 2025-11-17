@@ -6,7 +6,7 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 import logging
 from fastapi import APIRouter, HTTPException, Depends, Request
 from typing import Dict, Any
-from app.core.security import verify_twitter_endpoint_access
+from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -22,7 +22,10 @@ except Exception as e:
 
 
 @router.post("/tasks/discover")
-async def run_station_discovery():
+async def run_station_discovery(
+    request: Request,
+    _: bool = Depends(verify_tasks_token)
+):
     """
     Trigger station discovery task.
     Discovers all available stations and updates station/city manifests.
@@ -51,7 +54,10 @@ async def run_station_discovery():
 
 
 @router.post("/tasks/ingest-stations")
-async def run_station_ingestion():
+async def run_station_ingestion(
+    request: Request,
+    _: bool = Depends(verify_tasks_token)
+):
     """
     Trigger station data ingestion task.
     Fetches current readings from individual stations using the station manifest.
@@ -80,7 +86,10 @@ async def run_station_ingestion():
 
 
 @router.post("/tasks/ingest-cities")
-async def run_city_ingestion():
+async def run_city_ingestion(
+    request: Request,
+    _: bool = Depends(verify_tasks_token)
+):
     """
     Trigger city data ingestion task.
     Fetches current readings from cities using the city manifest.
@@ -109,7 +118,10 @@ async def run_city_ingestion():
 
 
 @router.post("/tasks/full-pipeline")
-async def run_full_pipeline():
+async def run_full_pipeline(
+    request: Request,
+    _: bool = Depends(verify_tasks_token)
+):
     """
     Run the complete ingestion pipeline:
     1. Station discovery (refresh manifests)
@@ -206,7 +218,10 @@ async def run_twitter_lahore_pm25(
 
 
 @router.get("/tasks/status")
-async def get_task_status():
+async def get_task_status(
+    request: Request,
+    _: bool = Depends(verify_tasks_token)
+):
     """
     Get status information about available tasks and recent runs.
     """

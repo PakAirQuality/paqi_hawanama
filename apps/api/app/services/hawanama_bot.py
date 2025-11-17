@@ -123,7 +123,7 @@ class HawanamaBot:
             # Fallback to current time
             formatted_time = datetime.now(TZ).strftime("%d-%m-%Y %H:00")
         
-        pm25 = current_data["cityAveragePM25"]
+        pm25 = current_data["pm25"]
         aqi = current_data["cityAverageAQI"]
         category = current_data["cityCategory"]
         
@@ -283,7 +283,7 @@ class HawanamaBot:
         
         recommendations = []
         
-        # Trigger 1: High Smog (Very Unhealthy or Hazardous) - 3 hour cooldown
+        # Trigger 1: High Smog (Hazardous only) - 3 hour cooldown
         if triggers["high_smog"]:
             last_high_smog = last_checks.get("high_smog_last_post")
             if not last_high_smog:
@@ -292,7 +292,8 @@ class HawanamaBot:
                     "trigger": "high_smog",
                     "should_post": True,
                     "reason": f"High smog detected: {payload['currentData']['cityCategory']}",
-                    "schedule": "immediate"
+                    "schedule": "priority_high",  # High priority for public health
+                    "urgency": "high"
                 })
             else:
                 # Check if 3 hours have passed since last high smog post
@@ -306,7 +307,8 @@ class HawanamaBot:
                             "trigger": "high_smog",
                             "should_post": True,
                             "reason": f"High smog continues: {payload['currentData']['cityCategory']} (3h+ since last post)",
-                            "schedule": "immediate"
+                            "schedule": "priority_high",
+                            "urgency": "high"
                         })
                 except Exception:
                     # If time parsing fails, allow posting
@@ -314,10 +316,11 @@ class HawanamaBot:
                         "trigger": "high_smog",
                         "should_post": True,
                         "reason": f"High smog detected: {payload['currentData']['cityCategory']}",
-                        "schedule": "immediate"
+                        "schedule": "priority_high",
+                        "urgency": "high"
                     })
         
-        # Trigger 2: Volatility Alert (>50 point AQI increase) - 2 hour cooldown
+        # Trigger 2: Volatility Alert (>100 point AQI increase) - 2 hour cooldown
         if triggers["volatility_alert"]:
             last_volatility = last_checks.get("volatility_last_post")
             if not last_volatility:
@@ -330,7 +333,8 @@ class HawanamaBot:
                         "trigger": "volatility_alert",
                         "should_post": True,
                         "reason": f"AQI volatility: +{change} points in 2 hours",
-                        "schedule": "immediate"
+                        "schedule": "priority_medium",  # Medium priority for trend alerts
+                        "urgency": "medium"
                     })
             else:
                 # Check if 2 hours have passed since last volatility post
@@ -349,7 +353,8 @@ class HawanamaBot:
                                 "trigger": "volatility_alert",
                                 "should_post": True,
                                 "reason": f"AQI volatility continues: +{change} points (2h+ since last post)",
-                                "schedule": "immediate"
+                                "schedule": "priority_medium",
+                                "urgency": "medium"
                             })
                 except Exception:
                     # If time parsing fails, allow posting
@@ -362,10 +367,11 @@ class HawanamaBot:
                             "trigger": "volatility_alert",
                             "should_post": True,
                             "reason": f"AQI volatility: +{change} points in 2 hours",
-                            "schedule": "immediate"
+                            "schedule": "priority_medium",
+                            "urgency": "medium"
                         })
         
-        # Trigger 3: Hotspot Alert (worst station >75 points higher) - 4 hour cooldown
+        # Trigger 3: Hotspot Alert (worst station >99 points higher) - 4 hour cooldown
         if triggers["hotspot_alert"]:
             last_hotspot = last_checks.get("hotspot_last_post")
             if not last_hotspot:
@@ -378,7 +384,8 @@ class HawanamaBot:
                         "trigger": "hotspot_alert",
                         "should_post": True,
                         "reason": f"Extreme hotspot: {hotspots[0]['name']} ({worst_aqi}) vs city avg ({city_avg}), diff: +{diff}",
-                        "schedule": "immediate"
+                        "schedule": "priority_low",  # Low priority for location-specific alerts
+                        "urgency": "low"
                     })
             else:
                 # Check if 4 hours have passed since last hotspot post
@@ -397,7 +404,8 @@ class HawanamaBot:
                                 "trigger": "hotspot_alert",
                                 "should_post": True,
                                 "reason": f"Extreme hotspot continues: {hotspots[0]['name']} ({worst_aqi}) vs city avg ({city_avg}), diff: +{diff} (4h+ since last post)",
-                                "schedule": "immediate"
+                                "schedule": "priority_low",
+                                "urgency": "low"
                             })
                 except Exception:
                     # If time parsing fails, allow posting
@@ -410,7 +418,8 @@ class HawanamaBot:
                             "trigger": "hotspot_alert",
                             "should_post": True,
                             "reason": f"Extreme hotspot: {hotspots[0]['name']} ({worst_aqi}) vs city avg ({city_avg}), diff: +{diff}",
-                            "schedule": "immediate"
+                            "schedule": "priority_low",
+                            "urgency": "low"
                         })
         
         # Special: Airpocalypse (AQI > 500)
@@ -421,9 +430,14 @@ class HawanamaBot:
                     "trigger": "airpocalypse",
                     "should_post": True,
                     "reason": f"AIRPOCALYPSE: AQI {payload['currentData']['cityAverageAQI']} > 500",
-                    "schedule": "immediate",
+                    "schedule": "emergency",  # Emergency override - bypasses all limits
+                    "urgency": "emergency",
                     "priority": "emergency"
                 })
+        
+        # Sort recommendations by priority: emergency > high > medium > low
+        priority_order = {"emergency": 0, "high": 1, "medium": 2, "low": 3}
+        recommendations.sort(key=lambda x: priority_order.get(x.get("urgency", "low"), 3))
         
         return {
             "triggers": triggers,
@@ -819,7 +833,7 @@ class HawanamaBot:
                 "current_conditions": {
                     "aqi": payload["currentData"]["cityAverageAQI"],
                     "category": payload["currentData"]["cityCategory"],
-                    "pm25": payload["currentData"]["cityAveragePM25"]
+                    "pm25": payload["currentData"]["pm25"]
                 },
                 "active_triggers": {
                     "high_smog": triggers["high_smog"],
