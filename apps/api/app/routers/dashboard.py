@@ -19,7 +19,6 @@ router = APIRouter()
 async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
     """Get dashboard statistics"""
     try:
-        # Get comprehensive dashboard stats
         result = await db.execute(text("""
             WITH station_stats AS (
                 SELECT 
@@ -40,18 +39,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
                 AND r.source != 'punjab'
                 AND r.pm25 IS NOT NULL 
                 AND r.ts_utc > NOW() - INTERVAL '24 hours'
-            ),
-            top_cities AS (
-                SELECT 
-                    r.scope_key,
-                    AVG(r.aqi_us) as avg_aqi
-                FROM readings r 
-                WHERE r.scope_type = 'city' 
-                AND r.aqi_us IS NOT NULL 
-                AND r.ts_utc > NOW() - INTERVAL '24 hours'
-                GROUP BY r.scope_key
-                ORDER BY avg_aqi DESC
-                LIMIT 5
             ),
             reading_counts AS (
                 SELECT 
@@ -77,7 +64,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
         if not row:
             return {"error": "No data available"}
             
-        # Get top cities separately (try last 7 days if no data in last 24 hours)
+        # Get top cities (last 7 days)
         cities_result = await db.execute(text("""
             SELECT 
                 r.scope_key,
@@ -94,7 +81,6 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
         cities_rows = cities_result.fetchall()
         top_cities = []
         for city_row in cities_rows:
-            # Extract city name from scope_key (format: country|state|city)
             city_parts = city_row.scope_key.split('|')
             city_name = city_parts[-1].title() if len(city_parts) > 0 else city_row.scope_key
             top_cities.append({
@@ -102,12 +88,12 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
                 "aqi": float(city_row.avg_aqi)
             })
         
-        # Determine AQI color category
+        # AQI color
         avg_aqi = float(row.avg_aqi) if row.avg_aqi else 0
         if avg_aqi <= 50:
             aqi_color = 'green'
         elif avg_aqi <= 100:
-            aqi_color = 'yellow' 
+            aqi_color = 'yellow'
         elif avg_aqi <= 150:
             aqi_color = 'orange'
         elif avg_aqi <= 200:
@@ -115,11 +101,10 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
         else:
             aqi_color = 'purple'
             
-        # Format last update (convert UTC to Pakistan time UTC+5)
+        # Last update in PKT
         last_update = None
         if row.last_update:
-            from datetime import datetime, timezone, timedelta
-            # Convert UTC to Pakistan time (UTC+5)
+            from datetime import timezone, timedelta
             pkr_timezone = timezone(timedelta(hours=5))
             pkr_time = row.last_update.replace(tzinfo=timezone.utc).astimezone(pkr_timezone)
             last_update = pkr_time.strftime("%H:%M PKT")
@@ -132,7 +117,7 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
             "last_update": last_update or "No data",
             "top_cities": top_cities,
             "city_readings": row.city_readings or 0,
-            "station_readings": row.station_readings or 0, 
+            "station_readings": row.station_readings or 0,
             "total_readings": row.total_readings or 0,
             "total_cities": row.total_cities or 0
         }
@@ -142,71 +127,70 @@ async def get_dashboard_stats(db: AsyncSession = Depends(get_database)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-
 @router.get("/stations")
 async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
-    """Get Stations from IQAir API for Map Display"""
+    """Get stations with latest readings for map display (hash-based IDs)"""
     try:
-        # Get stations with latest readings - only get most recent reading per station
         result = await db.execute(text("""
             WITH latest_readings AS (
                 SELECT DISTINCT ON (scope_key) 
-                    scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa, wind_speed_ms, wind_dir_deg, ts_utc
+                    scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa,
+                    wind_speed_ms, wind_dir_deg, ts_utc
                 FROM readings
-                WHERE scope_type = 'station' 
-                AND ts_utc > NOW() - INTERVAL '48 hours'
+                WHERE scope_type = 'station'
+                  AND ts_utc > NOW() - INTERVAL '48 hours'
                 ORDER BY scope_key, ts_utc DESC
             )
             SELECT 
                 s.station_id,
                 s.name,
-                s.lat as latitude,
-                s.lon as longitude,
-                c.name as city_name,
+                s.lat AS latitude,
+                s.lon AS longitude,
+                c.name AS city_name,
                 lr.pm25,
                 lr.aqi_us,
-                lr.temp_c as temp,
-                lr.humidity as hum,
+                lr.temp_c AS temp,
+                lr.humidity AS hum,
                 lr.pressure_hpa,
                 lr.wind_speed_ms,
                 lr.wind_dir_deg,
-                lr.ts_utc as last_reading,
-                'OK' as qc_state,
+                lr.ts_utc AS last_reading,
+                'OK' AS qc_state,
                 CASE 
                     WHEN lr.aqi_us <= 50 THEN 'good'
-                    WHEN lr.aqi_us <= 100 THEN 'moderate' 
+                    WHEN lr.aqi_us <= 100 THEN 'moderate'
                     WHEN lr.aqi_us <= 150 THEN 'unhealthy_sensitive'
                     WHEN lr.aqi_us <= 200 THEN 'unhealthy'
                     WHEN lr.aqi_us <= 300 THEN 'very_unhealthy'
                     ELSE 'hazardous'
-                END as aqi_category
+                END AS aqi_category
             FROM stations s
             LEFT JOIN cities c ON s.city_id = c.id
             LEFT JOIN latest_readings lr ON s.station_id = lr.scope_key
             LEFT JOIN providers p ON s.provider_id = p.id
             WHERE s.active = true
-            AND COALESCE(p.code, '') != 'punjab'
+              AND COALESCE(p.code, '') != 'punjab'
             ORDER BY s.name
         """))
         
         stations_rows = result.fetchall()
         stations_list = []
-        for i, row in enumerate(stations_rows):
+        for row in stations_rows:
             station_data = {
-                "id": i + 1,  # Use sequential numeric ID for frontend
-                "station_id": row.station_id,  # Keep original hash ID
+                # <-- hash ID becomes the public API ID
+                "id": row.station_id,
                 "name": row.name,
-                "latitude": float(row.latitude) if row.latitude else 0,
-                "longitude": float(row.longitude) if row.longitude else 0,
-                "city": row.city_name,  # Add city name for boundary filtering
-                "source_id": 1,  # Default source ID (AirVisual)
-                "pm25": float(row.pm25) if row.pm25 else None,
-                "aqi_raw": int(row.aqi_us) if row.aqi_us else None,  # Frontend expects aqi_raw
-                "temp": float(row.temp) if row.temp else None,
-                "hum": float(row.hum) if row.hum else None,
+                "latitude": float(row.latitude) if row.latitude is not None else 0.0,
+                "longitude": float(row.longitude) if row.longitude is not None else 0.0,
+                "city": row.city_name,
+                "source_id": 1,  # keep if frontend expects this
+                "pm25": float(row.pm25) if row.pm25 is not None else None,
+                "aqi_raw": int(row.aqi_us) if row.aqi_us is not None else None,
+                "temp": float(row.temp) if row.temp is not None else None,
+                "hum": float(row.hum) if row.hum is not None else None,
                 "qc_state": row.qc_state,
-                "aqi_category": row.aqi_category if row.aqi_us else None,
-                "last_reading": row.last_reading.isoformat() if row.last_reading else None
+                "aqi_category": row.aqi_category if row.aqi_us is not None else None,
+                "last_reading": row.last_reading.isoformat() if row.last_reading else None,
             }
             stations_list.append(station_data)
         
@@ -217,69 +201,66 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
-
 @router.get("/stations/{station_id}/current")
 async def get_station_current_data(
-    station_id: int,
+    station_id: str,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get current data for a specific station using numeric station ID"""
+    """Get current data for a specific station using hash station_id"""
     try:
-        # First, find the station by numeric ID to get the hash-based station_id (exclude Punjab EPA)
-        station_lookup = await db.execute(text("""
-            SELECT s.station_id, s.name, s.lat, s.lon 
+        # Verify station exists and is not Punjab EPA
+        station_result = await db.execute(text("""
+            SELECT s.station_id, s.name, s.lat, s.lon
             FROM stations s
             LEFT JOIN providers p ON s.provider_id = p.id
-            WHERE s.active = true 
-            AND COALESCE(p.code, '') != 'punjab'
-            ORDER BY s.name
-        """))
+            WHERE s.station_id = :station_id
+              AND s.active = true
+              AND COALESCE(p.code, '') != 'punjab'
+        """), {"station_id": station_id})
         
-        stations_list = station_lookup.fetchall()
-        
-        # Find the station at the given index (station_id - 1, since IDs are 1-based)
-        if station_id < 1 or station_id > len(stations_list):
+        target_station = station_result.fetchone()
+        if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        target_station = stations_list[station_id - 1]  # Convert to 0-based index
-        hash_station_id = target_station.station_id
-        
-        # Get latest reading for this station using the same pattern as working endpoint
+        # Get latest reading for this station
         latest_reading = await db.execute(text("""
             WITH latest_readings AS (
-                SELECT DISTINCT ON (scope_key) 
-                    scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa, wind_speed_ms, wind_dir_deg, ts_utc
+                SELECT DISTINCT ON (scope_key)
+                    scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa,
+                    wind_speed_ms, wind_dir_deg, ts_utc
                 FROM readings
-                WHERE scope_type = 'station' 
-                AND scope_key = :hash_station_id
-                AND ts_utc > NOW() - INTERVAL '48 hours'
+                WHERE scope_type = 'station'
+                  AND scope_key = :station_id
+                  AND ts_utc > NOW() - INTERVAL '48 hours'
                 ORDER BY scope_key, ts_utc DESC
             )
             SELECT * FROM latest_readings
-        """), {"hash_station_id": hash_station_id})
+        """), {"station_id": station_id})
         
         reading_row = latest_reading.fetchone()
         
-        # Determine main pollutant (simplified - use PM2.5 for now)
+        # Main pollutant
         main_pollutant = "PM2.5"
-        main_value = float(reading_row.pm25) if reading_row and reading_row.pm25 else 0
-        aqi_value = int(reading_row.aqi_us) if reading_row and reading_row.aqi_us else 0
+        main_value = float(reading_row.pm25) if reading_row and reading_row.pm25 is not None else 0.0
+        aqi_value = int(reading_row.aqi_us) if reading_row and reading_row.aqi_us is not None else 0
         
         return {
-            "station_id": str(station_id),  # Return the numeric ID as expected by frontend
+            "station_id": station_id,  # hash ID as string
             "name": target_station.name,
             "aqi_us": aqi_value,
             "main_pollutant": main_pollutant,
             "main_value": main_value,
             "main_units": "µg/m³",
-            "temp_c": float(reading_row.temp_c) if reading_row and reading_row.temp_c else None,
-            "humidity": float(reading_row.humidity) if reading_row and reading_row.humidity else None,
-            "wind_speed_kmh": float(reading_row.wind_speed_ms * 3.6) if reading_row and reading_row.wind_speed_ms else None,
-            "wind_direction": float(reading_row.wind_dir_deg) if reading_row and reading_row.wind_dir_deg else None,
-            "pressure_mbar": float(reading_row.pressure_hpa) if reading_row and reading_row.pressure_hpa else None,
-            "last_update": reading_row.ts_utc.isoformat() if reading_row and reading_row.ts_utc else None
+            "temp_c": float(reading_row.temp_c) if reading_row and reading_row.temp_c is not None else None,
+            "humidity": float(reading_row.humidity) if reading_row and reading_row.humidity is not None else None,
+            "wind_speed_kmh": float(reading_row.wind_speed_ms * 3.6) if reading_row and reading_row.wind_speed_ms is not None else None,
+            "wind_direction": float(reading_row.wind_dir_deg) if reading_row and reading_row.wind_dir_deg is not None else None,
+            "pressure_mbar": float(reading_row.pressure_hpa) if reading_row and reading_row.pressure_hpa is not None else None,
+            "last_update": reading_row.ts_utc.isoformat() if reading_row and reading_row.ts_utc is not None else None,
         }
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting station current data: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -287,36 +268,33 @@ async def get_station_current_data(
 
 @router.get("/stations/{station_id}/history")
 async def get_station_history_data(
-    station_id: int,
+    station_id: str,
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical data for a specific station using numeric station ID"""
+    """Get historical AQI data for a specific station using hash station_id"""
     try:
-        # Get station by numeric index using same pattern as current endpoint (exclude Punjab EPA)
-        station_lookup = await db.execute(text("""
-            SELECT s.station_id, s.name 
+        # Verify station exists / is allowed
+        station_result = await db.execute(text("""
+            SELECT s.station_id, s.name
             FROM stations s
             LEFT JOIN providers p ON s.provider_id = p.id
-            WHERE s.active = true 
-            AND COALESCE(p.code, '') != 'punjab'
-            ORDER BY s.name
-        """))
+            WHERE s.station_id = :station_id
+              AND s.active = true
+              AND COALESCE(p.code, '') != 'punjab'
+        """), {"station_id": station_id})
         
-        stations_list = station_lookup.fetchall()
-        
-        # Find the station at the given index
-        if station_id < 1 or station_id > len(stations_list):
+        target_station = station_result.fetchone()
+        if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        target_station = stations_list[station_id - 1]  # Convert to 0-based index
-        hash_station_id = target_station.station_id
-        
-        # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
             WITH RECURSIVE hour_series AS (
                 SELECT 
-                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                    date_trunc(
+                        'hour',
+                        NOW() - ((:hours::text || ' hours')::interval)
+                    ) + INTERVAL '1 hour' AS hour_utc
                 UNION ALL
                 SELECT 
                     hour_utc + INTERVAL '1 hour'
@@ -330,25 +308,27 @@ async def get_station_history_data(
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :hash_station_id 
+                AND r.scope_key = :station_id
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"hash_station_id": hash_station_id})
+        """), {"station_id": station_id, "hours": hours})
         
         history_rows = history_result.fetchall()
         history_data = [
             {
                 "timestamp_utc": row.hour_utc.isoformat() + "Z",
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
-                "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None
+                "timestamp": row.hour_utc.isoformat() + "Z",  # backward compat
+                "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None,
             }
             for row in history_rows
         ]
         
         return history_data
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting station history: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -356,48 +336,33 @@ async def get_station_history_data(
 
 @router.get("/stations/{station_id}/history/pm25")
 async def get_station_history_pm25_data(
-    station_id: int,
+    station_id: str,
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical PM2.5 concentration data for a specific station using numeric station ID
-    
-    Args:
-        station_id: The numeric station ID
-        hours: Number of hours of history to fetch (default: 24)
-        
-    Returns:
-        List of historical PM2.5 readings with timestamp and pm25 value
-        
-    Note:
-        This endpoint follows the same safe pattern as the AQI history endpoint,
-        using parameterized queries and proper error handling.
-    """
+    """Get historical PM2.5 concentration data for a specific station using hash station_id"""
     try:
-        # Get station by numeric index using same pattern as other endpoints (exclude Punjab EPA)
-        station_lookup = await db.execute(text("""
-            SELECT s.station_id, s.name 
+        # Verify station exists / is allowed
+        station_result = await db.execute(text("""
+            SELECT s.station_id, s.name
             FROM stations s
             LEFT JOIN providers p ON s.provider_id = p.id
-            WHERE s.active = true 
-            AND COALESCE(p.code, '') != 'punjab'
-            ORDER BY s.name
-        """))
+            WHERE s.station_id = :station_id
+              AND s.active = true
+              AND COALESCE(p.code, '') != 'punjab'
+        """), {"station_id": station_id})
         
-        stations_list = station_lookup.fetchall()
-        
-        # Find the station at the given index
-        if station_id < 1 or station_id > len(stations_list):
+        target_station = station_result.fetchone()
+        if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
         
-        target_station = stations_list[station_id - 1]  # Convert to 0-based index
-        hash_station_id = target_station.station_id
-        
-        # Generate complete hourly time series with Pakistan timezone
         history_result = await db.execute(text("""
             WITH RECURSIVE hour_series AS (
                 SELECT 
-                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                    date_trunc(
+                        'hour',
+                        NOW() - ((:hours::text || ' hours')::interval)
+                    ) + INTERVAL '1 hour' AS hour_utc
                 UNION ALL
                 SELECT 
                     hour_utc + INTERVAL '1 hour'
@@ -411,27 +376,27 @@ async def get_station_history_pm25_data(
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :hash_station_id 
+                AND r.scope_key = :station_id
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"hash_station_id": hash_station_id})
+        """), {"station_id": station_id, "hours": hours})
         
         history_rows = history_result.fetchall()
         history_data = [
             {
                 "timestamp_utc": row.hour_utc.isoformat() + "Z",
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
-                "pm25": float(row.pm25) if row.pm25 is not None else None
+                "timestamp": row.hour_utc.isoformat() + "Z",
+                "pm25": float(row.pm25) if row.pm25 is not None else None,
             }
             for row in history_rows
         ]
         
         return history_data
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Error getting station PM2.5 history: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
-
-
