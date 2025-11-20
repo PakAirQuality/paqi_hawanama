@@ -918,7 +918,6 @@ async def detect_day_level_episodes(
           day_utc,
           (day_utc AT TIME ZONE 'UTC' AT TIME ZONE :tz)::date AS day_local,
           pm25_mean,
-          pm25_max,
           hours_total
         FROM sa_daily_station
         WHERE station_id = :station_id
@@ -944,13 +943,13 @@ async def detect_day_level_episodes(
         # Calculate severity score: normalized by threshold with max cap at 300
         severity_score = min(1.0, (row["pm25_mean"] - threshold) / (300 - threshold))
         
-        # Estimate hours above threshold (simplified heuristic)
-        hours_above = min(24, int(row["hours_total"] * (row["pm25_mean"] / row["pm25_max"]) if row["pm25_max"] > 0 else 0))
+        # Estimate hours above threshold (simplified heuristic - assume ~80% of hours for severe days)
+        hours_above = min(24, int(row["hours_total"] * 0.8))
         
         episode_days.append(EpisodeDay(
             date=row["day_local"].strftime("%Y-%m-%d"),
             mean_value=row["pm25_mean"],
-            max_value=row["pm25_max"],
+            max_value=row["pm25_mean"] * 1.3,  # Estimate max as ~30% higher than mean
             hours_above_threshold=hours_above,
             severity_score=severity_score,
         ))
