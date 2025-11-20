@@ -137,7 +137,7 @@ async def compute_data_availability(
         # Theoretical hours in window (rough: days * 24)
         num_days = max(1, (end.date() - start.date()).days)
         theoretical_hours = num_days * 24
-        coverage_pct = 100.0 * (hours_with_data / theoretical_hours) if theoretical_hours > 0 else 0.0
+        coverage_pct = 100.0 * (float(hours_with_data) / theoretical_hours) if theoretical_hours > 0 else 0.0
 
         return DataAvailability(
             first_obs=first_obs,
@@ -539,7 +539,7 @@ async def compute_station_uptime(
         total_buckets = len(bucket_data)
         buckets_with_data = sum(1 for bucket in bucket_data if bucket["pm25_max"] is not None)
         missing_buckets = total_buckets - buckets_with_data
-        coverage_pct = (buckets_with_data / total_buckets * 100) if total_buckets > 0 else 0.0
+        coverage_pct = (float(buckets_with_data) / total_buckets * 100) if total_buckets > 0 else 0.0
         
         coverage = CoverageStats(
             expected_buckets=total_buckets,
