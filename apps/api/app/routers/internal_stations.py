@@ -511,9 +511,10 @@ async def compute_station_uptime(
         pg_interval = interval_map[bucket]
         
         # Use time_bucket_gapfill to detect missing data
-        q = text("""
+        # Note: Using f-string for interval since it's validated from enum
+        q = text(f"""
             SELECT
-              time_bucket_gapfill(:interval::interval, ts_utc) AS bucket,
+              time_bucket_gapfill('{pg_interval}'::interval, ts_utc) AS bucket,
               max(pm25) AS pm25_max,
               min(pm25) AS pm25_min,
               count(*) AS reading_count
@@ -527,7 +528,6 @@ async def compute_station_uptime(
         """)
         
         result = await db.execute(q, {
-            "interval": pg_interval,
             "station_id": station_id,
             "start": start,
             "end": end
