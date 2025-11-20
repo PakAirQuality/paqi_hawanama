@@ -124,8 +124,8 @@ async def compute_data_availability(
               COALESCE(SUM(hours_qc_ok), 0) AS hours_qc_ok
             FROM sa_daily_station
             WHERE station_id = :station_id
-              AND day_utc >= :start::timestamptz
-              AND day_utc <  :end::timestamptz
+              AND day_utc >= :start
+              AND day_utc <  :end
         """)
         r2 = (await db.execute(q2, {"station_id": station_id, "start": start, "end": end})).mappings().first()
 
