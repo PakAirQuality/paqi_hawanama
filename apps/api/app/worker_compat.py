@@ -21,17 +21,11 @@ try:
     sys.modules['config'].settings = config_settings_module.settings
     sys.modules['config.settings'] = config_settings_module
     
-    # Worker tasks expect 'services.iqair_client' - create an adapter
-    class IQAirClientAdapter:
-        def __init__(self):
-            # Import the new service
-            from app.services.ingestion.iqair_service import IQAirService
-            self.IQAirClient = IQAirService  # Alias for compatibility
-            
-    iqair_adapter = IQAirClientAdapter()
+    # Worker tasks expect 'services.iqair_client' - import from the new location
+    import app.services.ingestion.iqair_service as iqair_client_module
     sys.modules['services'] = sys.modules.get('services', type(sys)('services'))
-    sys.modules['services'].iqair_client = iqair_adapter
-    sys.modules['services.iqair_client'] = iqair_adapter
+    sys.modules['services'].iqair_client = iqair_client_module
+    sys.modules['services.iqair_client'] = iqair_client_module
     
     # Worker tasks expect 'services.database' - use worker_services version
     import app.worker_services.database as database_module
