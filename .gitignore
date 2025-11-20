@@ -43,3 +43,6 @@ node_modules/
 # Database explorer with credentials
 prod_db_explorer/
 **/prod_db_explorer/
+
+# Hawanama specific - Data directories
+exports/

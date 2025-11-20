@@ -9,7 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
 
 from app.models.current import CurrentOut, CityStationsResponse, CityTop10PM25Response, CityAverageResponse
-from app.services.airvisual_current import get_current_service
+from app.services.ingestion.airvisual_service import get_current_service
 from app.utils.normalization import pm25_to_aqi, get_aqi_label, get_aqi_category
 
 logger = logging.getLogger(__name__)

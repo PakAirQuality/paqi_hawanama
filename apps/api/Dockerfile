@@ -21,14 +21,14 @@ COPY apps/api/ /app/
 
 # Copy worker into the API package namespace expected by your imports
 COPY apps/worker/tasks /app/app/tasks
-COPY apps/worker/services /app/app/services
-COPY apps/worker/config /app/app/config
+COPY apps/worker/services /app/app/worker_services
+COPY apps/worker/config /app/app/worker_config
 COPY apps/worker/manifest_utils.py /app/app/manifest_utils.py
 
 # Make sure these are Python packages
 RUN touch /app/app/tasks/__init__.py \
-         /app/app/services/__init__.py \
-         /app/app/config/__init__.py
+         /app/app/worker_services/__init__.py \
+         /app/app/worker_config/__init__.py
 
 # Worker modules now have dual-path imports for compatibility
 

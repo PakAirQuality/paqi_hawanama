@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 # Dual-path imports for API container compatibility
 try:
-    from app.services.iqair_client import IQAirClient
+    from app.services.ingestion.iqair_service import IQAirClient
     from app.services.database import DatabaseService, AsyncSessionLocal
     from app.manifest_utils import finalize_union_manifest
 except ImportError:  # running in pure worker repo layout

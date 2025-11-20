@@ -8,13 +8,13 @@ from typing import Dict, Any, Optional, Literal
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
-from app.services.cache import get_cache
-from app.services.station_registry import resolve_station_id
-from app.services.normalize import normalize_current
+from app.services.ingestion.cache import get_cache
+from app.services.ingestion.station_utils import resolve_station_id
+from app.services.ingestion.normalizer import normalize_current
 from app.models.current import CurrentOut, StationMeta
 
 # Import the local IQAir client
-from app.services.iqair_client import IQAirClient
+from app.services.ingestion.iqair_service import IQAirClient
 
 logger = logging.getLogger(__name__)
 
@@ -173,7 +173,7 @@ class AirVisualCurrentService:
             try:
                 result = CurrentOut(**cached_result)
                 # Update local timestamp with requested timezone
-                from app.services.normalize import _convert_to_local_time
+                from app.services.ingestion.normalizer import _convert_to_local_time
                 result.ts_local = _convert_to_local_time(result.ts_utc, tz)
                 return result
             except Exception as e:
@@ -234,7 +234,7 @@ class AirVisualCurrentService:
             try:
                 result = CurrentOut(**cached_result)
                 # Update local timestamp with requested timezone
-                from app.services.normalize import _convert_to_local_time
+                from app.services.ingestion.normalizer import _convert_to_local_time
                 result.ts_local = _convert_to_local_time(result.ts_utc, tz)
                 return result
             except Exception as e:

@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from app.schemas.nearest import NearestStationOut, NearestCityOut
-from app.services.airvisual_nearest import get_nearest_service
+from app.services.ingestion.nearest_service import get_nearest_service
 
 logger = logging.getLogger(__name__)
 

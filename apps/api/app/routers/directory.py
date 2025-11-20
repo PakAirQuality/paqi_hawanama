@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import JSONResponse
 
 from app.schemas.directory import CountryOut, StateOut, CityOut, StationOut
-from app.services.airvisual_directory import get_directory_service
+from app.services.ingestion.directory_service import get_directory_service
 
 logger = logging.getLogger(__name__)
 

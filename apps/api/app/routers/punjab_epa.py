@@ -14,7 +14,7 @@ from typing import Optional
 from enum import Enum
 
 from app.core.database import get_database
-from app.services.epa_ingestion import collect_once
+from app.services.ingestion.epa_service import collect_once
 
 logger = logging.getLogger(__name__)
 
