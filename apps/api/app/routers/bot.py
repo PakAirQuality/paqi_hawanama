@@ -8,9 +8,9 @@ from fastapi import APIRouter, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 
-from app.services.llm_data_compiler import LLMDataCompiler, MASTER_PERSONA_PROMPT, AIRPOCALYPSE_PROMPT
-from app.services.hawanama_bot import HawanamaBot
-from app.services.gemini_ai import GeminiAIService
+from app.services.bot.data_compiler import LLMDataCompiler, MASTER_PERSONA_PROMPT, AIRPOCALYPSE_PROMPT
+from app.services.bot.bot_engine import HawanamaBot
+from app.services.bot.ai_client import GeminiAIService
 
 logger = logging.getLogger(__name__)
 

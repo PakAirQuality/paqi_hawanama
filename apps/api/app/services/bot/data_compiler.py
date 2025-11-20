@@ -15,7 +15,7 @@ from zoneinfo import ZoneInfo
 from app.core.database import get_database
 from sqlalchemy import text
 from app.utils.normalization import pm25_to_aqi, get_aqi_category
-from app.services.monthly_stats import monthly_stats_service
+from app.services.bot.stats_service import monthly_stats_service
 
 logger = logging.getLogger(__name__)
 

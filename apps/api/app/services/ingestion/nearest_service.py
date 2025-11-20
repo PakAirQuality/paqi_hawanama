@@ -8,7 +8,7 @@ from typing import Dict, Any, Optional, Literal
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
-from app.services.cache import get_cache
+from app.services.ingestion.cache import get_cache
 from app.schemas.nearest import (
     NearestStationOut, NearestCityOut, NearestStationEntity, NearestCityEntity, 
     make_station_id
@@ -17,7 +17,7 @@ from app.utils.geo import haversine_km, validate_coordinates, validate_radius
 from app.utils.normalization import normalize_airvisual_current_data, extract_location_info
 
 # Import the local IQAir client
-from app.services.iqair_client import IQAirClient
+from app.services.ingestion.iqair_service import IQAirClient
 
 logger = logging.getLogger(__name__)
 

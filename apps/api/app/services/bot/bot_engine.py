@@ -18,9 +18,9 @@ from zoneinfo import ZoneInfo
 from pathlib import Path
 from fcntl import flock, LOCK_EX, LOCK_UN
 
-from app.services.llm_data_compiler import LLMDataCompiler, MASTER_PERSONA_PROMPT, AIRPOCALYPSE_PROMPT
-from app.services.gemini_ai import GeminiAIService
-from app.services.twitter_automation import TwitterAutomationService
+from app.services.bot.data_compiler import LLMDataCompiler, MASTER_PERSONA_PROMPT, AIRPOCALYPSE_PROMPT
+from app.services.bot.ai_client import GeminiAIService
+from app.services.bot.twitter_client import TwitterAutomationService
 
 logger = logging.getLogger(__name__)
 

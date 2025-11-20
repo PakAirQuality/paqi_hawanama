@@ -8,7 +8,7 @@ from datetime import datetime, timezone, timedelta
 
 # Dual-path imports for API container compatibility
 try:
-    from app.services.iqair_client import (
+    from app.services.ingestion.iqair_service import (
         IQAirClient,
         IQAirError,
         StationNotFound,

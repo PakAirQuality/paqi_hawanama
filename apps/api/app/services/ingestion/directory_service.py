@@ -8,11 +8,11 @@ from typing import List, Dict, Any, Optional
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 from app.core.config import settings
-from app.services.cache import get_cache
+from app.services.ingestion.cache import get_cache
 from app.schemas.directory import CountryOut, StateOut, CityOut, StationOut, make_station_id
 
 # Import the local IQAir client
-from app.services.iqair_client import IQAirClient
+from app.services.ingestion.iqair_service import IQAirClient
 
 logger = logging.getLogger(__name__)
 

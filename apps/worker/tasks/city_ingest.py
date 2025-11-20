@@ -30,7 +30,7 @@ if _root not in _sys.path:
 
 # Dual-path imports for API container compatibility
 try:
-    from app.services.iqair_client import IQAirClient
+    from app.services.ingestion.iqair_service import IQAirClient
     from app.services.database import DatabaseService, AsyncSessionLocal
 except ImportError:  # running in pure worker repo layout
     from services.iqair_client import IQAirClient
