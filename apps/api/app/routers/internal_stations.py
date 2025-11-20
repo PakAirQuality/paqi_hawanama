@@ -555,7 +555,7 @@ async def compute_station_uptime(
         return StationUptimeResponse(
             station_id=station_id,
             bucket=bucket,
-            window=TimeWindow(from_=start, to=end),
+            window=TimeWindow(**{"from": start, "to": end}),
             coverage=coverage,
             offline_periods=offline_periods,
             flatline_periods=flatline_periods
@@ -889,7 +889,7 @@ async def get_station_diurnal(
             station_id=station_id,
             pollutant=pollutant,
             timezone=tz,
-            window=DiurnalWindow(from_=from_, to=to),
+            window=DiurnalWindow(**{"from": from_, "to": to}),
             overall=overall,
             by_weekday_weekend=by_weekday_weekend,
             by_season=by_season,
@@ -1145,7 +1145,7 @@ async def get_station_episodes(
             pollutant=pollutant,
             level=level,
             threshold=threshold,
-            window=TimeWindow(from_=from_, to=to),
+            window=TimeWindow(**{"from": from_, "to": to}),
             top_days=top_days,
             episodes=episodes,
             total_episodes=total_episodes,
