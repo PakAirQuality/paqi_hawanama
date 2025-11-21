@@ -288,31 +288,25 @@ async def get_station_history_data(
         if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
         
+        # Validate hours parameter
+        if not isinstance(hours, int) or hours < 1 or hours > 168:
+            raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
+            
+        from datetime import datetime, timedelta
+        start_time = datetime.now() - timedelta(hours=hours)
+        
         history_result = await db.execute(text("""
-            WITH RECURSIVE hour_series AS (
-                SELECT 
-                    date_trunc(
-                        'hour',
-                        NOW() - ((:hours::text || ' hours')::interval)
-                    ) + INTERVAL '1 hour' AS hour_utc
-                UNION ALL
-                SELECT 
-                    hour_utc + INTERVAL '1 hour'
-                FROM hour_series
-                WHERE hour_utc < date_trunc('hour', NOW())
-            )
             SELECT 
-                hs.hour_utc,
-                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
+                date_trunc('hour', r.ts_utc) AS hour_utc,
+                date_trunc('hour', r.ts_utc) + INTERVAL '5 hours' AS hour_pk,
                 r.aqi_us
-            FROM hour_series hs
-            LEFT JOIN readings r ON (
-                date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :station_id
+            FROM readings r 
+            WHERE r.scope_key = :station_id 
                 AND r.scope_type = 'station'
-            )
-            ORDER BY hs.hour_utc ASC
-        """), {"station_id": station_id, "hours": hours})
+                AND r.ts_utc >= :start_time
+                AND r.ts_utc <= NOW()
+            ORDER BY r.ts_utc ASC
+        """), {"station_id": station_id, "start_time": start_time})
         
         history_rows = history_result.fetchall()
         history_data = [
@@ -356,31 +350,25 @@ async def get_station_history_pm25_data(
         if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
         
+        # Validate hours parameter
+        if not isinstance(hours, int) or hours < 1 or hours > 168:
+            raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
+            
+        from datetime import datetime, timedelta
+        start_time = datetime.now() - timedelta(hours=hours)
+        
         history_result = await db.execute(text("""
-            WITH RECURSIVE hour_series AS (
-                SELECT 
-                    date_trunc(
-                        'hour',
-                        NOW() - ((:hours::text || ' hours')::interval)
-                    ) + INTERVAL '1 hour' AS hour_utc
-                UNION ALL
-                SELECT 
-                    hour_utc + INTERVAL '1 hour'
-                FROM hour_series
-                WHERE hour_utc < date_trunc('hour', NOW())
-            )
             SELECT 
-                hs.hour_utc,
-                hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
+                date_trunc('hour', r.ts_utc) AS hour_utc,
+                date_trunc('hour', r.ts_utc) + INTERVAL '5 hours' AS hour_pk,
                 r.pm25
-            FROM hour_series hs
-            LEFT JOIN readings r ON (
-                date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :station_id
+            FROM readings r 
+            WHERE r.scope_key = :station_id 
                 AND r.scope_type = 'station'
-            )
-            ORDER BY hs.hour_utc ASC
-        """), {"station_id": station_id, "hours": hours})
+                AND r.ts_utc >= :start_time
+                AND r.ts_utc <= NOW()
+            ORDER BY r.ts_utc ASC
+        """), {"station_id": station_id, "start_time": start_time})
         
         history_rows = history_result.fetchall()
         history_data = [
