@@ -1,6 +1,6 @@
 'use client'
 
-import React, { useEffect } from 'react'
+import React, { useEffect, useState } from 'react'
 import { X, Thermometer, Droplets, Wind, Eye } from 'lucide-react'
 import { useStationSidebar } from '@/stores/stationSidebar'
 import { useStationCurrent, useStationHistory, useStationPM25History, useAQICategories, useAbortOnStationChange } from '@/hooks/useStation'
@@ -73,6 +73,17 @@ export function StationCard() {
   const { isOpen, stationId, close } = useStationSidebar()
   const abortQueries = useAbortOnStationChange(stationId)
   const [chartMetric, setChartMetric] = React.useState<'aqi' | 'pm25'>('pm25')
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth <= 768)
+    }
+    
+    checkIsMobile()
+    window.addEventListener('resize', checkIsMobile)
+    return () => window.removeEventListener('resize', checkIsMobile)
+  }, [])
   
   const { data: current, isLoading: currentLoading } = useStationCurrent(stationId)
   const { data: history, isLoading: historyLoading } = useStationHistory(stationId)
@@ -321,91 +332,111 @@ export function StationCard() {
                     </div>
                   </div>
 
-                  <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current [&_.recharts-wrapper]:!outline-none [&_.recharts-surface]:!outline-none">
-                    <div style={{ width: '100%', height: '140px', outline: 'none' }}>
+                  {/* Mobile-optimized chart configuration for station card sidebar */}
+                  {(() => {
+                    const mobileConfig = {
+                      height: isMobile ? 180 : 140,
+                      margin: isMobile 
+                        ? { top: 10, right: 12, bottom: 45, left: 8 }
+                        : { top: 10, right: 15, bottom: 25, left: 15 },
+                      barCategoryGap: isMobile ? "8%" : "8%",
+                      maxBarSize: isMobile ? 10 : 16,
+                      tickCount: isMobile ? 4 : 5,
+                      yAxisWidth: isMobile ? 35 : 35,
+                      fontSize: isMobile ? 10 : 10,
+                      interval: isMobile ? Math.max(0, Math.floor(chartData.length / 4) - 1) : 0
+                    }
+
+                    return (
+                      <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current [&_.recharts-wrapper]:!outline-none [&_.recharts-surface]:!outline-none">
+                        <div style={{ width: '100%', height: `${mobileConfig.height}px`, outline: 'none' }}>
                       <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={chartData}
-                        margin={{ top: 10, right: 15, bottom: 25, left: 15 }}
-                        barCategoryGap="2%"
-                        onClick={() => {}} // Disable click events
-                        onMouseMove={() => {}} // Disable mouse tracking
-                        style={{ outline: 'none' }}
-                      >
-                        <XAxis
-                          dataKey="chartPosition"
-                          type="number"
-                          domain={[0, chartData.length - 1]}
-                          axisLine={false}
-                          tickLine={false}
-                          stroke="#9ca3af"
-                          tick={{ fontSize: 10 }}
-                          tickCount={5}
-                          tickFormatter={(value) => {
-                            const dataPoint = chartData[Math.round(value)]
-                            if (!dataPoint) return ""
-                            const hour = dataPoint.hour
-                            if (hour === 0) return "00:00"
-                            return `${hour.toString().padStart(2, '0')}:00`
-                          }}
-                        />
-                        
-                        <YAxis
-                          orientation="right"
-                          axisLine={false}
-                          tickLine={false}
-                          stroke="#9ca3af"
-                          tick={{ fontSize: 10 }}
-                          tickFormatter={(value) => Math.round(value)}
-                          width={35}
-                        />
-
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'white',
-                            border: '1px solid #e5e7eb',
-                            borderRadius: '8px',
-                            fontSize: '12px'
-                          }}
-                          formatter={(value, name) => [
-                            chartMetric === 'aqi' ? `AQI ${value}` : `${value} µg/m³`,
-                            chartMetric === 'aqi' ? 'AQI' : 'PM2.5'
-                          ]}
-                          labelFormatter={(label, payload) => {
-                            if (payload && payload[0]?.payload?.timestamp_pk) {
-                              const date = new Date(payload[0].payload.timestamp_pk)
-                              return date.toLocaleString('en-US', {
-                                month: 'short',
-                                day: 'numeric',
-                                hour: '2-digit',
-                                minute: '2-digit',
-                                hour12: false,
-                                timeZone: 'Asia/Karachi'
-                              }) + ' PKT'
-                            }
-                            return label
-                          }}
-                        />
-
-                        <Bar
-                          dataKey={chartMetric}
-                          radius={[2, 2, 0, 0]}
-                          maxBarSize={28}
-                          isAnimationActive={false}
-                          style={{ cursor: 'default' }}
-                        >
-                          {chartData.map((entry, index) => (
-                            <Cell 
-                              key={`cell-${index}`} 
-                              fill={getAQIColorByValue(entry.aqi)}
-                              style={{ cursor: 'default' }}
+                          <BarChart
+                            data={chartData}
+                            margin={mobileConfig.margin}
+                            barCategoryGap={mobileConfig.barCategoryGap}
+                            onClick={() => {}} // Disable click events
+                            onMouseMove={() => {}} // Disable mouse tracking
+                            style={{ outline: 'none' }}
+                          >
+                            <XAxis
+                              dataKey="chartPosition"
+                              type="number"
+                              domain={[0, chartData.length - 1]}
+                              axisLine={false}
+                              tickLine={false}
+                              stroke="#9ca3af"
+                              tick={{ fontSize: mobileConfig.fontSize }}
+                              tickCount={mobileConfig.tickCount}
+                              interval={mobileConfig.interval}
+                              tickFormatter={(value) => {
+                                const dataPoint = chartData[Math.round(value)]
+                                if (!dataPoint) return ""
+                                const hour = dataPoint.hour
+                                if (hour === 0) return "00:00"
+                                return `${hour.toString().padStart(2, '0')}:00`
+                              }}
                             />
-                          ))}
-                        </Bar>
-                      </BarChart>
-                      </ResponsiveContainer>
-                    </div>
-                  </div>
+                            
+                            <YAxis
+                              orientation="right"
+                              axisLine={false}
+                              tickLine={false}
+                              stroke="#9ca3af"
+                              tick={{ fontSize: mobileConfig.fontSize, dx: isMobile ? 1 : 0 }}
+                              tickFormatter={(value) => Math.round(value)}
+                              width={mobileConfig.yAxisWidth}
+                            />
+
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: 'white',
+                                border: '1px solid #e5e7eb',
+                                borderRadius: '8px',
+                                fontSize: isMobile ? '11px' : '12px',
+                                padding: isMobile ? '6px' : '8px'
+                              }}
+                              formatter={(value, name) => [
+                                chartMetric === 'aqi' ? `AQI ${value}` : `${value} µg/m³`,
+                                chartMetric === 'aqi' ? 'AQI' : 'PM2.5'
+                              ]}
+                              labelFormatter={(label, payload) => {
+                                if (payload && payload[0]?.payload?.timestamp_pk) {
+                                  const date = new Date(payload[0].payload.timestamp_pk)
+                                  return date.toLocaleString('en-US', {
+                                    month: 'short',
+                                    day: 'numeric',
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                    hour12: false,
+                                    timeZone: 'Asia/Karachi'
+                                  }) + ' PKT'
+                                }
+                                return label
+                              }}
+                            />
+
+                            <Bar
+                              dataKey={chartMetric}
+                              radius={[2, 2, 0, 0]}
+                              maxBarSize={mobileConfig.maxBarSize}
+                              isAnimationActive={false}
+                              style={{ cursor: 'default' }}
+                            >
+                              {chartData.map((entry, index) => (
+                                <Cell 
+                                  key={`cell-${index}`} 
+                                  fill={getAQIColorByValue(entry.aqi)}
+                                  style={{ cursor: 'default' }}
+                                />
+                              ))}
+                            </Bar>
+                          </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 
