@@ -46,3 +46,4 @@ prod_db_explorer/
 
 # Hawanama specific - Data directories
 exports/
+external_data/

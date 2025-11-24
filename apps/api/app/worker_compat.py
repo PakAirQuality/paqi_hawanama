@@ -21,14 +21,14 @@ try:
     sys.modules['config'].settings = config_settings_module.settings
     sys.modules['config.settings'] = config_settings_module
     
-    # Worker tasks expect 'services.iqair_client' but it's at 'app.worker_services.iqair_client'  
-    import app.worker_services.iqair_client as iqair_client_module
+    # Worker tasks expect 'services.iqair_client' - import from the new location
+    import app.services.ingestion.iqair_service as iqair_client_module
     sys.modules['services'] = sys.modules.get('services', type(sys)('services'))
     sys.modules['services'].iqair_client = iqair_client_module
     sys.modules['services.iqair_client'] = iqair_client_module
     
-    # Worker tasks expect 'services.database' but it's at 'app.worker_services.database'
-    import app.worker_services.database as database_module  
+    # Worker tasks expect 'services.database' - use worker_services version
+    import app.worker_services.database as database_module
     sys.modules['services'].database = database_module
     sys.modules['services.database'] = database_module
     

@@ -31,7 +31,7 @@ async function fetchCitySlugs() {
 async function fetchStationIds() {
   try {
     console.log('Fetching station IDs from API...')
-    const response = await fetch(`${API_BASE}/api/v1/stations`)
+    const response = await fetch(`${API_BASE}/api/v1/dashboard/stations`)
     
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
@@ -39,12 +39,12 @@ async function fetchStationIds() {
     
     const data = await response.json()
     
-    // Extract station IDs from the API response
-    // Based on the API structure, stations are in data.stations array
+    // Extract hash-based station IDs from the API response
+    // Backend now returns hash station_id as the primary ID field
     const stations = data.stations || []
-    const ids = stations.map(station => station.id.toString()).filter(Boolean)
+    const ids = stations.map(station => station.id).filter(Boolean)
     
-    console.log(`Found ${ids.length} station IDs`)
+    console.log(`Found ${ids.length} station IDs (hash-based)`)
     return ids
   } catch (error) {
     console.error('Error fetching station IDs:', error)

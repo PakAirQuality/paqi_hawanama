@@ -14,6 +14,7 @@ from typing import Optional
 from enum import Enum
 
 from app.core.database import get_database
+from app.core.security import verify_tasks_token
 from app.services.ingestion.epa_service import collect_once
 
 logger = logging.getLogger(__name__)
@@ -326,7 +327,8 @@ async def get_station_aqi(station_name: StationName, db: AsyncSession = Depends(
 async def export_readings_csv(
     hours: int = Query(None, description="Hours to look back (optional - if not provided, exports all data)", ge=1, le=168),  # Max 7 days (24*7=168)
     limit: int = Query(50000, description="Max records total", ge=1, le=50000),
-    db: AsyncSession = Depends(get_database)
+    db: AsyncSession = Depends(get_database),
+    _: bool = Depends(verify_tasks_token)
 ):
     """Export readings as CSV with coordinates - grouped by station, ordered chronologically"""
     try:
@@ -441,7 +443,10 @@ async def export_readings_csv(
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/ingest/hourly")
-async def trigger_punjab_ingest(db: AsyncSession = Depends(get_database)):
+async def trigger_punjab_ingest(
+    db: AsyncSession = Depends(get_database),
+    _: bool = Depends(verify_tasks_token)
+):
     """
     Trigger one-shot Punjab EPA data ingestion.
     

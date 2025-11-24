@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, MapPin, Clock, Activity, Thermometer, Droplets, Wind, Eye } from 'lucide-react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -27,6 +27,17 @@ interface StationClientProps {
 
 export default function StationClient({ stationId }: StationClientProps) {
   const [chartMetric, setChartMetric] = useState<'aqi' | 'pm25'>('pm25')
+  const [isMobile, setIsMobile] = useState(false)
+
+  useEffect(() => {
+    const checkIsMobile = () => {
+      setIsMobile(window.innerWidth <= 768)
+    }
+    
+    checkIsMobile()
+    window.addEventListener('resize', checkIsMobile)
+    return () => window.removeEventListener('resize', checkIsMobile)
+  }, [])
 
   const { data: current, isLoading: currentLoading, error: currentError } = useStationCurrent(stationId)
   const { data: history, isLoading: historyLoading } = useStationHistory(stationId)
@@ -365,14 +376,27 @@ export default function StationClient({ stationId }: StationClientProps) {
                         chartPosition: index
                       }))
                     
+                    // Mobile-optimized chart configuration
+                    const mobileConfig = {
+                      height: isMobile ? 250 : 320,
+                      margin: isMobile 
+                        ? { top: 10, right: 10, bottom: 25, left: 5 }
+                        : { top: 10, right: 15, bottom: 30, left: 10 },
+                      barCategoryGap: isMobile ? "15%" : "25%",
+                      maxBarSize: isMobile ? 12 : 16,
+                      tickCount: isMobile ? 4 : 6,
+                      yAxisWidth: isMobile ? 35 : 40,
+                      fontSize: isMobile ? 10 : 11
+                    }
+
                     return chartData.length > 0 ? (
-                      <div className="bg-white border border-gray-100 rounded-xl p-4">
+                      <div className="bg-white border border-gray-100 rounded-xl p-3 sm:p-4">
                         <div className="relative [&_.recharts-active-bar]:!opacity-100 [&_.recharts-bar]:!opacity-100 [&_.recharts-rectangle:hover]:!opacity-100 [&_.recharts-active-shape]:!fill-current">
-                          <ResponsiveContainer width="100%" height={320}>
+                          <ResponsiveContainer width="100%" height={mobileConfig.height}>
                             <BarChart
                               data={chartData}
-                              margin={{ top: 10, right: 15, bottom: 30, left: 10 }}
-                              barCategoryGap="25%"
+                              margin={mobileConfig.margin}
+                              barCategoryGap={mobileConfig.barCategoryGap}
                               onClick={() => {}} // Disable click events
                               onMouseMove={() => {}} // Disable mouse tracking
                             >
@@ -384,9 +408,10 @@ export default function StationClient({ stationId }: StationClientProps) {
                                 axisLine={{ stroke: '#d1d5db' }}
                                 tickLine={{ stroke: '#d1d5db' }}
                                 stroke="#9ca3af"
-                                tick={{ fontSize: 11 }}
-                                tickCount={6}
+                                tick={{ fontSize: mobileConfig.fontSize }}
+                                tickCount={mobileConfig.tickCount}
                                 allowDataOverflow={false}
+                                interval={isMobile ? Math.floor(chartData.length / 4) : 0}
                                 tickFormatter={(value) => {
                                   const dataPoint = chartData[Math.round(value)]
                                   if (!dataPoint) return ""
@@ -401,9 +426,9 @@ export default function StationClient({ stationId }: StationClientProps) {
                                 axisLine={false}
                                 tickLine={false}
                                 stroke="#9ca3af"
-                                tick={{ fontSize: 11, dx: 5 }}
+                                tick={{ fontSize: mobileConfig.fontSize, dx: isMobile ? 2 : 5 }}
                                 tickFormatter={(value) => Math.round(value)}
-                                width={40}
+                                width={mobileConfig.yAxisWidth}
                                 domain={[0, 'dataMax + 10']}
                               />
                               
@@ -414,7 +439,8 @@ export default function StationClient({ stationId }: StationClientProps) {
                                   backgroundColor: 'white',
                                   border: '1px solid #e5e7eb',
                                   borderRadius: '8px',
-                                  fontSize: '12px'
+                                  fontSize: isMobile ? '11px' : '12px',
+                                  padding: isMobile ? '8px' : '12px'
                                 }}
                                 formatter={(value, name) => [
                                   chartMetric === 'aqi' ? `AQI ${value}` : `${value} µg/m³`,
@@ -439,7 +465,7 @@ export default function StationClient({ stationId }: StationClientProps) {
                               <Bar
                                 dataKey={chartMetric}
                                 radius={[2, 2, 0, 0]}
-                                maxBarSize={16}
+                                maxBarSize={mobileConfig.maxBarSize}
                                 isAnimationActive={false}
                                 style={{ cursor: 'default' }}
                               >

@@ -1,8 +1,8 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-152782825429.asia-south1.run.app'
 
 export interface Station {
-  id: number
-  station_id?: string  // Hash-based station ID from API
+  id: string  // Now hash-based station ID (primary identifier)
+  station_id?: string  // Deprecated: kept for backward compatibility
   name: string
   city_id?: number
   city?: string  // Add city name for boundary filtering
