@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "hawanama-dashboard",
     "public": "out",
     "ignore": [
       "firebase.json",

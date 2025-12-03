@@ -40,45 +40,23 @@ export default function Home() {
       {/* Logo - Lower Left (Floating) - Mobile Safe with safe area */}
       <div className="absolute left-4 sm:left-8 z-50" style={{ bottom: 'max(env(safe-area-inset-bottom, 1rem), 1rem)' }}>
         <div className="relative group">
-          {/* Main container with blue button styling */}
-          <div 
-            className="relative flex items-center justify-center cursor-pointer overflow-visible transform transition-all duration-200 hover:brightness-110 group-hover:scale-105"
+          {/* Clean white button */}
+          <button 
+            className="flex items-center justify-center cursor-pointer transform transition-all duration-200 hover:scale-105 active:scale-95"
             style={{
-              background: 'linear-gradient(135deg, #1899D6 0%, #0EA5E9 50%, #0284C7 100%)',
-              border: 'solid transparent',
-              borderRadius: '20px',
-              borderWidth: '0 0 3px',
-              color: '#FFFFFF',
-              padding: '4px',
-              boxSizing: 'border-box',
-              boxShadow: '0 4px 15px rgba(24, 153, 214, 0.3)'
+              background: '#FFFFFF',
+              borderRadius: '16px',
+              padding: '8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1), 0 4px 16px rgba(0, 0, 0, 0.05)',
+              border: '1px solid rgba(0, 0, 0, 0.05)'
             }}
           >
-            {/* Blue gradient shadow layer */}
-            <div 
-              className="absolute inset-0 -z-10"
-              style={{
-                background: 'linear-gradient(135deg, #1CB0F6 0%, #0EA5E9 100%)',
-                border: 'solid transparent',
-                borderRadius: '20px',
-                borderWidth: '0 0 3px',
-                bottom: '-3px',
-                left: '0',
-                right: '0',
-                top: '0',
-                backgroundClip: 'padding-box'
-              }}
-            ></div>
-            
             <img 
               src="/hawanama.png" 
               alt="Hawanama Logo" 
-              className="w-12 h-12 sm:w-16 sm:h-16 object-contain relative z-10 drop-shadow-lg"
-              style={{
-                filter: 'brightness(0) invert(1)' // Makes the logo white
-              }}
+              className="w-12 h-12 sm:w-16 sm:h-16 object-contain"
             />
-          </div>
+          </button>
         </div>
       </div>
 

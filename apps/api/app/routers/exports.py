@@ -25,10 +25,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 # Export limits and constants
-MAX_DAYS_BACK = 30
-MAX_EXPORT_ROWS = 50_000
+MAX_DAYS_BACK = 3650  # Allow up to ~10 years of data
+MAX_EXPORT_ROWS = 500_000  # Increased row limit for larger exports
 DEFAULT_DAYS_BACK = 1  # Swagger-friendly default
-PM25_MAX_DAYS = 30  # Smaller limit for full hourly series
+PM25_MAX_DAYS = 3650  # Allow full historical data for PM2.5
 
 def parse_date_yyyy_mm_dd(date_str: str) -> datetime:
     """Parse YYYY-MM-DD date string to UTC datetime at start of day"""
@@ -52,12 +52,9 @@ def validate_and_compute_time_range(
             if start_ts >= end_ts:
                 raise HTTPException(status_code=400, detail="start_date must be before end_date")
                 
-            # Limit date range to MAX_DAYS_BACK
-            if (end_ts - start_ts).days > MAX_DAYS_BACK:
-                raise HTTPException(
-                    status_code=400, 
-                    detail=f"Date range cannot exceed {MAX_DAYS_BACK} days"
-                )
+            # Optional: Log large date ranges for monitoring
+            if (end_ts - start_ts).days > 365:
+                logger.warning(f"Large date range requested: {(end_ts - start_ts).days} days")
                 
             return start_ts, end_ts
             
@@ -70,6 +67,7 @@ def validate_and_compute_time_range(
         if days_back < 1:
             raise HTTPException(status_code=400, detail="days_back must be >= 1")
         if days_back > MAX_DAYS_BACK:
+            logger.warning(f"Large days_back requested: {days_back}, allowing up to {MAX_DAYS_BACK}")
             days_back = MAX_DAYS_BACK  # Clamp to maximum
             
         now = datetime.now(timezone.utc)
@@ -97,7 +95,7 @@ async def export_station_readings_csv(
     - Quality control flags and timestamps
     
     Parameters:
-    - days_back: Number of days of historical data to include (default: 1, max: 30)
+    - days_back: Number of days of historical data to include (default: 1, max: 3650)
     
     **Usage:**
     ```bash
@@ -264,7 +262,7 @@ async def export_city_readings_csv(
     - Quality control flags and timestamps
     
     Parameters:
-    - days_back: Number of days of historical data to include (default: 1, max: 30)
+    - days_back: Number of days of historical data to include (default: 1, max: 3650)
     """
     # Compute time range with validation
     start_ts, end_ts = validate_and_compute_time_range(days_back=days_back)
@@ -402,7 +400,7 @@ async def export_station_readings_by_city_csv(
     
     Parameters:
     - city: Name of the city to filter stations (required, selected from dropdown)
-    - days_back: Number of days of historical data to include (default: 1, max: 30)
+    - days_back: Number of days of historical data to include (default: 1, max: 3650)
     - start_date: Start date in YYYY-MM-DD format (overrides days_back if provided)
     - end_date: End date in YYYY-MM-DD format (requires start_date)
     """
@@ -604,7 +602,7 @@ async def export_station_readings_by_city_pm25_csv(
     
     Parameters:
     - city: Name of the city to filter stations (required, selected from dropdown)
-    - days_back: Number of days of historical data to include (default: 30, max: 365)
+    - days_back: Number of days of historical data to include (default: 1, max: 3650)
     - start_date: Start date in YYYY-MM-DD format (overrides days_back if provided)
     - end_date: End date in YYYY-MM-DD format (overrides days_back if provided)
     """

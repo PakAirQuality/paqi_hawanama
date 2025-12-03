@@ -5,6 +5,13 @@ import { useQuery } from '@tanstack/react-query'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { useState } from 'react'
+import { DashboardWidget } from '@/components/dashboard/DashboardWidget'
+import { StationMap } from '@/components/dashboard/StationMap'
+import { AlertsPanel } from '@/components/dashboard/AlertsPanel'
+import { TopCitiesWidget } from '@/components/dashboard/TopCitiesWidget'
+import { InteractivePakistanMap } from '@/components/dashboard/InteractivePakistanMap'
+import { YearOverYearChart } from '@/components/charts/YearOverYearChart'
+import { HeatmapChart } from '@/components/charts/HeatmapChart'
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
 
@@ -45,7 +52,7 @@ async function fetchStations(): Promise<StationListItem[]> {
   return data.stations ?? data;
 }
 
-export default function DashboardHome() {
+export default function AQIDashboard() {
   const { data: stats, isLoading: statsLoading } = useQuery({
     queryKey: ["dashboard-stats"],
     queryFn: fetchDashboardStats,
@@ -93,232 +100,135 @@ export default function DashboardHome() {
   };
 
   return (
-    <div className="space-y-8">
-      {/* Header */}
-      <div className="space-y-2">
-        <h2 className="text-3xl font-bold">Dashboard</h2>
-        <p className="text-muted-foreground">
-          System snapshot and network health overview
-        </p>
-      </div>
+    <div className="space-y-6">
 
-      {/* System Snapshot */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">System Snapshot</h3>
-        {statsLoading ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            {[...Array(4)].map((_, i) => (
-              <Card key={i} className="animate-pulse">
-                <CardHeader className="pb-2">
-                  <div className="h-4 bg-muted rounded w-24"></div>
-                </CardHeader>
-                <CardContent>
-                  <div className="h-8 bg-muted rounded w-16"></div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-        ) : stats ? (
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Average PM₂.₅
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.avg_pm25.toFixed(1)} μg/m³</div>
-                <p className="text-xs text-muted-foreground">Last 24 hours (non-Punjab EPA)</p>
-              </CardContent>
-            </Card>
+      {/* Pakistan Air Quality Overview */}
+      <InteractivePakistanMap />
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Stations Online
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">
-                  {stats.active_stations}/{stats.total_stations}
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  {((stats.active_stations / stats.total_stations) * 100).toFixed(1)}% operational
-                </p>
-              </CardContent>
-            </Card>
+      {/* Year-over-Year PM2.5 Trends */}
+      <YearOverYearChart />
 
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Last Data Update
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.last_update}</div>
-                <p className="text-xs text-muted-foreground">Most recent reading</p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-muted-foreground">
-                  Cities Covered
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{stats.total_cities}</div>
-                <p className="text-xs text-muted-foreground">Monitoring locations</p>
-              </CardContent>
-            </Card>
-          </div>
-        ) : (
-          <Card className="p-6">
-            <p className="text-destructive">Failed to load system stats</p>
-          </Card>
-        )}
-      </div>
-
-      <div className="grid gap-8 lg:grid-cols-2">
-        {/* Stations Needing Attention */}
-        <div className="space-y-4">
+      {/* Air Quality Heatmap */}
+      <Card className="w-full">
+        <CardHeader>
           <div className="flex items-center justify-between">
-            <h3 className="text-lg font-semibold">Stations Needing Attention</h3>
-            <Link href="/stations" className="text-sm text-primary hover:underline">
-              View all stations →
-            </Link>
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                🗺️ Air Quality Heatmap
+              </CardTitle>
+              <p className="text-sm text-gray-600 mt-1">
+                Hourly patterns over the last 30 days
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                📍 Hourly
+              </Badge>
+            </div>
           </div>
           
-          {stationsNeedingAttention.length === 0 ? (
-            <Card className="p-6 text-center">
-              <div className="text-4xl mb-2">✅</div>
-              <p className="text-muted-foreground">All stations operating normally</p>
-            </Card>
-          ) : (
-            <Card>
-              <CardContent className="p-0">
-                <div className="divide-y">
-                  {stationsNeedingAttention.map((station) => {
-                    const status = getStationStatus(station);
-                    return (
-                      <div
-                        key={station.station_id}
-                        className="p-4 hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => {
-                          // TODO: Navigate to /stations with this station pre-selected
-                          window.location.href = '/stations';
-                        }}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <div className="font-medium">{station.name}</div>
-                            <div className="text-sm text-muted-foreground">
-                              {station.city} • {station.provider}
-                            </div>
-                          </div>
-                          <Badge className={`text-xs ${status.color}`}>
-                            {status.label}
-                          </Badge>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
-
-        {/* Top Cities Right Now */}
-        <div className="space-y-4">
-          <h3 className="text-lg font-semibold">Top Cities Right Now</h3>
-          {stats?.top_cities ? (
-            <Card>
-              <CardContent className="p-0">
-                <div className="divide-y">
-                  {stats.top_cities.slice(0, 6).map((cityData, index) => (
-                    <div key={index} className="p-4 flex items-center justify-between">
-                      <div className="flex items-center space-x-3">
-                        <div 
-                          className={`w-3 h-3 rounded-full ${getAqiColor(cityData.avg_aqi)}`}
-                        ></div>
-                        <div>
-                          <div className="font-medium">{cityData.city}</div>
-                          <div className="text-sm text-muted-foreground">
-                            {cityData.station_count} station{cityData.station_count !== 1 ? 's' : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="font-medium">AQI {cityData.avg_aqi}</div>
-                        <div className="text-sm text-muted-foreground">24h avg</div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ) : (
-            <Card className="p-6">
-              <p className="text-muted-foreground text-center">Loading city data...</p>
-            </Card>
-          )}
-        </div>
-      </div>
-
-      {/* Recent Episodes Placeholder */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Recent Pollution Episodes</h3>
-        <Card className="p-6 text-center">
-          <div className="text-4xl mb-2">📊</div>
-          <h4 className="font-medium mb-1">Episodes Overview Coming Soon</h4>
-          <p className="text-sm text-muted-foreground">
-            Will show recent high-AQI events across all stations.
-          </p>
-          <Link href="/stations" className="text-sm text-primary hover:underline">
-            View individual station episodes →
-          </Link>
-        </Card>
-      </div>
-
-      {/* Quick Navigation */}
-      <div className="space-y-4">
-        <h3 className="text-lg font-semibold">Quick Actions</h3>
-        <div className="grid gap-4 md:grid-cols-2">
-          <Link href="/stations">
-            <Card className="p-4 hover:shadow-md transition-shadow cursor-pointer">
-              <div className="flex items-center space-x-3">
-                <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                  <svg className="h-5 w-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-5 -5l-2 2l-3 -3l6 6" />
-                  </svg>
-                </div>
-                <div>
-                  <h4 className="font-medium">Station Management</h4>
-                  <p className="text-sm text-muted-foreground">
-                    Detailed station analytics and monitoring
-                  </p>
-                </div>
-              </div>
-            </Card>
-          </Link>
-
-          <Card className="p-4 opacity-60">
-            <div className="flex items-center space-x-3">
-              <div className="h-10 w-10 rounded-lg bg-muted flex items-center justify-center">
-                <svg className="h-5 w-5 text-muted-foreground" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
-              <div>
-                <h4 className="font-medium">Network Reports</h4>
-                <p className="text-sm text-muted-foreground">
-                  System-wide analytics (Coming Soon)
-                </p>
-              </div>
+          {/* AQI Legend */}
+          <div className="flex flex-wrap items-center gap-3 mt-4">
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-green-500 rounded"></div>
+              <span className="text-xs text-gray-600">Good (0-50)</span>
             </div>
-          </Card>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-yellow-500 rounded"></div>
+              <span className="text-xs text-gray-600">Moderate (51-100)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-orange-500 rounded"></div>
+              <span className="text-xs text-gray-600">Unhealthy (101-150)</span>
+            </div>
+            <div className="flex items-center gap-1">
+              <div className="w-3 h-3 bg-red-600 rounded"></div>
+              <span className="text-xs text-gray-600">Hazardous (150+)</span>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <HeatmapChart height={500} />
+        </CardContent>
+      </Card>
+
+      {/* Main Dashboard Grid - MonetX inspired widget layout */}
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Station Map */}
+        <div className="lg:col-span-2">
+          <StationMap stations={stations} />
         </div>
+        
+        {/* Top Cities Widget */}
+        <div>
+          <TopCitiesWidget 
+            topCities={stats?.top_cities}
+            getAqiColor={getAqiColor}
+          />
+        </div>
+      </div>
+
+      {/* System Alerts - Moved Below Heatmap */}
+      <Card className="w-full">
+        <CardHeader>
+          <div className="flex items-center justify-between">
+            <CardTitle className="flex items-center gap-2">
+              System Alerts
+            </CardTitle>
+            <Link 
+              href="/admin" 
+              className="text-sm text-blue-600 hover:text-blue-800 font-medium"
+            >
+              View All →
+            </Link>
+          </div>
+          <p className="text-sm text-gray-600">
+            Stations requiring immediate attention
+          </p>
+        </CardHeader>
+        <CardContent>
+          <AlertsPanel 
+            stationsNeedingAttention={stationsNeedingAttention}
+            getStationStatus={getStationStatus}
+          />
+        </CardContent>
+      </Card>
+
+      {/* Additional Insights Row */}
+      <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold mb-4">Recent Pollution Episodes</h3>
+          <div className="text-center py-8">
+            <div className="text-4xl mb-2">📊</div>
+            <h4 className="font-medium mb-1">Episodes Detection</h4>
+            <p className="text-sm text-gray-600 mb-4">
+              Advanced episode detection and alerting system
+            </p>
+            <Link 
+              href="/analytics" 
+              className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 font-medium"
+            >
+              View Network Analytics →
+            </Link>
+          </div>
+        </Card>
+        
+        <Card className="p-6">
+          <h3 className="text-lg font-semibold mb-4">Data Quality Summary</h3>
+          <div className="text-center py-8">
+            <div className="text-4xl mb-2">🔍</div>
+            <h4 className="font-medium mb-1">QA/QC Status</h4>
+            <p className="text-sm text-gray-600 mb-4">
+              Real-time data validation and quality assessment
+            </p>
+            <Link 
+              href="/data-quality" 
+              className="inline-flex items-center text-sm text-blue-600 hover:text-blue-800 font-medium"
+            >
+              View Data Quality →
+            </Link>
+          </div>
+        </Card>
       </div>
     </div>
   )
