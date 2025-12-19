@@ -26,9 +26,13 @@ router = APIRouter()
 
 # Export limits and constants
 MAX_DAYS_BACK = 3650  # Allow up to ~10 years of data
-MAX_EXPORT_ROWS = 500_000  # Increased row limit for larger exports
+MAX_EXPORT_ROWS_DEFAULT = 500_000  # Default row limit
+MAX_EXPORT_ROWS_HARD_CAP = 5_000_000  # Hard safety cap for debugging
 DEFAULT_DAYS_BACK = 1  # Swagger-friendly default
 PM25_MAX_DAYS = 3650  # Allow full historical data for PM2.5
+
+STREAM_FLUSH_EVERY_ROWS = 500  # yield every N rows (tune: 200–2000)
+CSV_ENCODING = "utf-8"
 
 def parse_date_yyyy_mm_dd(date_str: str) -> datetime:
     """Parse YYYY-MM-DD date string to UTC datetime at start of day"""
@@ -81,6 +85,10 @@ async def export_station_readings_csv(
     request: Request,
     db: AsyncSession = Depends(get_database),
     days_back: Optional[int] = Query(DEFAULT_DAYS_BACK, description=f"Number of days back from now (default: {DEFAULT_DAYS_BACK}, max: {MAX_DAYS_BACK})"),
+    max_rows: Optional[int] = Query(
+        None,
+        description=f"Optional safety cap on rows (default: {MAX_EXPORT_ROWS_DEFAULT}, hard cap: {MAX_EXPORT_ROWS_HARD_CAP})"
+    ),
     _: bool = Depends(verify_tasks_token)
 ):
     """
@@ -103,146 +111,170 @@ async def export_station_readings_csv(
          "https://hawanama.org/api/v1/exports/station-readings-csv?days_back=7"
     ```
     """
-    # Compute time range with validation
+    # Compute time range and validate max_rows
     start_ts, end_ts = validate_and_compute_time_range(days_back=days_back)
-    
-    logger.info(f"Exporting station readings CSV from {start_ts} to {end_ts}")
-    
-    # Station readings export with metadata from JOINs - fully parameterized
-    query = text("""
-    SELECT 
-        r.scope_key as station_id,
-        COALESCE(s.name, 'Unknown Station') as station_name,
-        COALESCE(s.lat, 0) as latitude,
-        COALESCE(s.lon, 0) as longitude,
-        COALESCE(c.name, 'Unknown City') as city_name,
-        COALESCE(st.name, 'Unknown State') as state_name,
-        COALESCE(co.name, 'Unknown Country') as country_name,
-        r.ts_utc as timestamp_utc,
-        r.pm25,
-        r.aqi_us,
-        r.aqi_cn,
-        r.main_us,
-        r.main_cn,
-        r.temp_c as temperature_celsius,
-        r.humidity as humidity_percent,
-        r.pressure_hpa,
-        r.wind_speed_ms,
-        r.wind_dir_deg as wind_direction_degrees,
-        r.heatindex_c as heat_index_celsius,
-        r.weather_icon,
-        r.qc_state,
-        COALESCE(p.code, r.source) as provider_code,
-        COALESCE(p.display_name, r.source) as provider_name,
-        r.units_pm25
-    FROM readings r
-    LEFT JOIN stations s ON r.scope_key = s.station_id
-    LEFT JOIN providers p ON s.provider_id = p.id
-    LEFT JOIN cities c ON s.city_id = c.id
-    LEFT JOIN states st ON c.state_id = st.id
-    LEFT JOIN countries co ON st.country_id = co.id
-    WHERE r.scope_type = 'station'
-        AND r.ts_utc >= :start_ts
-        AND r.ts_utc < :end_ts
-        AND s.active = true
-    ORDER BY r.scope_key, r.ts_utc ASC
-    LIMIT :max_rows
+
+    effective_max_rows = max_rows if max_rows is not None else MAX_EXPORT_ROWS_DEFAULT
+    if effective_max_rows < 1:
+        raise HTTPException(status_code=400, detail="max_rows must be >= 1")
+    if effective_max_rows > MAX_EXPORT_ROWS_HARD_CAP:
+        logger.warning(f"max_rows={effective_max_rows} exceeds hard cap; clamping to {MAX_EXPORT_ROWS_HARD_CAP}")
+        effective_max_rows = MAX_EXPORT_ROWS_HARD_CAP
+
+    logger.info(f"Exporting station readings CSV from {start_ts} to {end_ts} (max_rows={effective_max_rows})")
+
+    # 1) Build station_id -> numeric_id mapping WITHOUT scanning all readings into memory
+    # (Stable ordering: station_name, station_id)
+    stations_query = text("""
+        SELECT
+            s.station_id,
+            COALESCE(s.name, 'Unknown Station') AS station_name
+        FROM stations s
+        WHERE s.active = true
+        ORDER BY COALESCE(s.name, 'Unknown Station'), s.station_id
     """)
-    
-    params = {
-        "start_ts": start_ts,
-        "end_ts": end_ts,
-        "max_rows": MAX_EXPORT_ROWS,
-    }
-    
     try:
-        result = await db.execute(query, params)
-        rows = result.fetchall()
-        
-        # Create station_id to numeric_id mapping like dashboard API does
-        # Get unique stations and sort by name to create consistent mapping
-        unique_stations = {}
-        for row in rows:
-            if row.station_id not in unique_stations:
-                unique_stations[row.station_id] = {
-                    'name': row.station_name,
-                    'station_id': row.station_id
-                }
-        
-        # Sort stations by name and assign numeric IDs
-        sorted_stations = sorted(unique_stations.items(), key=lambda x: x[1]['name'])
-        station_id_map = {}
-        for i, (station_id, station_info) in enumerate(sorted_stations):
-            station_id_map[station_id] = i + 1  # 1-based indexing like dashboard
-        
-        # Create CSV content generator
-        def generate_csv():
-            output = io.StringIO()
-            writer = csv.writer(output)
-            
-            # Write filtered header with provider information
-            header = [
-                'id', 'station_name', 'latitude', 'longitude',
-                'city_name', 'state_name', 'country_name', 'timestamp_utc',
-                'pm25_ugm3', 'aqi_us', 'aqi_cn', 'main_pollutant_us', 'main_pollutant_cn',
-                'temperature_celsius', 'humidity_percent', 'pressure_hpa',
-                'wind_speed_ms', 'wind_direction_degrees', 'heat_index_celsius',
-                'weather_icon', 'qc_state', 'provider_code', 'provider_name', 'pm25_units'
-            ]
-            writer.writerow(header)
-            yield output.getvalue()
-            output.seek(0)
-            output.truncate(0)
-            
-            # Write filtered data rows with numeric station IDs and provider info
-            for row in rows:
-                numeric_id = station_id_map.get(row.station_id, 0)
-                data_row = [
-                    numeric_id,  # Use numeric ID instead of hex station_id
-                    row.station_name or '',
-                    row.latitude or '',
-                    row.longitude or '',
-                    row.city_name or '',
-                    row.state_name or '',
-                    row.country_name or '',
-                    row.timestamp_utc.isoformat() if row.timestamp_utc else '',
-                    row.pm25 or '',
-                    row.aqi_us or '',
-                    row.aqi_cn or '',
-                    row.main_us or '',
-                    row.main_cn or '',
-                    row.temperature_celsius or '',
-                    row.humidity_percent or '',
-                    row.pressure_hpa or '',
-                    row.wind_speed_ms or '',
-                    row.wind_direction_degrees or '',
-                    row.heat_index_celsius or '',
-                    row.weather_icon or '',
-                    row.qc_state or '',
-                    row.provider_code or '',
-                    row.provider_name or '',
-                    row.units_pm25 or ''
-                ]
-                writer.writerow(data_row)
-                yield output.getvalue()
-                output.seek(0)
-                output.truncate(0)
-        
-        # Generate filename with timestamp and actual date range
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        date_range = f"{start_ts.strftime('%Y%m%d')}_to_{end_ts.strftime('%Y%m%d')}"
-        filename = f"hawanama_station_readings_{date_range}_{timestamp}.csv"
-        
-        # Return streaming response
-        return StreamingResponse(
-            generate_csv(),
-            media_type="text/csv",
-            headers={"Content-Disposition": f"attachment; filename={filename}"}
-        )
-        
+        stations_res = await db.execute(stations_query)
+        stations = stations_res.fetchall()
+        station_id_map = {row.station_id: i + 1 for i, row in enumerate(stations)}
+        logger.info(f"Station ID map size: {len(station_id_map)} active stations")
     except Exception as e:
-        logger.error(f"Error exporting station readings CSV: {e}")
+        logger.error(f"Failed to build station_id_map: {e}")
         raise HTTPException(status_code=500, detail="Failed to export station readings")
+
+    # 2) Stream the export query (NO fetchall)
+    # ORDER BY time first to make truncation "fairer" across stations
+    query = text("""
+        SELECT
+            r.scope_key as station_id,
+            COALESCE(s.name, 'Unknown Station') as station_name,
+            COALESCE(s.lat, 0) as latitude,
+            COALESCE(s.lon, 0) as longitude,
+            COALESCE(c.name, 'Unknown City') as city_name,
+            COALESCE(st.name, 'Unknown State') as state_name,
+            COALESCE(co.name, 'Unknown Country') as country_name,
+            r.ts_utc as timestamp_utc,
+            r.pm25,
+            r.aqi_us,
+            r.aqi_cn,
+            r.main_us,
+            r.main_cn,
+            r.temp_c as temperature_celsius,
+            r.humidity as humidity_percent,
+            r.pressure_hpa,
+            r.wind_speed_ms,
+            r.wind_dir_deg as wind_direction_degrees,
+            r.heatindex_c as heat_index_celsius,
+            r.weather_icon,
+            r.qc_state,
+            COALESCE(p.code, r.source) as provider_code,
+            COALESCE(p.display_name, r.source) as provider_name,
+            r.units_pm25
+        FROM readings r
+        LEFT JOIN stations s ON r.scope_key = s.station_id
+        LEFT JOIN providers p ON s.provider_id = p.id
+        LEFT JOIN cities c ON s.city_id = c.id
+        LEFT JOIN states st ON c.state_id = st.id
+        LEFT JOIN countries co ON st.country_id = co.id
+        WHERE r.scope_type = 'station'
+            AND r.ts_utc >= :start_ts
+            AND r.ts_utc < :end_ts
+            AND s.active = true
+        ORDER BY r.ts_utc ASC, r.scope_key ASC
+        LIMIT :max_rows
+    """)
+
+    params = {"start_ts": start_ts, "end_ts": end_ts, "max_rows": effective_max_rows}
+
+    header = [
+        "id", "station_name", "latitude", "longitude",
+        "city_name", "state_name", "country_name", "timestamp_utc",
+        "pm25_ugm3", "aqi_us", "aqi_cn", "main_pollutant_us", "main_pollutant_cn",
+        "temperature_celsius", "humidity_percent", "pressure_hpa",
+        "wind_speed_ms", "wind_direction_degrees", "heat_index_celsius",
+        "weather_icon", "qc_state", "provider_code", "provider_name", "pm25_units",
+    ]
+    
+    async def generate_csv():
+        output = io.StringIO()
+        writer = csv.writer(output)
+
+        # header
+        writer.writerow(header)
+        yield output.getvalue().encode(CSV_ENCODING)
+        output.seek(0)
+        output.truncate(0)
+
+        row_count = 0
+
+        try:
+            # SQLAlchemy 2.x async streaming
+            result = await db.stream(query, params)
+
+            async for row in result:
+                # If client disconnects, stop work (important on Cloud Run)
+                if await request.is_disconnected():
+                    logger.warning("Client disconnected during export; stopping stream early")
+                    break
+
+                numeric_id = station_id_map.get(row.station_id, 0)
+
+                writer.writerow([
+                    numeric_id,
+                    row.station_name or "",
+                    row.latitude or "",
+                    row.longitude or "",
+                    row.city_name or "",
+                    row.state_name or "",
+                    row.country_name or "",
+                    row.timestamp_utc.isoformat() if row.timestamp_utc else "",
+                    row.pm25 if row.pm25 is not None else "",
+                    row.aqi_us if row.aqi_us is not None else "",
+                    row.aqi_cn if row.aqi_cn is not None else "",
+                    row.main_us or "",
+                    row.main_cn or "",
+                    row.temperature_celsius if row.temperature_celsius is not None else "",
+                    row.humidity_percent if row.humidity_percent is not None else "",
+                    row.pressure_hpa if row.pressure_hpa is not None else "",
+                    row.wind_speed_ms if row.wind_speed_ms is not None else "",
+                    row.wind_direction_degrees if row.wind_direction_degrees is not None else "",
+                    row.heat_index_celsius if row.heat_index_celsius is not None else "",
+                    row.weather_icon or "",
+                    row.qc_state or "",
+                    row.provider_code or "",
+                    row.provider_name or "",
+                    row.units_pm25 or "",
+                ])
+
+                row_count += 1
+
+                # flush in chunks
+                if row_count % STREAM_FLUSH_EVERY_ROWS == 0:
+                    yield output.getvalue().encode(CSV_ENCODING)
+                    output.seek(0)
+                    output.truncate(0)
+
+            # flush remaining buffer
+            if output.tell() > 0:
+                yield output.getvalue().encode(CSV_ENCODING)
+
+            logger.info(f"Export completed: streamed {row_count} rows (max_rows={effective_max_rows})")
+        
+        except Exception as e:
+            logger.error(f"Error during streaming export: {e}")
+            # Still yield error info as a comment in CSV
+            error_msg = f"# Export error: {str(e)}\n"
+            yield error_msg.encode(CSV_ENCODING)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    date_range = f"{start_ts.strftime('%Y%m%d')}_to_{end_ts.strftime('%Y%m%d')}"
+    filename = f"hawanama_station_readings_{date_range}_{timestamp}.csv"
+
+    return StreamingResponse(
+        generate_csv(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @router.get("/city-readings-csv")
