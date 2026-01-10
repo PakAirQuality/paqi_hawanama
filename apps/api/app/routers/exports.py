@@ -334,11 +334,25 @@ async def export_station_readings_csv(
 
     station_where_sql = " AND ".join(where_station)
 
+    # Enhanced logging: Request parameters
     logger.info(
-        f"Export station CSV [{data_type}] {start_ts} → {end_ts} "
-        f"pollutants={selected_pollutants} province={province} city={city} "
-        f"station_ids={len(station_ids)} providers={provider_codes} max_rows={effective_max_rows}"
+        f"=== Export Request Started === "
+        f"data_type={data_type} aggregated={aggregated}"
     )
+    logger.info(
+        f"Time range: {start_ts.isoformat()} → {end_ts.isoformat()} "
+        f"({(end_ts - start_ts).days} days)"
+    )
+    logger.info(
+        f"Pollutants: {', '.join(selected_pollutants)} "
+        f"(total: {len(selected_pollutants)})"
+    )
+    logger.info(
+        f"Filters: province={province or 'ALL'} city={city or 'ALL'} "
+        f"station_ids={len(station_ids) if station_ids else 'ALL'} "
+        f"providers={provider_codes or 'ALL'}"
+    )
+    logger.info(f"Safety limits: max_rows={effective_max_rows}")
 
     # 7) Build station_id -> numeric_id mapping (ONLY for the filtered station set)
     stations_query_sql = f"""
@@ -359,12 +373,22 @@ async def export_station_readings_csv(
         stations_query = stations_query.bindparams(provider_bind)
 
     try:
+        logger.info("Building station ID mapping...")
         stations_res = await db.execute(stations_query, params)
         stations = stations_res.fetchall()
         station_id_map = {row.station_id: i + 1 for i, row in enumerate(stations)}
-        logger.info(f"Station map size: {len(station_id_map)} stations")
+        logger.info(
+            f"✓ Station mapping complete: {len(station_id_map)} stations matched filters"
+        )
+
+        # Log warning if no stations matched
+        if len(station_id_map) == 0:
+            logger.warning(
+                f"No stations matched filters: province={province} city={city} "
+                f"station_ids={station_ids} providers={provider_codes}"
+            )
     except Exception as e:
-        logger.error(f"Failed to build station_id_map: {e}")
+        logger.error(f"Failed to build station_id_map: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to export station readings")
 
     # 8) Build SELECT list dynamically (pollutants + units)
@@ -493,15 +517,21 @@ async def export_station_readings_csv(
         output = io.StringIO()
         writer = csv.writer(output)
 
+        # Log CSV structure
+        logger.info(f"CSV structure: {len(header)} columns - {', '.join(header[:10])}...")
+
         writer.writerow(header)
         yield output.getvalue().encode(CSV_ENCODING)
         output.seek(0)
         output.truncate(0)
 
         row_count = 0
+        start_streaming_time = datetime.now()
 
         try:
+            logger.info("Starting database streaming query...")
             result = await db.stream(readings_query, params)
+            logger.info("✓ Query execution started, streaming rows...")
 
             async for row in result:
                 if await request.is_disconnected():
@@ -550,6 +580,16 @@ async def export_station_readings_csv(
                 writer.writerow(base_row + dyn)
 
                 row_count += 1
+
+                # Progress logging every 10K rows
+                if row_count % 10000 == 0:
+                    elapsed = (datetime.now() - start_streaming_time).total_seconds()
+                    rate = row_count / elapsed if elapsed > 0 else 0
+                    logger.info(
+                        f"Progress: {row_count:,} rows streamed "
+                        f"({rate:.0f} rows/sec, {elapsed:.1f}s elapsed)"
+                    )
+
                 if row_count % STREAM_FLUSH_EVERY_ROWS == 0:
                     yield output.getvalue().encode(CSV_ENCODING)
                     output.seek(0)
@@ -558,10 +598,32 @@ async def export_station_readings_csv(
             if output.tell() > 0:
                 yield output.getvalue().encode(CSV_ENCODING)
 
-            logger.info(f"Export completed: streamed {row_count} rows (max_rows={effective_max_rows})")
+            # Final summary logging
+            total_duration = (datetime.now() - start_streaming_time).total_seconds()
+            avg_rate = row_count / total_duration if total_duration > 0 else 0
+
+            logger.info(
+                f"=== Export Completed === "
+                f"rows={row_count:,} duration={total_duration:.2f}s "
+                f"rate={avg_rate:.0f} rows/sec "
+                f"stations={len(station_id_map)} "
+                f"max_rows_limit={effective_max_rows}"
+            )
+
+            # Log if we hit the max_rows limit
+            if row_count >= effective_max_rows:
+                logger.warning(
+                    f"Export hit max_rows limit ({effective_max_rows:,}). "
+                    f"Results may be incomplete. Consider using data_type=daily or "
+                    f"more specific filters."
+                )
 
         except Exception as e:
-            logger.error(f"Error during streaming export: {e}")
+            logger.error(
+                f"Error during streaming export: {e} "
+                f"(rows streamed before error: {row_count:,})",
+                exc_info=True
+            )
             yield f"# Export error: {str(e)}\n".encode(CSV_ENCODING)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
