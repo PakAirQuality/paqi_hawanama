@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     
     # Security
     TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
+    PUBLIC_API_SECRET: Optional[str] = None  # Secret for public API endpoints
     
     # LLM/AI Services
     GEMINI_API_KEY: Optional[str] = None

@@ -28,8 +28,10 @@ vite.config.ts.timestamp-*
 # Ignore build artifacts and cache files
 .next/
 .firebase/
+out/
 apps/web-next/.firebase/
 apps/web-next/.next/
+apps/dashboard-frontend/out/
 infra/.terraform/
 *.pack
 terraform-provider-*

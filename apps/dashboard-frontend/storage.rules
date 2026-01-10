@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    // Helper function to check if user has a valid @pakairquality.com domain
+    function isInternalUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@pakairquality\\.com');
+    }
+
+    // Default rule: Only allow access to verified @pakairquality.com users
+    match /{allPaths=**} {
+      allow read, write: if isInternalUser();
+    }
+
+    // Example: Specific folder for uploads with size limits
+    // match /uploads/{userId}/{fileName} {
+    //   allow read, write: if isInternalUser() 
+    //     && request.auth.uid == userId 
+    //     && resource.size < 50 * 1024 * 1024; // 50MB limit
+    // }
+  }
+}

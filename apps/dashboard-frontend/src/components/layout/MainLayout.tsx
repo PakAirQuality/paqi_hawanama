@@ -9,8 +9,10 @@ import {
   Search, 
   TrendingUp,
   Menu,
-  X
+  X,
+  FileText
 } from 'lucide-react'
+import { UserMenu } from '@/components/auth/UserMenu'
 
 const modules = [
   {
@@ -40,6 +42,13 @@ const modules = [
     href: '/analytics',
     icon: TrendingUp,
     description: 'System-wide insights and reporting'
+  },
+  {
+    id: 'reports',
+    name: 'Reports',
+    href: '/reports',
+    icon: FileText,
+    description: 'Average report criteria and data analysis'
   }
 ]
 
@@ -134,7 +143,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               <span className="text-lg font-bold text-gray-900">Hawanama</span>
             </div>
 
-            <div></div>
+            <UserMenu />
           </div>
         </header>
 
@@ -150,10 +159,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
               </p>
             </div>
             
-            {/* System Status - Far right */}
-            <div className="flex items-center space-x-2 px-4 py-2 bg-green-50 rounded-full">
-              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-              <span className="text-sm text-green-700 font-medium">System Online</span>
+            {/* User menu */}
+            <div className="flex items-center space-x-4">
+              <UserMenu />
             </div>
           </div>
         </header>
