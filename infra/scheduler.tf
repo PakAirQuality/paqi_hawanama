@@ -236,6 +236,41 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
   }
 }
 
+# 5. Daily Parquet Export to GCS - 3:00 AM UTC daily
+resource "google_cloud_scheduler_job" "parquet_export_daily" {
+  name        = "parquet-export-daily"
+  description = "Daily Parquet export of all station readings to GCS at 3:00 AM UTC"
+  schedule    = "0 3 * * *"  # 3:00 AM UTC daily (8:00 AM PKT)
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-readings-hourly-parquet"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    body = base64encode(jsonencode({
+      start_date = "2018-01-01",
+      end_date   = "2026-12-31",
+      parameters = "all",
+      data_type  = "hourly"
+    }))
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "3600s"  # 1 hour max retry duration
+    min_backoff_duration = "120s"
+    max_backoff_duration = "600s"
+  }
+}
+
 # Optional: Emergency full pipeline job (manual trigger via gcloud)
 resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
   name        = "full-pipeline-emergency"
@@ -247,11 +282,11 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
   http_target {
     http_method = "POST"
     uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/full-pipeline"
-    
+
     headers = {
       "Content-Type" = "application/json"
     }
-    
+
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
     }
