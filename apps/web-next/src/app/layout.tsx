@@ -18,9 +18,9 @@ export const metadata: Metadata = {
   description: "Real-time air quality monitoring across Pakistan. Track PM2.5, PM10, and other pollutants in major cities.",
   viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
   icons: {
-    icon: "/logo-cropped.png",
-    shortcut: "/logo-cropped.png",
-    apple: "/logo-cropped.png",
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
   },
 };
 

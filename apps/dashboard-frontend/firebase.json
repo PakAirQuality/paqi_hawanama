@@ -1,5 +1,6 @@
 {
   "hosting": {
+    "target": "hawanama-dashboard",
     "public": "out",
     "ignore": [
       "firebase.json",
@@ -20,5 +21,12 @@
         ]
       }
     ]
+  },
+  "firestore": {
+    "rules": "firestore.rules",
+    "indexes": "firestore.indexes.json"
+  },
+  "storage": {
+    "rules": "storage.rules"
   }
 }

@@ -7,17 +7,28 @@ steps:
       - 'apps/api/Dockerfile'
       - '-t'
       - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
-      - '-t'
-      - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:$BUILD_ID'
       - '--build-arg'
       - 'HAWANAMA_BOT_ENABLED=true'
       - '.'
     env:
       - 'DOCKER_BUILDKIT=1'
 
-images:
-  - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
-  - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:$BUILD_ID'
+  # Push the image to registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
+
+  # Deploy to Cloud Run using latest tag (guaranteed to be available after push)
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hawanama'
+      - '--image=asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
+      - '--region=asia-south1'
+      - '--platform=managed'
 
 # Build options for faster builds
 options:

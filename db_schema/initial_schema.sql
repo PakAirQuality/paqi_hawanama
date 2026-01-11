@@ -1172,6 +1172,50 @@ ALTER TABLE ONLY public.units_catalog
 
 
 --
+-- Name: city_hourly_from_stations; Type: MATERIALIZED VIEW; Schema: public; Owner: -
+--
+
+CREATE MATERIALIZED VIEW public.city_hourly_from_stations
+WITH (timescaledb.continuous) AS
+SELECT
+  time_bucket('1 hour', r.ts_utc, 'UTC') AS hour_utc,
+  s.city_id,
+  AVG(r.pm25) FILTER (
+      WHERE r.pm25 IS NOT NULL
+        AND (r.qc_state IS NULL OR r.qc_state != 'INVALID')
+  ) AS pm25_mean,
+  AVG(r.aqi_us) FILTER (
+      WHERE r.aqi_us IS NOT NULL
+        AND (r.qc_state IS NULL OR r.qc_state != 'INVALID')
+  ) AS aqi_mean,
+  COUNT(*) FILTER (
+      WHERE r.pm25 IS NOT NULL
+        AND (r.qc_state IS NULL OR r.qc_state != 'INVALID')
+  ) AS sample_count,
+  COUNT(DISTINCT r.scope_key) FILTER (
+      WHERE r.pm25 IS NOT NULL
+        AND (r.qc_state IS NULL OR r.qc_state != 'INVALID')
+  ) AS station_count
+FROM readings r
+JOIN stations s
+  ON r.scope_type = 'station'
+ AND r.scope_key = s.station_id
+GROUP BY hour_utc, s.city_id;
+
+--
+-- Name: city_hourly_from_stations_city_id_hour_utc_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX city_hourly_from_stations_city_id_hour_utc_idx ON public.city_hourly_from_stations USING btree (city_id, hour_utc DESC);
+
+--
+-- Name: city_hourly_from_stations; Type: CONTINUOUS AGGREGATE POLICY; Schema: public; Owner: -
+--
+
+SELECT add_continuous_aggregate_policy('public.city_hourly_from_stations', start_offset => INTERVAL '5 years', end_offset => INTERVAL '1 hour', schedule_interval => INTERVAL '15 minutes');
+
+
+--
 -- Name: _hyper_1_1_chunk_idx_readings_city_pollutant; Type: INDEX; Schema: _timescaledb_internal; Owner: -
 --
 

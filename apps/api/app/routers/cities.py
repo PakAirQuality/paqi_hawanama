@@ -4,7 +4,7 @@ from sqlalchemy import text
 from app.core.database import get_database
 from typing import List, Optional
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -449,6 +449,182 @@ async def get_city_historical(
         raise
     except Exception as e:
         logger.error(f"Error getting historical data for city {city_slug}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/cities/{city_slug}/historical-from-stations")
+async def get_city_historical_from_stations(
+    city_slug: str = Path(
+        ...,
+        description="Select city from dropdown list",
+        example="lahore",
+        enum=[
+            "abbottabad", "bahawalpur", "bhopalwala", "chak-jhumra",
+            "daska-kalan", "dera-ismail-khan", "eminabad", "faisalabad",
+            "gujranwala", "haripur", "hundal", "hyderabad", "islamabad",
+            "jhang", "jhelum", "kahna-nau", "karachi", "kasur",
+            "khairpur-mirs", "kharan", "khurrianwala", "kot-malik-barkhurdar",
+            "kotli-loharan", "kotri", "ladhewala-waraich", "lahore",
+            "lodhran", "malam-jabba", "malir-cantonment", "mandi-bahauddin",
+            "mirpur-khas", "multan", "murree", "pasrur", "pattoki",
+            "peshawar", "pindi-bhattian", "qadirpur-ran", "quetta",
+            "rahim-yar-khan", "raiwind", "rawalpindi", "rojhan", "sambrial",
+            "sheikhupura", "sialkot", "skardu", "sukkur"
+        ],
+    ),
+    hours: int = 24,  # how far back you want (e.g. 24, 168, 24*365)
+    db: AsyncSession = Depends(get_database),
+):
+    """
+    City historical data **derived from stations**:
+
+    1. Aggregate all station readings in the city to **hourly city values**
+       (mean PM2.5/AQI across stations in that hour).
+    2. Aggregate those hourly city values into **daily values** (24-hour averages).
+    """
+    try:
+        # --- 1) Resolve city ---
+        city_name = city_slug.replace("-", " ").title()
+
+        city_query = """
+            SELECT
+                c.id,
+                c.name          AS city_name,
+                s.name          AS state_name,
+                co.name         AS country_name
+            FROM cities c
+            LEFT JOIN states s   ON c.state_id   = s.id
+            LEFT JOIN countries co ON c.country_id = co.id
+            WHERE LOWER(c.name) = LOWER(:city_name)
+               OR LOWER(c.name) = LOWER(:city_slug)
+            LIMIT 1;
+        """
+        city_result = await db.execute(
+            text(city_query),
+            {
+                "city_name": city_name,
+                "city_slug": city_slug.replace("-", " "),
+            },
+        )
+        city = city_result.fetchone()
+        if not city:
+            raise HTTPException(status_code=404, detail="City not found")
+
+        # --- 2) Time window ---
+        now_utc = datetime.now(timezone.utc)
+        start_ts = now_utc - timedelta(hours=hours)
+
+        # --- 3) Use pre-aggregated continuous aggregate for MASSIVE speed improvement ---
+        #   This queries our city_hourly_from_stations materialized view instead of scanning readings
+        hourly_query = """
+            SELECT
+                hour_utc,
+                pm25_mean,
+                aqi_mean,
+                sample_count,
+                station_count
+            FROM city_hourly_from_stations
+            WHERE city_id = :city_id
+              AND hour_utc >= :start_ts
+            ORDER BY hour_utc;
+        """
+
+        hourly_result = await db.execute(
+            text(hourly_query),
+            {
+                "city_id": city.id,
+                "start_ts": start_ts,
+            },
+        )
+        hourly_rows = hourly_result.fetchall()
+
+        # --- 4) Build hourly list for response ---
+        hourly_readings = []
+        for row in hourly_rows:
+            hourly_readings.append(
+                {
+                    "timestamp": row.hour_utc.isoformat() if row.hour_utc else None,
+                    "pm25_mean": float(row.pm25_mean) if row.pm25_mean is not None else None,
+                    "aqi_mean": float(row.aqi_mean) if row.aqi_mean is not None else None,
+                    "sample_count": int(row.sample_count) if row.sample_count is not None else 0,
+                    "station_count": int(row.station_count) if row.station_count is not None else 0,
+                }
+            )
+
+        # --- 5) Aggregate hourly → daily (24-hour city values) in Python ---
+        #     (This avoids scanning `readings` a second time.)
+        daily_tmp = {}
+
+        for row in hourly_rows:
+            if row.hour_utc is None:
+                continue
+            day = row.hour_utc.date()
+
+            d = daily_tmp.get(day)
+            if d is None:
+                d = {
+                    "pm25_sum": 0.0,
+                    "pm25_count": 0,
+                    "pm25_max": None,
+                    "pm25_min": None,
+                    "aqi_sum": 0.0,
+                    "aqi_count": 0,
+                    "aqi_max": None,
+                    "aqi_min": None,
+                    "hours_with_data": 0,
+                }
+                daily_tmp[day] = d
+
+            # PM2.5
+            if row.pm25_mean is not None:
+                val = float(row.pm25_mean)
+                d["pm25_sum"] += val
+                d["pm25_count"] += 1
+                d["pm25_max"] = val if d["pm25_max"] is None else max(d["pm25_max"], val)
+                d["pm25_min"] = val if d["pm25_min"] is None else min(d["pm25_min"], val)
+
+            # AQI
+            if row.aqi_mean is not None:
+                val = float(row.aqi_mean)
+                d["aqi_sum"] += val
+                d["aqi_count"] += 1
+                d["aqi_max"] = val if d["aqi_max"] is None else max(d["aqi_max"], val)
+                d["aqi_min"] = val if d["aqi_min"] is None else min(d["aqi_min"], val)
+
+            d["hours_with_data"] += 1
+
+        daily_readings = []
+        for day in sorted(daily_tmp.keys()):
+            d = daily_tmp[day]
+            daily_readings.append(
+                {
+                    "date": day.isoformat(),
+                    "pm25_mean": (d["pm25_sum"] / d["pm25_count"]) if d["pm25_count"] > 0 else None,
+                    "pm25_max": d["pm25_max"],
+                    "pm25_min": d["pm25_min"],
+                    "aqi_mean": (d["aqi_sum"] / d["aqi_count"]) if d["aqi_count"] > 0 else None,
+                    "aqi_max": d["aqi_max"],
+                    "aqi_min": d["aqi_min"],
+                    "hours_with_data": d["hours_with_data"],
+                }
+            )
+
+        return {
+            "city_slug": city_slug,
+            "city_name": city.city_name,
+            "state": city.state_name,
+            "country": city.country_name,
+            "hours": hours,
+            "hourly_count": len(hourly_readings),
+            "daily_count": len(daily_readings),
+            "hourly": hourly_readings,  # city series derived from stations
+            "daily": daily_readings,    # 24h aggregates of that city series
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting historical station-derived data for city {city_slug}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
