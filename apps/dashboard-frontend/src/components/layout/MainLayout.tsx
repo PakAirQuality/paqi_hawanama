@@ -3,14 +3,15 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { 
-  BarChart3, 
-  Settings, 
-  Search, 
+import {
+  BarChart3,
+  Settings,
+  Search,
   TrendingUp,
   Menu,
   X,
-  FileText
+  FileText,
+  Cpu
 } from 'lucide-react'
 import { UserMenu } from '@/components/auth/UserMenu'
 
@@ -49,6 +50,13 @@ const modules = [
     href: '/reports',
     icon: FileText,
     description: 'Average report criteria and data analysis'
+  },
+  {
+    id: 'ml-ops',
+    name: 'ML Ops',
+    href: '/ops/pipeline',
+    icon: Cpu,
+    description: 'ML pipeline operations and monitoring'
   }
 ]
 

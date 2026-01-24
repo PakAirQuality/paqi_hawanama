@@ -36,9 +36,16 @@ class Settings(BaseSettings):
     
     # LLM/AI Services
     GEMINI_API_KEY: Optional[str] = None
-    
+
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 60
+
+    # Ops Pipeline (ML estimation jobs)
+    OPS_DERIVED_BUCKET: Optional[str] = None  # GCS bucket for pipeline outputs (e.g., paqi-derived-hawanama-data)
+    OPS_GCP_PROJECT: Optional[str] = None  # GCP project for Cloud Run jobs
+    OPS_RUN_REGION: str = "asia-south1"  # Cloud Run region
+    OPS_DAILY_JOB_NAME: str = "estimation-daily-pipeline"  # Daily estimation job name
+    OPS_RETRAIN_JOB_NAME: str = "estimation-model-retrain"  # Model retrain job name
     
     @property
     def DATABASE_URL(self) -> str:
