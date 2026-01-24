@@ -7,10 +7,12 @@
   },
   "scripts": {
     "dev": "next dev --port 3001",
+    "clean": "rm -rf .next out",
+    "prebuild": "npm run clean",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "export": "next build"
+    "export": "npm run clean && next build"
   },
   "dependencies": {
     "@observablehq/plot": "^0.6.17",
@@ -34,7 +36,7 @@
     "firebase": "^12.7.0",
     "lucide-react": "^0.544.0",
     "maplibre-gl": "^5.13.0",
-    "next": "15.0.3",
+    "next": "^16.1.4",
     "react": "18.3.1",
     "react-apexcharts": "^1.8.0",
     "react-dom": "18.3.1",
