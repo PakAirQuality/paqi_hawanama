@@ -237,6 +237,99 @@ async def get_run_report(
     return _gcs_read_json(bucket, f"runs/date={run_date}/run_report.json")
 
 
+def _gcs_list_prediction_dates(bucket_name: str, limit: int = 30) -> List[str]:
+    """
+    List prediction date prefixes like predictions/date=YYYY-MM-DD/.
+    """
+    try:
+        client = _gcs_client()
+        bucket = client.bucket(bucket_name)
+
+        blobs_iter = bucket.list_blobs(prefix="predictions/date=", delimiter="/")
+
+        for _ in blobs_iter:
+            pass
+
+        prefixes = list(blobs_iter.prefixes)
+
+        dates = []
+        for p in prefixes:
+            try:
+                d = p.split("predictions/date=")[1].split("/")[0]
+                dates.append(d)
+            except Exception:
+                continue
+
+        dates.sort()
+        return dates[-limit:]
+    except Exception as e:
+        logger.error(f"Failed to list prediction dates from gs://{bucket_name}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list prediction dates: {str(e)}"
+        )
+
+
+@router.get(
+    "/predictions",
+    summary="List available predictions",
+    description="Returns list of dates with predictions available."
+)
+async def list_predictions(
+    limit: int = Query(30, ge=1, le=365, description="Maximum number of dates to return"),
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """List available prediction dates (most recent last)."""
+    bucket = _get_derived_bucket()
+    dates = _gcs_list_prediction_dates(bucket, limit=limit)
+    return {"dates": dates, "count": len(dates)}
+
+
+@router.get(
+    "/predictions/{pred_date}",
+    summary="Get prediction data",
+    description="Returns prediction data for map visualization."
+)
+async def get_prediction_data(
+    pred_date: str,
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """
+    Get prediction data for a specific date.
+
+    Returns JSON with grid metadata, statistics, and PM2.5 values
+    optimized for frontend map rendering.
+
+    Args:
+        pred_date: Date in YYYY-MM-DD format
+    """
+    bucket = _get_derived_bucket()
+
+    # Try JSON format first (new format with grid data)
+    try:
+        return _gcs_read_json(bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
+    except HTTPException as e:
+        if e.status_code != 404:
+            raise
+
+    # Fallback: check if GeoTIFF exists (older predictions)
+    try:
+        client = _gcs_client()
+        tif_blob = client.bucket(bucket).blob(f"predictions/date={pred_date}/pm25_{pred_date}.tif")
+        if tif_blob.exists(client):
+            raise HTTPException(
+                status_code=501,
+                detail=f"Prediction for {pred_date} exists as GeoTIFF only. JSON format not available. Re-run pipeline to generate JSON."
+            )
+    except HTTPException:
+        raise
+
+    raise HTTPException(
+        status_code=404,
+        detail=f"Prediction not found for date: {pred_date}"
+    )
+
+
 # =============================================================================
 # JOB CONTROL ENDPOINTS (Cloud Run Jobs API)
 # =============================================================================
@@ -248,6 +341,16 @@ async def get_run_report(
 )
 async def run_pipeline_job(
     which: str,
+    reference_date: Optional[str] = Query(
+        None,
+        description="Reference date for waterline calculation (YYYY-MM-DD). For retrain job only.",
+        regex=r"^\d{4}-\d{2}-\d{2}$"
+    ),
+    date: Optional[str] = Query(
+        None,
+        description="Date to process (YYYY-MM-DD). For daily pipeline only.",
+        regex=r"^\d{4}-\d{2}-\d{2}$"
+    ),
     _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
@@ -255,6 +358,8 @@ async def run_pipeline_job(
 
     Args:
         which: Job type - "daily" for daily estimation pipeline, "retrain" for model retraining
+        reference_date: Reference date for waterline calculation (retrain only, YYYY-MM-DD)
+        date: Date to process (daily pipeline only, YYYY-MM-DD)
     """
     if which not in ("daily", "retrain"):
         raise HTTPException(
@@ -268,9 +373,30 @@ async def run_pipeline_job(
     # POST https://run.googleapis.com/v2/{name}:run
     url = f"https://run.googleapis.com/v2/{name}:run"
 
+    # Build request body with overrides if parameters provided
+    # Cloud Run Jobs API: https://cloud.google.com/run/docs/reference/rest/v2/projects.locations.jobs/run
+    request_body: Dict[str, Any] = {}
+
+    if which == "retrain" and reference_date:
+        # Override args for retrain job to pass reference_date
+        request_body["overrides"] = {
+            "containerOverrides": [{
+                "args": ["retrain_job.py", "--reference_date", reference_date]
+            }]
+        }
+        logger.info(f"Retrain job will use reference_date: {reference_date}")
+    elif which == "daily" and date:
+        # Override args for daily pipeline to pass date
+        request_body["overrides"] = {
+            "containerOverrides": [{
+                "args": ["--date", date]
+            }]
+        }
+        logger.info(f"Daily pipeline will use date: {date}")
+
     try:
         sess = _cloudrun_session()
-        resp = sess.post(url, json={})
+        resp = sess.post(url, json=request_body)
 
         if resp.status_code >= 400:
             logger.error(f"Cloud Run job trigger failed: {resp.status_code} {resp.text}")
