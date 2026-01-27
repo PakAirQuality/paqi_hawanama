@@ -145,7 +145,49 @@ export interface TileDatesResponse {
   tilejson_url_template: string
 }
 
-export type TabType = 'overview' | 'runs' | 'executions' | 'results'
+export type TabType = 'overview' | 'runs' | 'executions' | 'results' | 'model-history'
+
+export interface ModelHistoryEntry {
+  schema_version: string
+  training_mode: 'operational' | 'cv' | 'operational_waterline'
+  reference_date: string
+  waterline: string
+  cutoff_days: number
+  validation_days: number
+  train_date_range: [string, string]
+  val_date_range: [string, string]
+  train_samples: number
+  val_samples: number
+  train_years: number[]
+  n_features: number
+  val_metrics: {
+    rmse: number
+    mae: number
+    r2: number
+    bias: number
+    n_predictions?: number
+    n_stations?: number
+    skill_vs_station_month?: number
+    skill_vs_yesterday?: number
+  }
+  val_monthly?: Record<string, {
+    rmse: number
+    mae: number
+    r2: number
+    bias: number
+    n_predictions?: number
+  }>
+  lgbm_params_used?: Record<string, number | string | boolean>
+  feature_importance_top30?: [string, number][]
+  timestamp: string
+  git_commit?: string
+  created_at_utc?: string
+}
+
+export interface ModelHistoryResponse {
+  reference_dates: string[]
+  count: number
+}
 
 // Model training details - supports both operational and CV training formats
 export interface ModelDetails {

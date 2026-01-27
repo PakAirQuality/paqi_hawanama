@@ -9,6 +9,8 @@ import type {
   PredictionData,
   TileDatesResponse,
   ModelDetails,
+  ModelHistoryResponse,
+  ModelHistoryEntry,
 } from './types'
 
 export const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
@@ -108,5 +110,23 @@ export async function fetchModelDetails(): Promise<ModelDetails> {
     cache: 'no-store'
   })
   if (!res.ok) throw new Error("Failed to load model details")
+  return res.json()
+}
+
+export async function fetchModelHistory(limit: number = 30): Promise<ModelHistoryResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/model-history?limit=${limit}`, {
+    headers,
+    cache: 'no-store'
+  })
+  if (!res.ok) throw new Error("Failed to load model history")
+  return res.json()
+}
+
+export async function fetchModelHistoryEntry(referenceDate: string): Promise<ModelHistoryEntry> {
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/model-history/${referenceDate}`, {
+    headers,
+    cache: 'no-store'
+  })
+  if (!res.ok) throw new Error(`Failed to load model history for ${referenceDate}`)
   return res.json()
 }

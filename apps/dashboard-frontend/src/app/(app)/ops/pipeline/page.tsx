@@ -11,6 +11,8 @@ import {
   triggerJob,
   fetchTileDates,
   fetchPredictionData,
+  fetchModelHistory,
+  fetchModelHistoryEntry,
   getExecutionStatus,
   type TabType,
 } from '@/components/ops-pipeline'
@@ -20,12 +22,14 @@ import { OverviewTab } from '@/components/ops-pipeline/OverviewTab'
 import { RunsTab } from '@/components/ops-pipeline/RunsTab'
 import { ExecutionsTab } from '@/components/ops-pipeline/ExecutionsTab'
 import { ResultsTab } from '@/components/ops-pipeline/ResultsTab'
+import { ModelHistoryTab } from '@/components/ops-pipeline/ModelHistoryTab'
 
 export default function OpsPipelinePage() {
   const queryClient = useQueryClient()
   const [selectedRunDate, setSelectedRunDate] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [selectedPredDate, setSelectedPredDate] = useState<string | null>(null)
+  const [selectedModelRefDate, setSelectedModelRefDate] = useState<string | null>(null)
 
   // Queries
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -69,6 +73,18 @@ export default function OpsPipelinePage() {
     enabled: !!selectedPredDate && activeTab === 'results',
   })
 
+  const { data: modelHistory, isLoading: modelHistoryLoading } = useQuery({
+    queryKey: ["ops-pipeline-model-history"],
+    queryFn: () => fetchModelHistory(30),
+    enabled: activeTab === 'model-history',
+  })
+
+  const { data: selectedModelEntry, isLoading: selectedModelEntryLoading } = useQuery({
+    queryKey: ["ops-pipeline-model-history-entry", selectedModelRefDate],
+    queryFn: () => selectedModelRefDate ? fetchModelHistoryEntry(selectedModelRefDate) : null,
+    enabled: !!selectedModelRefDate && activeTab === 'model-history',
+  })
+
   // Mutations
   const triggerRetrainMutation = useMutation({
     mutationFn: () => triggerJob('retrain'),
@@ -95,6 +111,7 @@ export default function OpsPipelinePage() {
         <nav className="flex space-x-8">
           {[
             { id: 'overview', name: 'Overview' },
+            { id: 'model-history', name: 'Model History' },
             { id: 'runs', name: 'Run History' },
             { id: 'executions', name: 'Job Executions' },
             { id: 'results', name: 'Results' },
@@ -130,6 +147,17 @@ export default function OpsPipelinePage() {
           summaryLoading={summaryLoading}
           triggerRetrainMutation={triggerRetrainMutation}
           hasRunningRetrain={hasRunningRetrain || false}
+        />
+      )}
+
+      {activeTab === 'model-history' && (
+        <ModelHistoryTab
+          history={modelHistory}
+          historyLoading={modelHistoryLoading}
+          selectedRefDate={selectedModelRefDate}
+          setSelectedRefDate={setSelectedModelRefDate}
+          selectedEntry={selectedModelEntry}
+          selectedEntryLoading={selectedModelEntryLoading}
         />
       )}
 

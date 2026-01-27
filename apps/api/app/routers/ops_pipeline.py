@@ -348,6 +348,106 @@ async def get_model_details(
         }
 
 
+def _gcs_list_model_history(bucket_name: str, limit: int = 30) -> List[str]:
+    """
+    List model history entries like models/history/ref_YYYYMMDD.json.
+    Returns reference dates (sorted, most recent last).
+    """
+    try:
+        client = _gcs_client()
+        bucket = client.bucket(bucket_name)
+
+        blobs = bucket.list_blobs(prefix="models/history/ref_")
+
+        dates = []
+        for blob in blobs:
+            # blob.name: models/history/ref_20250101.json
+            try:
+                name = blob.name
+                if name.endswith(".json") and "ref_" in name:
+                    # Extract date from ref_YYYYMMDD.json
+                    date_part = name.split("ref_")[1].split(".json")[0]
+                    # Convert YYYYMMDD to YYYY-MM-DD
+                    formatted = f"{date_part[:4]}-{date_part[4:6]}-{date_part[6:8]}"
+                    dates.append(formatted)
+            except Exception:
+                continue
+
+        dates.sort()
+        return dates[-limit:]
+    except Exception as e:
+        logger.error(f"Failed to list model history from gs://{bucket_name}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list model history: {str(e)}"
+        )
+
+
+@router.get(
+    "/model-history",
+    summary="List model training history",
+    description="Returns list of reference dates with model training results."
+)
+async def list_model_history(
+    limit: int = Query(30, ge=1, le=365, description="Maximum number of entries to return"),
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """List available model training history entries (most recent last)."""
+    bucket = _get_derived_bucket()
+    dates = _gcs_list_model_history(bucket, limit=limit)
+    return {"reference_dates": dates, "count": len(dates)}
+
+
+@router.get(
+    "/model-history/{reference_date}",
+    summary="Get model training details",
+    description="Returns model training results for a specific reference date."
+)
+async def get_model_history_entry(
+    reference_date: str,
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """
+    Get model training results for a specific reference date.
+
+    Args:
+        reference_date: Date in YYYY-MM-DD format
+    """
+    bucket = _get_derived_bucket()
+
+    # Convert YYYY-MM-DD to YYYYMMDD for the filename
+    date_compact = reference_date.replace("-", "")
+    blob_path = f"models/history/ref_{date_compact}.json"
+
+    try:
+        results = _gcs_read_json(bucket, blob_path)
+    except HTTPException as e:
+        if e.status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Model history not found for reference date: {reference_date}"
+            )
+        raise
+
+    # Sanitize NaN/Inf values
+    import math
+    def sanitize_value(v):
+        if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+            return None
+        return v
+
+    def sanitize_dict(d):
+        if d is None:
+            return None
+        if isinstance(d, dict):
+            return {k: sanitize_dict(v) for k, v in d.items()}
+        if isinstance(d, list):
+            return [sanitize_dict(v) for v in d]
+        return sanitize_value(d)
+
+    return sanitize_dict(results)
+
+
 @router.get(
     "/runs",
     summary="List pipeline runs",
