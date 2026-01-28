@@ -50,3 +50,6 @@ export function turboToRGBA(t: number): [number, number, number, number] {
 // Fixed colorscale range
 export const VMIN = 20
 export const VMAX = 180
+
+// Turbo colormap gradient (matches backend tile rendering)
+export const TURBO_GRADIENT = 'linear-gradient(to right, #30123b, #4662d7, #36aaf9, #1be5b5, #afea3b, #fbc424, #e45a31, #7a0403)'
