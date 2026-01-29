@@ -75,11 +75,13 @@ def _gcs_read_json(bucket_name: str, blob_path: str) -> Dict[str, Any]:
         )
 
 
-def _gcs_list_run_dates(bucket_name: str, limit: int = 30) -> List[str]:
+def _gcs_list_run_dates(limit: int = 30) -> List[str]:
     """
     List run date prefixes like runs/date=YYYY-MM-DD/ and return latest N dates.
     Uses delimiter to get "folders".
+    Reads from OUTPUTS bucket.
     """
+    bucket_name = _get_outputs_bucket()
     try:
         client = _gcs_client()
         bucket = client.bucket(bucket_name)
@@ -129,15 +131,34 @@ def _cloudrun_job_name(job: str) -> str:
     return f"projects/{settings.OPS_GCP_PROJECT}/locations/{settings.OPS_RUN_REGION}/jobs/{job}"
 
 
-def _get_derived_bucket() -> str:
-    """Get the derived bucket name, stripping gs:// prefix if present."""
-    bucket = settings.OPS_DERIVED_BUCKET
-    if not bucket:
+def _get_bucket(bucket_setting: str, env_var_name: str) -> str:
+    """Get a bucket name, stripping gs:// prefix if present."""
+    if not bucket_setting:
         raise HTTPException(
             status_code=500,
-            detail="OPS_DERIVED_BUCKET environment variable not set"
+            detail=f"{env_var_name} environment variable not set"
         )
-    return bucket.replace("gs://", "").strip("/")
+    return bucket_setting.replace("gs://", "").strip("/")
+
+
+def _get_models_bucket() -> str:
+    """Get the models bucket name (for model artifacts)."""
+    return _get_bucket(settings.OPS_MODELS_BUCKET, "OPS_MODELS_BUCKET")
+
+
+def _get_outputs_bucket() -> str:
+    """Get the outputs bucket name (for predictions and runs)."""
+    return _get_bucket(settings.OPS_OUTPUTS_BUCKET, "OPS_OUTPUTS_BUCKET")
+
+
+def _get_features_bucket() -> str:
+    """Get the features bucket name (for COGs and training data)."""
+    return _get_bucket(settings.OPS_FEATURES_BUCKET, "OPS_FEATURES_BUCKET")
+
+
+def _get_derived_bucket() -> str:
+    """Get the derived bucket name (for feature stores - legacy/fallback)."""
+    return _get_bucket(settings.OPS_DERIVED_BUCKET, "OPS_DERIVED_BUCKET")
 
 
 # =============================================================================
@@ -158,32 +179,33 @@ async def get_pipeline_summary(
     - Predictions pointer (latest published predictions)
     - Latest run report with health stats
     """
-    bucket = _get_derived_bucket()
+    models_bucket = _get_models_bucket()
+    outputs_bucket = _get_outputs_bucket()
 
-    # Read model pointer
+    # Read model pointer (from MODELS bucket, path: operational/latest.json)
     model_ptr = None
     try:
-        model_ptr = _gcs_read_json(bucket, "models/operational/latest.json")
+        model_ptr = _gcs_read_json(models_bucket, "operational/latest.json")
     except HTTPException as e:
         if e.status_code != 404:
             raise
         logger.warning("Model pointer not found")
 
-    # Read predictions pointer
+    # Read predictions pointer (from OUTPUTS bucket)
     preds_ptr = None
     try:
-        preds_ptr = _gcs_read_json(bucket, "predictions/latest.json")
+        preds_ptr = _gcs_read_json(outputs_bucket, "predictions/latest.json")
     except HTTPException as e:
         if e.status_code != 404:
             raise
         logger.warning("Predictions pointer not found")
 
-    # Get latest run report
+    # Get latest run report (from OUTPUTS bucket)
     latest_run = None
-    dates = _gcs_list_run_dates(bucket, limit=1)
+    dates = _gcs_list_run_dates(limit=1)
     if dates:
         try:
-            latest_run = _gcs_read_json(bucket, f"runs/date={dates[-1]}/run_report.json")
+            latest_run = _gcs_read_json(outputs_bucket, f"runs/date={dates[-1]}/run_report.json")
         except HTTPException as e:
             if e.status_code != 404:
                 raise
@@ -193,7 +215,8 @@ async def get_pipeline_summary(
         "model_pointer": model_ptr,
         "predictions_pointer": preds_ptr,
         "latest_run_report": latest_run,
-        "derived_bucket": bucket,
+        "models_bucket": models_bucket,
+        "outputs_bucket": outputs_bucket,
         "region": settings.OPS_RUN_REGION,
         "gcp_project": settings.OPS_GCP_PROJECT,
         "jobs": {
@@ -203,20 +226,22 @@ async def get_pipeline_summary(
     }
 
 
-def _find_model_results_file(bucket_name: str, waterline: str) -> Optional[str]:
+def _find_model_results_file(waterline: str) -> Optional[str]:
     """
     Find the results JSON file for a given waterline.
 
     Results files are named like: operational_results_W20250713_20260122_172806.json
     We match by waterline (W{date}) and return the most recent one.
+    Reads from MODELS bucket.
     """
+    bucket_name = _get_models_bucket()
     try:
         client = _gcs_client()
         bucket = client.bucket(bucket_name)
 
-        # List all results files
+        # List all results files (path: operational/results/ in models bucket)
         waterline_compact = waterline.replace("-", "")
-        prefix = f"models/operational/results/operational_results_W{waterline_compact}_"
+        prefix = f"operational/results/operational_results_W{waterline_compact}_"
 
         blobs = list(bucket.list_blobs(prefix=prefix))
         if not blobs:
@@ -248,11 +273,11 @@ async def get_model_details(
     - final_model: Final model metrics on dev/test sets
     - feature_importance: Top features by importance
     """
-    bucket = _get_derived_bucket()
+    models_bucket = _get_models_bucket()
 
-    # First get the model pointer to find the waterline
+    # First get the model pointer to find the waterline (path: operational/latest.json)
     try:
-        model_ptr = _gcs_read_json(bucket, "models/operational/latest.json")
+        model_ptr = _gcs_read_json(models_bucket, "operational/latest.json")
     except HTTPException as e:
         if e.status_code == 404:
             raise HTTPException(status_code=404, detail="No model pointer found")
@@ -262,8 +287,8 @@ async def get_model_details(
     if not waterline:
         raise HTTPException(status_code=404, detail="Model pointer missing waterline")
 
-    # Find the results file
-    results_path = _find_model_results_file(bucket, waterline)
+    # Find the results file (in MODELS bucket)
+    results_path = _find_model_results_file(waterline)
     if not results_path:
         raise HTTPException(
             status_code=404,
@@ -271,7 +296,7 @@ async def get_model_details(
         )
 
     # Read and return the results
-    results = _gcs_read_json(bucket, results_path)
+    results = _gcs_read_json(models_bucket, results_path)
 
     # Sanitize NaN/Inf values that can't be JSON serialized
     import math
@@ -348,20 +373,23 @@ async def get_model_details(
         }
 
 
-def _gcs_list_model_history(bucket_name: str, limit: int = 30) -> List[str]:
+def _gcs_list_model_history(limit: int = 30) -> List[str]:
     """
-    List model history entries like models/history/ref_YYYYMMDD.json.
+    List model history entries like history/ref_YYYYMMDD.json.
     Returns reference dates (sorted, most recent last).
+    Reads from MODELS bucket.
     """
+    bucket_name = _get_models_bucket()
     try:
         client = _gcs_client()
         bucket = client.bucket(bucket_name)
 
-        blobs = bucket.list_blobs(prefix="models/history/ref_")
+        # Path in models bucket: history/ref_*
+        blobs = bucket.list_blobs(prefix="history/ref_")
 
         dates = []
         for blob in blobs:
-            # blob.name: models/history/ref_20250101.json
+            # blob.name: history/ref_20250101.json
             try:
                 name = blob.name
                 if name.endswith(".json") and "ref_" in name:
@@ -393,8 +421,7 @@ async def list_model_history(
     _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available model training history entries (most recent last)."""
-    bucket = _get_derived_bucket()
-    dates = _gcs_list_model_history(bucket, limit=limit)
+    dates = _gcs_list_model_history(limit=limit)
     return {"reference_dates": dates, "count": len(dates)}
 
 
@@ -413,14 +440,15 @@ async def get_model_history_entry(
     Args:
         reference_date: Date in YYYY-MM-DD format
     """
-    bucket = _get_derived_bucket()
+    models_bucket = _get_models_bucket()
 
     # Convert YYYY-MM-DD to YYYYMMDD for the filename
+    # Path in models bucket: history/ref_YYYYMMDD.json
     date_compact = reference_date.replace("-", "")
-    blob_path = f"models/history/ref_{date_compact}.json"
+    blob_path = f"history/ref_{date_compact}.json"
 
     try:
-        results = _gcs_read_json(bucket, blob_path)
+        results = _gcs_read_json(models_bucket, blob_path)
     except HTTPException as e:
         if e.status_code == 404:
             raise HTTPException(
@@ -451,15 +479,14 @@ async def get_model_history_entry(
 @router.get(
     "/runs",
     summary="List pipeline runs",
-    description="Returns list of run dates available in the derived bucket."
+    description="Returns list of run dates available in the outputs bucket."
 )
 async def list_pipeline_runs(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of run dates to return"),
     _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available pipeline run dates (most recent last)."""
-    bucket = _get_derived_bucket()
-    dates = _gcs_list_run_dates(bucket, limit=limit)
+    dates = _gcs_list_run_dates(limit=limit)
     return {"dates": dates, "count": len(dates)}
 
 
@@ -478,14 +505,16 @@ async def get_run_report(
     Args:
         run_date: Date in YYYY-MM-DD format
     """
-    bucket = _get_derived_bucket()
-    return _gcs_read_json(bucket, f"runs/date={run_date}/run_report.json")
+    outputs_bucket = _get_outputs_bucket()
+    return _gcs_read_json(outputs_bucket, f"runs/date={run_date}/run_report.json")
 
 
-def _gcs_list_prediction_dates(bucket_name: str, limit: int = 30) -> List[str]:
+def _gcs_list_prediction_dates(limit: int = 30) -> List[str]:
     """
     List prediction date prefixes like predictions/date=YYYY-MM-DD/.
+    Reads from OUTPUTS bucket.
     """
+    bucket_name = _get_outputs_bucket()
     try:
         client = _gcs_client()
         bucket = client.bucket(bucket_name)
@@ -525,8 +554,7 @@ async def list_predictions(
     _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available prediction dates (most recent last)."""
-    bucket = _get_derived_bucket()
-    dates = _gcs_list_prediction_dates(bucket, limit=limit)
+    dates = _gcs_list_prediction_dates(limit=limit)
     return {"dates": dates, "count": len(dates)}
 
 
@@ -548,11 +576,11 @@ async def get_prediction_data(
     Args:
         pred_date: Date in YYYY-MM-DD format
     """
-    bucket = _get_derived_bucket()
+    outputs_bucket = _get_outputs_bucket()
 
     # Try JSON format first (new format with grid data)
     try:
-        return _gcs_read_json(bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
+        return _gcs_read_json(outputs_bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
     except HTTPException as e:
         if e.status_code != 404:
             raise
@@ -560,7 +588,7 @@ async def get_prediction_data(
     # Fallback: check if GeoTIFF exists (older predictions)
     try:
         client = _gcs_client()
-        tif_blob = client.bucket(bucket).blob(f"predictions/date={pred_date}/pm25_{pred_date}.tif")
+        tif_blob = client.bucket(outputs_bucket).blob(f"predictions/date={pred_date}/pm25_{pred_date}.tif")
         if tif_blob.exists(client):
             raise HTTPException(
                 status_code=501,
@@ -624,6 +652,67 @@ PM25_VMIN = 20.0
 PM25_VMAX = 180.0
 
 
+# =============================================================================
+# FEATURE CONFIG & COLORMAPS
+# =============================================================================
+
+FEATURE_CONFIG = {
+    # MET features (ERA5)
+    "t2m": {"stage": "met", "vmin": 270, "vmax": 320, "unit": "K", "colormap": "RdBu_r"},
+    "d2m": {"stage": "met", "vmin": 250, "vmax": 310, "unit": "K", "colormap": "RdBu_r"},
+    "sp": {"stage": "met", "vmin": 60000, "vmax": 105000, "unit": "Pa", "colormap": "viridis"},
+    "u10": {"stage": "met", "vmin": -10, "vmax": 10, "unit": "m/s", "colormap": "RdBu_r"},
+    "v10": {"stage": "met", "vmin": -10, "vmax": 10, "unit": "m/s", "colormap": "RdBu_r"},
+    "blh": {"stage": "met", "vmin": 0, "vmax": 3000, "unit": "m", "colormap": "YlOrRd"},
+    "tcc": {"stage": "met", "vmin": 0, "vmax": 1, "unit": "fraction", "colormap": "Blues"},
+    "WS10": {"stage": "met", "vmin": 0, "vmax": 15, "unit": "m/s", "colormap": "Purples"},
+    "RH": {"stage": "met", "vmin": 0, "vmax": 100, "unit": "%", "colormap": "Blues"},
+    "VPD": {"stage": "met", "vmin": 0, "vmax": 50, "unit": "hPa", "colormap": "YlOrRd"},
+    "VC": {"stage": "met", "vmin": 0, "vmax": 50000, "unit": "m2/s", "colormap": "viridis"},
+    "msl": {"stage": "met", "vmin": 95000, "vmax": 105000, "unit": "Pa", "colormap": "viridis"},
+    # AOD features
+    "optical_depth_047": {"stage": "aod", "vmin": 0, "vmax": 2.0, "unit": "unitless", "colormap": "YlOrRd"},
+    "optical_depth_055": {"stage": "aod", "vmin": 0, "vmax": 2.0, "unit": "unitless", "colormap": "YlOrRd"},
+    # TROPOMI features
+    "no2_median": {"stage": "tropomi", "vmin": 0, "vmax": 0.0002, "unit": "mol/m2", "colormap": "Reds"},
+    "so2_median": {"stage": "tropomi", "vmin": -0.001, "vmax": 0.005, "unit": "mol/m2", "colormap": "Purples"},
+    "co_median": {"stage": "tropomi", "vmin": 0.01, "vmax": 0.06, "unit": "mol/m2", "colormap": "YlOrRd"},
+    "o3_median": {"stage": "tropomi", "vmin": 0.1, "vmax": 0.16, "unit": "mol/m2", "colormap": "viridis"},
+    "hcho_median": {"stage": "tropomi", "vmin": 0, "vmax": 0.001, "unit": "mol/m2", "colormap": "Reds"},
+}
+
+
+def _build_matplotlib_colormap(name: str) -> Dict[int, tuple]:
+    """Build a 256-entry colormap dict from a matplotlib colormap name."""
+    try:
+        from matplotlib import colormaps
+        cmap = colormaps[name]
+    except Exception:
+        import matplotlib.pyplot as plt
+        cmap = plt.get_cmap(name)
+
+    result = {}
+    for i in range(256):
+        r, g, b, a = cmap(i / 255.0)
+        result[i] = (
+            max(0, min(255, int(round(r * 255)))),
+            max(0, min(255, int(round(g * 255)))),
+            max(0, min(255, int(round(b * 255)))),
+            255,
+        )
+    return result
+
+
+# Precompute all needed colormaps
+_FEATURE_CMAPS: Dict[str, Dict[int, tuple]] = {}
+
+def _get_feature_cmap(name: str) -> Dict[int, tuple]:
+    """Get or build a colormap by name (lazy + cached)."""
+    if name not in _FEATURE_CMAPS:
+        _FEATURE_CMAPS[name] = _build_matplotlib_colormap(name)
+    return _FEATURE_CMAPS[name]
+
+
 def _download_cog_to_temp(bucket_name: str, blob_path: str) -> str:
     """Download COG from GCS to a temp file and return the path."""
     import tempfile
@@ -680,71 +769,98 @@ async def get_prediction_tile(
     import os
 
     Reader, _ = _require_rio_tiler()
-    bucket = _get_derived_bucket()
+    outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file (GCS client uses Application Default Credentials)
     blob_path = f"predictions/date={pred_date}/pm25_{pred_date}.tif"
-    tmp_path = _download_cog_to_temp(bucket, blob_path)
+    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:
         import numpy as np
-        from rio_tiler.models import ImageData
+        from PIL import Image
+        import io
+        from rio_tiler.errors import TileOutsideBounds
 
-        with Reader(tmp_path) as src:
-            # Read tile
-            tile = src.tile(
-                x, y, z,
-                indexes=1,
-                resampling_method="bilinear"
+        # Helper to create empty transparent tile
+        def empty_tile_png():
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+
+        def tile_response(png_bytes):
+            return Response(
+                content=png_bytes,
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Tile-Date": pred_date,
+                }
             )
 
-            # Rescale data to 0-255 range based on PM2.5 colorscale
+        with Reader(tmp_path) as src:
+            # Try to read tile - may be outside bounds
+            try:
+                tile = src.tile(x, y, z, indexes=1, resampling_method="bilinear")
+            except TileOutsideBounds:
+                # Tile outside raster coverage - return transparent tile
+                return tile_response(empty_tile_png())
+
+            # Get data and mask
             data = tile.data[0].astype(np.float32)
             mask = tile.mask
 
-            # Linear rescale: (value - vmin) / (vmax - vmin) * 255
+            # If entire tile is nodata, return empty tile
+            if mask is None or np.max(mask) == 0:
+                return tile_response(empty_tile_png())
+
+            # Rescale data to 0-255 for colormap lookup
             rescaled = np.clip(
                 (data - PM25_VMIN) / (PM25_VMAX - PM25_VMIN) * 255,
                 0, 255
             ).astype(np.uint8)
 
-            # Create new ImageData with rescaled values
-            rescaled_tile = ImageData(
-                rescaled.reshape(1, *rescaled.shape),
-                mask,
-                crs=tile.crs,
-                bounds=tile.bounds,
-            )
+            # Create RGBA image with proper transparency
+            h, w = rescaled.shape
+            rgba = np.zeros((h, w, 4), dtype=np.uint8)
 
-            # Render with turbo colormap
-            img = rescaled_tile.render(
-                img_format="PNG",
-                colormap=TURBO_CMAP,
-            )
+            # Apply colormap to get RGB values
+            for idx, color in TURBO_CMAP.items():
+                color_mask = (rescaled == idx)
+                rgba[color_mask, 0] = color[0]  # R
+                rgba[color_mask, 1] = color[1]  # G
+                rgba[color_mask, 2] = color[2]  # B
 
-            return Response(
-                content=img,
-                media_type="image/png",
-                headers={
-                    "Cache-Control": "public, max-age=86400",  # Cache for 1 day
-                    "X-Tile-Date": pred_date,
-                }
-            )
+            # Set alpha from mask (0 = transparent, 255 = opaque)
+            # Use robust alpha: any mask > 0 becomes fully opaque
+            alpha = (mask > 0).astype(np.uint8) * 255
+            rgba[:, :, 3] = alpha
+
+            # Convert to PNG
+            img = Image.fromarray(rgba, mode='RGBA')
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            return tile_response(buffer.getvalue())
 
     except HTTPException:
         raise
     except Exception as e:
-        error_msg = str(e)
-        if "not found" in error_msg.lower() or "does not exist" in error_msg.lower():
-            raise HTTPException(
-                status_code=404,
-                detail=f"COG not found for date: {pred_date}"
+        # For tile errors, return empty tile instead of 500
+        # This prevents MapLibre from breaking on tiles outside coverage
+        logger.warning(f"Tile error for {pred_date}/{z}/{x}/{y}: {e}")
+        try:
+            from PIL import Image
+            import io
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return Response(
+                content=buf.getvalue(),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"}
             )
-        logger.error(f"Tile error for {pred_date}/{z}/{x}/{y}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Tile generation failed: {error_msg}"
-        )
+        except:
+            raise HTTPException(status_code=500, detail="Tile generation failed")
     finally:
         # Clean up temp file
         try:
@@ -772,11 +888,11 @@ async def get_prediction_tilejson(
     import os
 
     Reader, _ = _require_rio_tiler()
-    bucket = _get_derived_bucket()
+    outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file
     blob_path = f"predictions/date={pred_date}/pm25_{pred_date}.tif"
-    tmp_path = _download_cog_to_temp(bucket, blob_path)
+    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -825,10 +941,12 @@ async def get_prediction_tilejson(
             pass
 
 
-def _gcs_list_cog_dates(bucket_name: str, limit: int = 365) -> List[str]:
+def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
     """
     List prediction dates that have COG files available.
+    Reads from OUTPUTS bucket.
     """
+    bucket_name = _get_outputs_bucket()
     try:
         client = _gcs_client()
         bucket = client.bucket(bucket_name)
@@ -866,8 +984,7 @@ async def list_cog_dates(
     _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available COG prediction dates for tile serving."""
-    bucket = _get_derived_bucket()
-    dates = _gcs_list_cog_dates(bucket, limit=limit)
+    dates = _gcs_list_cog_dates(limit=limit)
     return {
         "dates": dates,
         "count": len(dates),
@@ -899,11 +1016,11 @@ async def get_point_value(
     import math
 
     Reader, _ = _require_rio_tiler()
-    bucket = _get_derived_bucket()
+    outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file
     blob_path = f"predictions/date={pred_date}/pm25_{pred_date}.tif"
-    tmp_path = _download_cog_to_temp(bucket, blob_path)
+    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -942,6 +1059,272 @@ async def get_point_value(
             status_code=500,
             detail=f"Point query failed: {error_msg}"
         )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+# =============================================================================
+# FEATURE TILE SERVING ENDPOINTS
+# =============================================================================
+
+@router.get(
+    "/tiles/features",
+    summary="List available features",
+    description="Returns list of features with metadata (stage, unit, vmin, vmax, colormap)."
+)
+async def list_features(
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """List all available features with their metadata."""
+    features = [
+        {
+            "name": name,
+            "stage": cfg["stage"],
+            "unit": cfg["unit"],
+            "vmin": cfg["vmin"],
+            "vmax": cfg["vmax"],
+            "colormap": cfg["colormap"],
+        }
+        for name, cfg in FEATURE_CONFIG.items()
+    ]
+    return {"features": features, "count": len(features)}
+
+
+def _gcs_list_feature_cog_dates(feature: str, limit: int = 365) -> List[str]:
+    """List dates that have COG files for a specific feature.
+    Reads from FEATURES bucket (path: cog/{feature}/date=).
+    """
+    bucket_name = _get_features_bucket()
+    try:
+        client = _gcs_client()
+        bucket = client.bucket(bucket_name)
+
+        # Path in features bucket: cog/{feature}/date=
+        prefix = f"cog/{feature}/date="
+        blobs = bucket.list_blobs(prefix=prefix)
+
+        dates = set()
+        for blob in blobs:
+            if blob.name.endswith(".tif"):
+                try:
+                    d = blob.name.split(f"cog/{feature}/date=")[1].split("/")[0]
+                    dates.add(d)
+                except Exception:
+                    continue
+
+        dates_list = sorted(list(dates))
+        return dates_list[-limit:]
+    except Exception as e:
+        logger.error(f"Failed to list feature COG dates for {feature}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to list feature COG dates: {str(e)}"
+        )
+
+
+@router.get(
+    "/tiles/features/dates",
+    summary="List dates with feature COGs",
+    description="Returns list of dates that have COG tiles for a given feature."
+)
+async def list_feature_cog_dates(
+    feature: str = Query(..., description="Feature name (e.g. t2m, optical_depth_047)"),
+    limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """List available COG dates for a specific feature."""
+    if feature not in FEATURE_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
+
+    dates = _gcs_list_feature_cog_dates(feature, limit=limit)
+    return {"dates": dates, "count": len(dates), "feature": feature}
+
+
+@router.get(
+    "/tiles/features/{feature}/{feat_date}/{z}/{x}/{y}.png",
+    summary="Get feature tile",
+    description="Returns a PNG tile from a feature COG.",
+    responses={
+        200: {"content": {"image/png": {}}},
+        404: {"description": "COG not found"},
+    }
+)
+async def get_feature_tile(
+    feature: str,
+    feat_date: str,
+    z: int,
+    x: int,
+    y: int,
+    _: bool = Depends(verify_tasks_token)
+):
+    """Serve XYZ tiles from a feature COG."""
+    from fastapi.responses import Response
+    import os
+
+    if feature not in FEATURE_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
+
+    cfg = FEATURE_CONFIG[feature]
+    Reader, _ = _require_rio_tiler()
+    features_bucket = _get_features_bucket()
+
+    # Path in features bucket: cog/{feature}/date={date}/{feature}.tif
+    blob_path = f"cog/{feature}/date={feat_date}/{feature}.tif"
+    tmp_path = _download_cog_to_temp(features_bucket, blob_path)
+
+    try:
+        import numpy as np
+        from PIL import Image
+        import io
+        from rio_tiler.errors import TileOutsideBounds
+
+        # Helper to create empty transparent tile
+        def empty_tile_png():
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return buf.getvalue()
+
+        def tile_response(png_bytes):
+            return Response(
+                content=png_bytes,
+                media_type="image/png",
+                headers={
+                    "Cache-Control": "public, max-age=86400",
+                    "X-Tile-Date": feat_date,
+                    "X-Feature": feature,
+                }
+            )
+
+        with Reader(tmp_path) as src:
+            # Try to read tile - may be outside bounds
+            try:
+                tile = src.tile(x, y, z, indexes=1, resampling_method="bilinear")
+            except TileOutsideBounds:
+                return tile_response(empty_tile_png())
+
+            # Get data and mask
+            data = tile.data[0].astype(np.float32)
+            mask = tile.mask
+
+            # If entire tile is nodata, return empty tile
+            if mask is None or np.max(mask) == 0:
+                return tile_response(empty_tile_png())
+
+            vmin = cfg["vmin"]
+            vmax = cfg["vmax"]
+            rescaled = np.clip(
+                (data - vmin) / (vmax - vmin) * 255,
+                0, 255
+            ).astype(np.uint8)
+
+            # Create RGBA image with proper transparency
+            h, w = rescaled.shape
+            rgba = np.zeros((h, w, 4), dtype=np.uint8)
+
+            # Apply colormap to get RGB values
+            colormap = _get_feature_cmap(cfg["colormap"])
+            for idx, color in colormap.items():
+                color_mask = (rescaled == idx)
+                rgba[color_mask, 0] = color[0]  # R
+                rgba[color_mask, 1] = color[1]  # G
+                rgba[color_mask, 2] = color[2]  # B
+
+            # Set alpha from mask - robust: any mask > 0 becomes fully opaque
+            alpha = (mask > 0).astype(np.uint8) * 255
+            rgba[:, :, 3] = alpha
+
+            # Convert to PNG
+            img = Image.fromarray(rgba, mode='RGBA')
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            return tile_response(buffer.getvalue())
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Return empty tile instead of 500 for any error
+        logger.warning(f"Feature tile error for {feature}/{feat_date}/{z}/{x}/{y}: {e}")
+        try:
+            from PIL import Image
+            import io
+            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+            buf = io.BytesIO()
+            img.save(buf, format="PNG")
+            return Response(
+                content=buf.getvalue(),
+                media_type="image/png",
+                headers={"Cache-Control": "public, max-age=86400"}
+            )
+        except:
+            raise HTTPException(status_code=500, detail="Tile generation failed")
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except Exception:
+            pass
+
+
+@router.get(
+    "/tiles/features/{feature}/{feat_date}/point",
+    summary="Get feature value at point",
+    description="Returns feature value at a specific lat/lon coordinate."
+)
+async def get_feature_point_value(
+    feature: str,
+    feat_date: str,
+    lat: float = Query(..., ge=20.0, le=40.0, description="Latitude"),
+    lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
+    _: bool = Depends(verify_tasks_token)
+) -> Dict[str, Any]:
+    """Query feature value at a specific coordinate."""
+    import os
+    import math
+
+    if feature not in FEATURE_CONFIG:
+        raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
+
+    cfg = FEATURE_CONFIG[feature]
+    Reader, _ = _require_rio_tiler()
+    features_bucket = _get_features_bucket()
+
+    # Path in features bucket: cog/{feature}/date={date}/{feature}.tif
+    blob_path = f"cog/{feature}/date={feat_date}/{feature}.tif"
+    tmp_path = _download_cog_to_temp(features_bucket, blob_path)
+
+    try:
+        with Reader(tmp_path) as src:
+            point_data = src.point(lon, lat, indexes=1)
+            value = point_data.data[0] if point_data.data is not None else None
+
+            if value is not None and (value < -9000 or not math.isfinite(value)):
+                value = None
+
+            return {
+                "date": feat_date,
+                "feature": feature,
+                "lat": lat,
+                "lon": lon,
+                "value": round(float(value), 6) if value is not None else None,
+                "unit": cfg["unit"],
+                "colorscale": {
+                    "vmin": cfg["vmin"],
+                    "vmax": cfg["vmax"],
+                    "colormap": cfg["colormap"],
+                }
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        error_msg = str(e)
+        if "outside" in error_msg.lower() or "bounds" in error_msg.lower():
+            raise HTTPException(status_code=400, detail=f"Coordinates ({lat}, {lon}) outside bounds")
+        logger.error(f"Feature point query error for {feature}/{feat_date} at ({lat}, {lon}): {e}")
+        raise HTTPException(status_code=500, detail=f"Point query failed: {error_msg}")
     finally:
         try:
             os.unlink(tmp_path)

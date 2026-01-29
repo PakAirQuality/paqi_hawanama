@@ -41,7 +41,11 @@ class Settings(BaseSettings):
     RATE_LIMIT_PER_MINUTE: int = 60
 
     # Ops Pipeline (ML estimation jobs)
-    OPS_DERIVED_BUCKET: Optional[str] = None  # GCS bucket for pipeline outputs (e.g., paqi-derived-hawanama-data)
+    # Multi-bucket architecture for separation of concerns
+    OPS_MODELS_BUCKET: Optional[str] = None  # GCS bucket for model artifacts (e.g., paqi-models-hawanama-data)
+    OPS_OUTPUTS_BUCKET: Optional[str] = None  # GCS bucket for predictions and runs (e.g., paqi-outputs-hawanama-data)
+    OPS_FEATURES_BUCKET: Optional[str] = None  # GCS bucket for COGs and training data (e.g., paqi-features-hawanama-data)
+    OPS_DERIVED_BUCKET: Optional[str] = None  # GCS bucket for feature stores (e.g., paqi-derived-hawanama-data) - legacy/fallback
     OPS_GCP_PROJECT: Optional[str] = None  # GCP project for Cloud Run jobs
     OPS_RUN_REGION: str = "asia-south1"  # Cloud Run region
     OPS_DAILY_JOB_NAME: str = "estimation-daily-pipeline"  # Daily estimation job name

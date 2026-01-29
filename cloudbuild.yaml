@@ -20,6 +20,7 @@ steps:
       - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
 
   # Deploy to Cloud Run using latest tag (guaranteed to be available after push)
+  # Uses Secret Manager for sensitive credentials
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
     args:
@@ -29,6 +30,8 @@ steps:
       - '--image=asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
       - '--region=asia-south1'
       - '--platform=managed'
+      - '--set-secrets=POSTGRES_SERVER=POSTGRES_SERVER:latest,POSTGRES_USER=POSTGRES_USER:latest,POSTGRES_PASSWORD=POSTGRES_PASSWORD:latest,POSTGRES_DB=POSTGRES_DB:latest,POSTGRES_PORT=POSTGRES_PORT:latest,TASKS_API_SECRET=TASKS_API_SECRET:latest,IQAIR_API_KEY=IQAIR_API_KEY:latest'
+      - '--set-env-vars=OPS_MODELS_BUCKET=paqi-models-hawanama-data,OPS_OUTPUTS_BUCKET=paqi-outputs-hawanama-data,OPS_FEATURES_BUCKET=paqi-features-hawanama-data,OPS_DERIVED_BUCKET=paqi-derived-hawanama-data,OPS_GCP_PROJECT=hawanama-data,OPS_RUN_REGION=asia-south1,OPS_DAILY_JOB_NAME=estimation-daily-pipeline,OPS_RETRAIN_JOB_NAME=estimation-model-retrain'
 
 # Build options for faster builds
 options:
