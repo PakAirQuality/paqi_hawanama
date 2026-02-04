@@ -59,10 +59,10 @@ CSV_ENCODING = "utf-8"
 PARQUET_BATCH_ROWS = 50_000  # write row-groups around this size
 
 # Default GCS "latest file" target (override via env)
-DEFAULT_GCS_BUCKET = os.getenv("GCS_EXPORT_BUCKET", "station-hourly-readings").strip()
+DEFAULT_GCS_BUCKET = os.getenv("GCS_EXPORT_BUCKET", "paqi-raw-hawanama-data").strip()
 DEFAULT_GCS_OBJECT = os.getenv(
     "GCS_EXPORT_OBJECT",
-    "exports/station_readings_hourly_latest.parquet"
+    "raw/station_readings_hourly_latest.parquet"
 ).strip()
 
 # -----------------------------
