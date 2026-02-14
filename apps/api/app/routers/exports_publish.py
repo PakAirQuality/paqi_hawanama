@@ -1,13 +1,12 @@
 """
-Parquet Publishing Endpoint for GCS
+Parquet Publishing Endpoints for GCS
 
-Provides functionality to publish station readings as a single Parquet file to GCS.
-This is intended for daily automated updates to create a canonical shared artifact.
+Publishes station readings (hourly and daily) as Parquet files to GCS.
 
-Key decisions:
-- Assumes hourly data only (no raw/daily)
-- Single Parquet object rewritten daily on GCS
-- Path: gs://<bucket>/exports/station_readings_hourly_latest.parquet
+Datasets:
+- Hourly:  gs://<bucket>/raw/station_hourly/date=YYYY-MM-DD/
+- Daily:   gs://<bucket>/raw/station_daily/date=YYYY-MM-DD/
+- Latest:  gs://<bucket>/raw/station_readings_hourly_latest.parquet
 """
 
 from __future__ import annotations
@@ -53,7 +52,18 @@ DEFAULT_DAILY_PREFIX = "raw/station_daily"
 
 # QA Parameters for daily aggregation
 DEFAULT_MIN_HOURS = 18  # Minimum hours per day for "complete" flag
+DEFAULT_MIN_PUBLISH_HOURS = 6  # Don't publish station-day at all below this
 DEFAULT_LOW_THRESHOLD = 2.0  # µg/m³ - suspiciously low PM2.5
+
+# --- Hourly QC thresholds ---
+PM25_ABS_MAX = 1000.0  # µg/m³ hard ceiling (anything above is invalid)
+PM25_SENTINELS = {999.0, 1000.0, -1.0}  # known cap / error codes from LCS feeds
+AQI_US_MIN, AQI_US_MAX = 0, 500
+
+# Spike / stuck-sensor detection
+PM25_MAX_DELTA_1H = 250.0  # µg/m³ jump in 1 hour (isolated spike threshold)
+PM25_SPIKE_RETURN_TOL = 1.0  # µg/m³ tolerance for "returns to baseline" (AVG → floats)
+PM25_FLATLINE_HOURS = 18  # consecutive identical-value hours to mark as stuck
 
 # -----------------------------
 # Pollutants (hourly aggregation only)
@@ -397,6 +407,99 @@ def read_hourly_partition_from_gcs(
         return None
 
 
+def _apply_hourly_qc(df, pd, np) -> tuple[Any, dict]:
+    """
+    Hour-level QC on the raw hourly DataFrame (single day, all stations).
+
+    Mutates pollutant columns in-place (invalid hours → NaN) so that
+    downstream aggregation only uses QC-passed values.
+
+    Returns (df, qc_stats) where qc_stats counts removals by cause.
+    """
+    qc = {
+        "pm25_sentinel": 0,
+        "pm25_bounds": 0,
+        "pm25_spike": 0,
+        "pm25_flatline": 0,
+        "aqi_bounds": 0,
+    }
+
+    # --- AQI sanity ---
+    if "aqi_us" in df.columns:
+        df["aqi_us"] = pd.to_numeric(df["aqi_us"], errors="coerce")
+        bad_aqi = (df["aqi_us"] < AQI_US_MIN) | (df["aqi_us"] > AQI_US_MAX)
+        qc["aqi_bounds"] = int(bad_aqi.sum())
+        df.loc[bad_aqi, "aqi_us"] = np.nan
+
+    # --- PM2.5 ---
+    if "pm25_ugm3" in df.columns:
+        df["pm25_ugm3"] = pd.to_numeric(df["pm25_ugm3"], errors="coerce")
+
+        # Sentinels / cap values (999, 1000, -1)
+        is_sentinel = df["pm25_ugm3"].isin(PM25_SENTINELS)
+        qc["pm25_sentinel"] = int(is_sentinel.sum())
+        df.loc[is_sentinel, "pm25_ugm3"] = np.nan
+
+        # Physical bounds: 0 ≤ pm25 ≤ 1000
+        out_of_bounds = (df["pm25_ugm3"] < 0) | (df["pm25_ugm3"] > PM25_ABS_MAX)
+        qc["pm25_bounds"] = int(out_of_bounds.sum())
+        df.loc[out_of_bounds, "pm25_ugm3"] = np.nan
+
+        # Spike filter: isolated 1-hour spike or 2-hour plateau that returns
+        df = df.sort_values(["station_id", "timestamp_utc"])
+        pm = df["pm25_ugm3"]
+        prev_pm = df.groupby("station_id")["pm25_ugm3"].shift(1)
+        next_pm = df.groupby("station_id")["pm25_ugm3"].shift(-1)
+        prev2_pm = df.groupby("station_id")["pm25_ugm3"].shift(2)
+
+        # 1-hour spike: big jump from prev AND returns next hour
+        spike_1h = (
+            pm.notna()
+            & prev_pm.notna()
+            & next_pm.notna()
+            & ((pm - prev_pm).abs() > PM25_MAX_DELTA_1H)
+            & ((next_pm - prev_pm).abs() <= PM25_SPIKE_RETURN_TOL)
+        )
+        df.loc[spike_1h, "pm25_ugm3"] = np.nan
+
+        # 2-hour spike plateau: two consecutive elevated hours, then returns
+        spike_2h = (
+            pm.notna()
+            & prev_pm.notna()
+            & prev2_pm.notna()
+            & next_pm.notna()
+            & ((prev_pm - prev2_pm).abs() > PM25_MAX_DELTA_1H)
+            & ((pm - prev2_pm).abs() > PM25_MAX_DELTA_1H)
+            & ((next_pm - prev2_pm).abs() <= PM25_SPIKE_RETURN_TOL)
+        )
+        # nullify both the current and previous spike hour
+        df.loc[spike_2h, "pm25_ugm3"] = np.nan
+        spike_2h_prev = spike_2h.groupby(df["station_id"]).shift(-1).fillna(False)
+        df.loc[spike_2h_prev, "pm25_ugm3"] = np.nan
+
+        qc["pm25_spike"] = int(spike_1h.sum()) + int(spike_2h.sum()) + int(spike_2h_prev.sum())
+
+        # Flatline / stuck sensor: ≥N consecutive hours with identical value
+        # (run-length on values, not deltas, so 18 identical hours = 18 flagged)
+        pm = df["pm25_ugm3"]
+        sid = df["station_id"].astype(str)
+
+        new_seg = (
+            (sid != sid.shift(1))
+            | pm.isna()
+            | pm.shift(1).isna()
+            | (pm != pm.shift(1))
+        )
+        seg_id = new_seg.cumsum()
+        seg_len = df.groupby(seg_id)["pm25_ugm3"].transform("size")
+
+        stuck = pm.notna() & (seg_len >= PM25_FLATLINE_HOURS)
+        qc["pm25_flatline"] = int(stuck.sum())
+        df.loc[stuck, "pm25_ugm3"] = np.nan
+
+    return df, qc
+
+
 def aggregate_hourly_to_daily(
     hourly_table: Any,
     target_date: date,
@@ -431,6 +534,14 @@ def aggregate_hourly_to_daily(
     # Parse timestamp
     df["timestamp_utc"] = pd.to_datetime(df["timestamp_utc"], errors="coerce")
     df = df[df["timestamp_utc"].notna()].copy()
+
+    # ---- Hour-level QC (before aggregation) ----
+    hourly_qc_stats = {}
+    if apply_qc:
+        df, hourly_qc_stats = _apply_hourly_qc(df, pd, np)
+        total_flagged = sum(hourly_qc_stats.values())
+        if total_flagged > 0:
+            logger.info(f"Hourly QC for {target_date}: {total_flagged} values nullified {hourly_qc_stats}")
 
     # Group by station_id only (stable key)
     group_cols = ["station_id"]
@@ -483,20 +594,27 @@ def aggregate_hourly_to_daily(
 
     stations_before_qc = len(daily)
 
-    # Apply basic QA if requested
-    if apply_qc and "pm25_ugm3_mean" in daily.columns:
-        # Flag stations with suspiciously low PM2.5 and high completeness
-        pm25_complete = daily.get("pm25_ugm3_complete", pd.Series([1] * len(daily)))
+    # ---- Day-level QC (after aggregation) ----
+    if apply_qc:
+        # 1. Drop station-days with suspiciously low PM2.5 (complete days only)
+        if "pm25_ugm3_mean" in daily.columns:
+            pm25_complete = daily.get("pm25_ugm3_complete", pd.Series([1] * len(daily)))
+            suspicious_low = (
+                (daily["pm25_ugm3_mean"] < DEFAULT_LOW_THRESHOLD)
+                & (pm25_complete == 1)
+            )
+            n_low = int(suspicious_low.sum())
+            if n_low > 0:
+                logger.info(f"Dropped {n_low} station-days: PM2.5 mean < {DEFAULT_LOW_THRESHOLD} µg/m³")
+                daily = daily[~suspicious_low].copy()
 
-        suspicious_low = (
-            (daily["pm25_ugm3_mean"] < DEFAULT_LOW_THRESHOLD) &
-            (pm25_complete == 1)
-        )
-
-        n_flagged = suspicious_low.sum()
-        if n_flagged > 0:
-            logger.info(f"Flagged {n_flagged} stations with suspiciously low PM2.5 (<{DEFAULT_LOW_THRESHOLD})")
-            daily = daily[~suspicious_low].copy()
+        # 2. Drop station-days with too few usable hours to be meaningful
+        if "pm25_ugm3_valid_hours" in daily.columns:
+            too_few = daily["pm25_ugm3_valid_hours"] < DEFAULT_MIN_PUBLISH_HOURS
+            n_sparse = int(too_few.sum())
+            if n_sparse > 0:
+                logger.info(f"Dropped {n_sparse} station-days: < {DEFAULT_MIN_PUBLISH_HOURS} valid PM2.5 hours")
+                daily = daily[~too_few].copy()
 
     stations_after_qc = len(daily)
     rows_out = len(daily)
@@ -510,6 +628,7 @@ def aggregate_hourly_to_daily(
         "stations_before_qc": stations_before_qc,
         "stations_after_qc": stations_after_qc,
         "stations_flagged": stations_before_qc - stations_after_qc,
+        "hourly_qc": hourly_qc_stats,
     }
 
     return daily_table, stats
@@ -521,6 +640,9 @@ def upload_daily_partition_to_gcs(
     bucket_name: str,
     daily_prefix: str,
     run_id: str,
+    stats: Optional[dict] = None,
+    min_hours: int = DEFAULT_MIN_HOURS,
+    apply_qc: bool = True,
 ) -> dict:
     """
     Upload daily aggregated table to GCS partition and write success marker.
@@ -551,13 +673,28 @@ def upload_daily_partition_to_gcs(
         blob = bucket.blob(parquet_file)
         blob.upload_from_filename(tmp_path)
 
-        # Write success marker
+        # Write success marker with full QC provenance
         success_data = {
             "date": target_date.isoformat(),
             "rows": len(daily_table),
             "uri": f"gs://{bucket_name}/{parquet_file}",
             "run_id": run_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "qc": {
+                "apply_qc": apply_qc,
+                "thresholds": {
+                    "min_hours": min_hours,
+                    "min_publish_hours": DEFAULT_MIN_PUBLISH_HOURS,
+                    "low_threshold_ugm3": DEFAULT_LOW_THRESHOLD,
+                    "pm25_abs_max_ugm3": PM25_ABS_MAX,
+                    "pm25_sentinels": sorted(PM25_SENTINELS),
+                    "pm25_max_delta_1h_ugm3": PM25_MAX_DELTA_1H,
+                    "pm25_spike_return_tol_ugm3": PM25_SPIKE_RETURN_TOL,
+                    "pm25_flatline_hours": PM25_FLATLINE_HOURS,
+                    "aqi_us_range": [AQI_US_MIN, AQI_US_MAX],
+                },
+                "stats": stats or {},
+            },
         }
 
         success_blob = bucket.blob(success_file)
@@ -836,7 +973,7 @@ async def publish_station_readings_hourly_parquet_partitioned_to_gcs(
 
     # GCS target base
     gcs_bucket: Optional[str] = Query(None),
-    gcs_prefix: str = Query("exports/hourly", description="Dataset prefix, e.g. exports/hourly"),
+    gcs_prefix: str = Query(DEFAULT_HOURLY_PREFIX, description="Dataset prefix for hourly partitions"),
     overwrite: bool = Query(False, description="If false, skip dates that already have _SUCCESS.json"),
 
     _: bool = Depends(verify_tasks_token),
@@ -1015,8 +1152,11 @@ async def publish_station_readings_hourly_parquet_partitioned_to_gcs(
                 "pollutants": selected_pollutants,
             }
 
-            tmp_success = tempfile.mktemp(prefix=f"hawanama_success_{d.isoformat()}_", suffix=".json")
-            with open(tmp_success, "w", encoding="utf-8") as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w", prefix=f"hawanama_success_{d.isoformat()}_", suffix=".json",
+                delete=False, encoding="utf-8",
+            ) as f:
+                tmp_success = f.name
                 json.dump(success_payload, f)
                 f.write("\n")
             bkt.blob(success_obj).upload_from_filename(tmp_success, content_type="application/json")
@@ -1196,6 +1336,9 @@ async def publish_station_daily_parquet(
                 bucket_name,
                 daily_pfx,
                 run_id,
+                stats=stats,
+                min_hours=min_hours,
+                apply_qc=apply_qc,
             )
 
             if upload_result["uploaded"]:
