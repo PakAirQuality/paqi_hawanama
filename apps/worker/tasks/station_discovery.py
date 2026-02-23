@@ -76,11 +76,15 @@ class StationDiscoveryTask:
             logger.warning("pandas not available; switching city manifest format to jsonl")
             self.city_manifest_format = "jsonl"
 
-    async def discover_all_stations_comprehensive(self):
+    async def discover_all_stations_comprehensive(self, country: Optional[str] = None):
         """
         Comprehensive discovery of ALL monitoring stations across South Asia.
         Follows API hierarchy: countries -> states -> cities -> stations
         Also writes a run-scoped manifest and updates an atomic 'latest' pointer.
+
+        Args:
+            country: If provided, limit discovery to this single country.
+                     Takes precedence over DISCOVERY_COUNTRY env var.
         """
         try:
             countries = get_iqair_countries()
@@ -101,11 +105,11 @@ class StationDiscoveryTask:
 
             progress_id = f"discovery-{datetime.now(timezone.utc).isoformat()}"
 
-            # Optionally limit to a single country for quick re-runs
-            only_country = os.getenv("DISCOVERY_COUNTRY")
+            # Optionally limit to a single country — query param takes precedence over env var
+            only_country = country or os.getenv("DISCOVERY_COUNTRY")
             if only_country:
                 countries = [c for c in countries if c.lower() == only_country.lower()]
-                logger.info("Limiting discovery to country=%s (via DISCOVERY_COUNTRY)", only_country)
+                logger.info("Limiting discovery to country=%s", only_country)
 
             for country in countries:
                 logger.info("Starting discovery run %s for %s", progress_id, country)

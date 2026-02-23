@@ -24,17 +24,19 @@ except Exception as e:
 @router.post("/tasks/discover")
 async def run_station_discovery(
     request: Request,
+    country: Optional[str] = Query(None, description="Single country to discover (default: all)"),
     _: bool = Depends(verify_tasks_token)
 ):
     """
     Trigger station discovery task.
     Discovers all available stations and updates station/city manifests.
+    Pass ?country=Pakistan to limit to a single country, or omit for all South Asian countries.
     """
     try:
-        logger.info("Starting station discovery via API endpoint")
+        logger.info("Starting station discovery via API endpoint (country=%s)", country or "all")
         from app.tasks.station_discovery import StationDiscoveryTask  # lazy import
         discovery_task = StationDiscoveryTask()
-        summary = await discovery_task.discover_all_stations_comprehensive()
+        summary = await discovery_task.discover_all_stations_comprehensive(country=country)
         logger.info("Station discovery completed successfully: %s", summary)
         return {
             "status": "success",
