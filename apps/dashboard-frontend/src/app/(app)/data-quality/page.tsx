@@ -1,315 +1,599 @@
 "use client";
 
-import { useQuery } from '@tanstack/react-query'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
-import { useState } from 'react'
-import { ChartWidget } from '@/components/charts/ChartWidget'
-import { ScatterChart } from '@/components/charts/ScatterChart'
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import {
+  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
+  ResponsiveContainer, ComposedChart, Area,
+} from "recharts";
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
 
-interface QualityMetric {
-  station_id: string
-  name: string
-  city?: string
-  provider?: string
-  coverage_30d: number
-  flatline_fraction: number
-  bias_vs_neighbors?: number
-  correlation_neighbors?: number
-  ml_readiness: 'GOOD_FOR_ML' | 'CAUTION' | 'EXCLUDE'
+// ── Types matching the real API responses ──
+
+type StationListItem = {
+  station_id: string;
+  station_name: string;
+  display_name: string;
+};
+
+type UptimeResponse = {
+  station_id: string;
+  bucket: string;
+  window: { from: string; to: string };
+  coverage: {
+    expected_buckets: number;
+    buckets_with_data: number;
+    coverage_pct: number;
+    missing_buckets: number;
+  };
+  offline_periods: Array<{
+    start: string;
+    end: string;
+    duration_hours: number;
+    reason: string;
+  }>;
+  flatline_periods: Array<{
+    start: string;
+    end: string;
+    duration_hours: number;
+    value: number;
+    pollutant: string;
+  }>;
+};
+
+type HourBucket = {
+  hour_local: number;
+  mean: number;
+  p10: number;
+  p50: number;
+  p90: number;
+  count: number;
+};
+
+type DiurnalResponse = {
+  station_id: string;
+  pollutant: string;
+  timezone: string;
+  window: { from: string; to: string };
+  overall: HourBucket[];
+  by_weekday_weekend: { weekday: HourBucket[]; weekend: HourBucket[] } | null;
+  by_season: Record<string, HourBucket[]> | null;
+};
+
+type TopDay = {
+  date: string;
+  mean_value: number;
+  max_value: number;
+  hours_above_threshold: number;
+  severity_score: number;
+};
+
+type Episode = {
+  start_datetime_local: string;
+  end_datetime_local: string;
+  duration_hours: number;
+  peak_value: number;
+  peak_datetime_local: string;
+  mean_value: number;
+  severity_score: number;
+};
+
+type EpisodesResponse = {
+  station_id: string;
+  pollutant: string;
+  level: string;
+  threshold: number;
+  window: { from: string; to: string };
+  top_days: TopDay[];
+  episodes: Episode[];
+  total_episodes: number;
+  total_episode_hours: number;
+};
+
+// ── Fetchers ──
+
+async function fetchStations(): Promise<StationListItem[]> {
+  const res = await fetch(`${API_BASE}/api/v1/meta/stations`);
+  if (!res.ok) throw new Error("Failed to load stations");
+  return res.json();
 }
 
-async function fetchQualityMetrics(): Promise<QualityMetric[]> {
-  // This would be a new endpoint that calculates QA/QC metrics
-  const res = await fetch(`${API_BASE}/api/v1/internal/data-quality/metrics`);
-  if (!res.ok) {
-    // Mock data for now
-    return [
-      {
-        station_id: "1", name: "Township Station", city: "Lahore", provider: "IQAir",
-        coverage_30d: 0.92, flatline_fraction: 0.02, bias_vs_neighbors: -2.1,
-        correlation_neighbors: 0.87, ml_readiness: "GOOD_FOR_ML"
-      },
-      {
-        station_id: "2", name: "DHA Station", city: "Lahore", provider: "Urban Unit", 
-        coverage_30d: 0.78, flatline_fraction: 0.15, bias_vs_neighbors: 8.5,
-        correlation_neighbors: 0.45, ml_readiness: "CAUTION"
-      },
-      {
-        station_id: "3", name: "Mall Road", city: "Lahore", provider: "Punjab EPA",
-        coverage_30d: 0.35, flatline_fraction: 0.45, bias_vs_neighbors: 25.2,
-        correlation_neighbors: 0.12, ml_readiness: "EXCLUDE"
-      }
-    ]
-  }
-  const data = await res.json();
-  return data.metrics ?? data;
+async function fetchUptime(stationId: string): Promise<UptimeResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/internal/stations/${stationId}/uptime`);
+  if (!res.ok) throw new Error("Failed to load uptime");
+  return res.json();
 }
+
+async function fetchDiurnal(stationId: string): Promise<DiurnalResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/internal/stations/${stationId}/diurnal`);
+  if (!res.ok) throw new Error("Failed to load diurnal");
+  return res.json();
+}
+
+async function fetchEpisodes(stationId: string): Promise<EpisodesResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/internal/stations/${stationId}/episodes`);
+  if (!res.ok) throw new Error("Failed to load episodes");
+  return res.json();
+}
+
+function getCity(displayName: string): string {
+  const parts = displayName.split(", ");
+  return parts.length >= 3 ? parts[1] : "";
+}
+
+function fmtDt(iso: string): string {
+  try {
+    return new Date(iso).toLocaleString("en-PK", {
+      month: "short", day: "numeric", hour: "2-digit", minute: "2-digit",
+    });
+  } catch { return iso; }
+}
+
+function coverageColor(pct: number): string {
+  if (pct >= 80) return "text-green-600";
+  if (pct >= 50) return "text-yellow-600";
+  return "text-red-600";
+}
+
+function coverageBg(pct: number): string {
+  if (pct >= 80) return "bg-green-500";
+  if (pct >= 50) return "bg-yellow-500";
+  return "bg-red-500";
+}
+
+// ── Component ──
 
 export default function DataQualityPage() {
-  const { data: metrics, isLoading } = useQuery({
-    queryKey: ["data-quality-metrics"],
-    queryFn: fetchQualityMetrics,
+  const [selectedId, setSelectedId] = useState<string>("");
+  const [search, setSearch] = useState("");
+
+  const { data: stations } = useQuery({
+    queryKey: ["dq-stations"],
+    queryFn: fetchStations,
   });
 
-  const [filterML, setFilterML] = useState<string>('all')
-  const [minCoverage, setMinCoverage] = useState(0)
-  
-  const filteredMetrics = metrics?.filter(metric => {
-    if (filterML !== 'all' && metric.ml_readiness !== filterML) return false
-    if (metric.coverage_30d < minCoverage / 100) return false
-    return true
-  }) || []
-  
-  const mlCounts = metrics?.reduce((acc, metric) => {
-    acc[metric.ml_readiness] = (acc[metric.ml_readiness] || 0) + 1
-    return acc
-  }, {} as Record<string, number>) || {}
+  const { data: uptime, isLoading: uptimeLoading } = useQuery({
+    queryKey: ["dq-uptime", selectedId],
+    queryFn: () => fetchUptime(selectedId),
+    enabled: !!selectedId,
+  });
+
+  const { data: diurnal, isLoading: diurnalLoading } = useQuery({
+    queryKey: ["dq-diurnal", selectedId],
+    queryFn: () => fetchDiurnal(selectedId),
+    enabled: !!selectedId,
+  });
+
+  const { data: episodes, isLoading: episodesLoading } = useQuery({
+    queryKey: ["dq-episodes", selectedId],
+    queryFn: () => fetchEpisodes(selectedId),
+    enabled: !!selectedId,
+  });
+
+  const filteredStations = useMemo(() => {
+    if (!stations) return [];
+    const q = search.toLowerCase().trim();
+    if (!q) return stations;
+    return stations.filter(
+      (s) =>
+        s.station_name.toLowerCase().includes(q) ||
+        s.display_name.toLowerCase().includes(q)
+    );
+  }, [stations, search]);
+
+  const loading = uptimeLoading || diurnalLoading || episodesLoading;
+
+  // Diurnal chart data
+  const diurnalChart = useMemo(() => {
+    if (!diurnal?.overall?.length) return [];
+    return diurnal.overall.map((b) => ({
+      hour: `${String(b.hour_local).padStart(2, "0")}:00`,
+      mean: Number(b.mean?.toFixed(1)),
+      p10: Number(b.p10?.toFixed(1)),
+      p90: Number(b.p90?.toFixed(1)),
+      p50: Number(b.p50?.toFixed(1)),
+    }));
+  }, [diurnal]);
+
+  const peakHour = useMemo(() => {
+    if (!diurnal?.overall?.length) return null;
+    return diurnal.overall.reduce((a, b) => (b.mean > a.mean ? b : a));
+  }, [diurnal]);
+
+  const cleanestHour = useMemo(() => {
+    if (!diurnal?.overall?.length) return null;
+    return diurnal.overall.reduce((a, b) => (b.mean < a.mean ? b : a));
+  }, [diurnal]);
+
+  const selectedStation = stations?.find((s) => s.station_id === selectedId);
 
   return (
     <div className="space-y-6">
-
-      {/* High-level Metrics */}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-lg">✅</span>
-              <h3 className="text-sm font-medium text-gray-600">ML Ready</h3>
-            </div>
-            <div className="text-2xl font-bold text-green-600">
-              {mlCounts['GOOD_FOR_ML'] || 0}
-            </div>
-            <p className="text-sm text-gray-500">High quality stations</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-lg">⚠️</span>
-              <h3 className="text-sm font-medium text-gray-600">Caution</h3>
-            </div>
-            <div className="text-2xl font-bold text-yellow-600">
-              {mlCounts['CAUTION'] || 0}
-            </div>
-            <p className="text-sm text-gray-500">Moderate quality</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-lg">❌</span>
-              <h3 className="text-sm font-medium text-gray-600">Exclude</h3>
-            </div>
-            <div className="text-2xl font-bold text-red-600">
-              {mlCounts['EXCLUDE'] || 0}
-            </div>
-            <p className="text-sm text-gray-500">Poor quality</p>
-          </CardContent>
-        </Card>
-        
-        <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <span className="text-lg">📊</span>
-              <h3 className="text-sm font-medium text-gray-600">Total Stations</h3>
-            </div>
-            <div className="text-2xl font-bold text-gray-900">
-              {metrics?.length || 0}
-            </div>
-            <p className="text-sm text-gray-500">In quality assessment</p>
-          </CardContent>
-        </Card>
+      {/* Header */}
+      <div>
+        <h2 className="text-3xl font-bold tracking-tight">Data Quality</h2>
+        <p className="text-muted-foreground">
+          Pollution episodes, diurnal cycles, and station uptime
+        </p>
       </div>
 
-      {/* Filters and Controls */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-                <span>🔍</span>
-                <span>Quality Filters & Dataset Builder</span>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* ML Readiness Filter */}
-              <div className="grid gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    ML Readiness Level
-                  </label>
-                  <select 
-                    value={filterML}
-                    onChange={(e) => setFilterML(e.target.value)}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="all">All Levels</option>
-                    <option value="GOOD_FOR_ML">Good for ML</option>
-                    <option value="CAUTION">Caution</option>
-                    <option value="EXCLUDE">Exclude</option>
-                  </select>
-                </div>
-                
-                <div>
-                  <label className="text-sm font-medium text-gray-700 mb-2 block">
-                    Min Coverage (%)
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={minCoverage}
-                    onChange={(e) => setMinCoverage(Number(e.target.value))}
-                    className="w-full"
-                  />
-                  <div className="text-sm text-gray-600 mt-1">{minCoverage}%</div>
-                </div>
-              </div>
-              
-              <div className="flex items-center justify-between pt-4 border-t border-gray-200">
-                <div className="text-sm text-gray-600">
-                  {filteredMetrics.length} stations match criteria
-                </div>
-                <div className="space-x-2">
-                  <button className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 transition-colors">
-                    Reset Filters
-                  </button>
-                  <button className="px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-md hover:bg-blue-700 transition-colors">
-                    Export ML Dataset
-                  </button>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-        
-        {/* Data Quality Visualization */}
-        <div>
-          <ChartWidget 
-            title="Quality Assessment" 
-            subtitle="Coverage vs Bias Analysis"
-            minHeight="340px"
-          >
-            <ScatterChart
-              height={280}
-              data={filteredMetrics.map(metric => ({
-                x: metric.coverage_30d * 100,
-                y: metric.bias_vs_neighbors || 0,
-                label: metric.name,
-                category: metric.ml_readiness === 'GOOD_FOR_ML' ? 'Good for ML' : 
-                        metric.ml_readiness === 'CAUTION' ? 'Caution' : 'Exclude'
-              }))}
-              xAxisTitle="Coverage (%)"
-              yAxisTitle="Bias vs Neighbors (μg/m³)"
-            />
-          </ChartWidget>
-        </div>
-      </div>
-
-      {/* Station Quality Table */}
+      {/* Station Selector */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-            <span>📋</span>
-            <span>Station Quality Assessment</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <div className="text-center py-8 text-gray-500">Loading quality metrics...</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-200">
-                    <th className="text-left py-3 px-2">Station</th>
-                    <th className="text-left py-3 px-2">Coverage</th>
-                    <th className="text-left py-3 px-2">Flatline %</th>
-                    <th className="text-left py-3 px-2">Bias vs Neighbors</th>
-                    <th className="text-left py-3 px-2">Correlation</th>
-                    <th className="text-left py-3 px-2">ML Readiness</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredMetrics.map((metric) => (
-                    <tr key={metric.station_id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="py-3 px-2">
-                        <div>
-                          <div className="font-medium">{metric.name}</div>
-                          <div className="text-xs text-gray-600">{metric.city} • {metric.provider}</div>
-                        </div>
-                      </td>
-                      <td className="py-3 px-2">
-                        <div className="flex items-center space-x-2">
-                          <div className="w-12 bg-gray-200 rounded-full h-2">
-                            <div
-                              className={`h-2 rounded-full ${
-                                metric.coverage_30d > 0.9 ? 'bg-green-500' :
-                                metric.coverage_30d > 0.7 ? 'bg-yellow-500' : 'bg-red-500'
-                              }`}
-                              style={{ width: `${metric.coverage_30d * 100}%` }}
-                            ></div>
-                          </div>
-                          <span className="text-xs">{(metric.coverage_30d * 100).toFixed(0)}%</span>
-                        </div>
-                      </td>
-                      <td className="py-3 px-2">
-                        <span className={`text-xs ${
-                          metric.flatline_fraction < 0.05 ? 'text-green-600' :
-                          metric.flatline_fraction < 0.2 ? 'text-yellow-600' : 'text-red-600'
-                        }`}>
-                          {(metric.flatline_fraction * 100).toFixed(1)}%
-                        </span>
-                      </td>
-                      <td className="py-3 px-2">
-                        {metric.bias_vs_neighbors ? (
-                          <span className={`text-xs ${
-                            Math.abs(metric.bias_vs_neighbors) < 5 ? 'text-green-600' :
-                            Math.abs(metric.bias_vs_neighbors) < 15 ? 'text-yellow-600' : 'text-red-600'
-                          }`}>
-                            {metric.bias_vs_neighbors > 0 ? '+' : ''}{metric.bias_vs_neighbors.toFixed(1)} μg/m³
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">N/A</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-2">
-                        {metric.correlation_neighbors ? (
-                          <span className={`text-xs ${
-                            metric.correlation_neighbors > 0.8 ? 'text-green-600' :
-                            metric.correlation_neighbors > 0.5 ? 'text-yellow-600' : 'text-red-600'
-                          }`}>
-                            {metric.correlation_neighbors.toFixed(2)}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-400">N/A</span>
-                        )}
-                      </td>
-                      <td className="py-3 px-2">
-                        <Badge className={`text-xs ${
-                          metric.ml_readiness === 'GOOD_FOR_ML' 
-                            ? 'bg-green-100 text-green-700 border-green-200'
-                            : metric.ml_readiness === 'CAUTION'
-                            ? 'bg-yellow-100 text-yellow-700 border-yellow-200'
-                            : 'bg-red-100 text-red-700 border-red-200'
-                        }`}>
-                          {metric.ml_readiness === 'GOOD_FOR_ML' ? 'Good' : 
-                           metric.ml_readiness === 'CAUTION' ? 'Caution' : 'Exclude'}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+        <CardContent className="p-4">
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="relative flex-1">
+              <svg
+                className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
+                fill="none" stroke="currentColor" viewBox="0 0 24 24"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2}
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+              </svg>
+              <input
+                type="text"
+                placeholder="Search stations..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+              />
             </div>
+            <select
+              className="w-full sm:w-auto sm:min-w-[320px] rounded-md border border-border px-3 py-2 text-sm bg-background focus:outline-none focus:ring-2 focus:ring-primary/50"
+              value={selectedId}
+              onChange={(e) => setSelectedId(e.target.value)}
+            >
+              <option value="">Choose a station...</option>
+              {filteredStations.map((s) => (
+                <option key={s.station_id} value={s.station_id}>
+                  {s.station_name} — {getCity(s.display_name)}
+                </option>
+              ))}
+            </select>
+          </div>
+          {search && (
+            <p className="text-xs text-muted-foreground mt-2">
+              {filteredStations.length} of {stations?.length ?? 0} stations
+            </p>
           )}
         </CardContent>
       </Card>
+
+      {!selectedId && (
+        <Card>
+          <CardContent className="p-12 text-center">
+            <div className="text-5xl mb-4">🔍</div>
+            <p className="font-medium">Select a station above</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              View uptime coverage, diurnal pollution patterns, and episode history
+            </p>
+          </CardContent>
+        </Card>
+      )}
+
+      {selectedId && loading && (
+        <div className="grid gap-6 md:grid-cols-3">
+          {[...Array(3)].map((_, i) => (
+            <Card key={i} className="animate-pulse">
+              <CardContent className="p-6">
+                <div className="h-4 bg-muted rounded w-24 mb-3" />
+                <div className="h-8 bg-muted rounded w-16" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+
+      {selectedId && !loading && (
+        <>
+          {/* Station Name Banner */}
+          {selectedStation && (
+            <div className="flex items-center gap-3 px-1">
+              <h3 className="text-lg font-semibold">{selectedStation.station_name}</h3>
+              <span className="text-sm text-muted-foreground">{selectedStation.display_name}</span>
+            </div>
+          )}
+
+          {/* ── Row 1: Uptime Summary Cards ── */}
+          <div className="grid gap-4 md:grid-cols-4">
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm font-medium text-muted-foreground mb-1">Coverage</p>
+                <p className={`text-3xl font-bold ${coverageColor(uptime?.coverage.coverage_pct ?? 0)}`}>
+                  {uptime?.coverage.coverage_pct?.toFixed(1) ?? "—"}%
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {uptime?.coverage.buckets_with_data?.toLocaleString() ?? "—"} / {uptime?.coverage.expected_buckets?.toLocaleString() ?? "—"} buckets
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm font-medium text-muted-foreground mb-1">Missing Buckets</p>
+                <p className="text-3xl font-bold">
+                  {uptime?.coverage.missing_buckets?.toLocaleString() ?? "—"}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Bucket size: {uptime?.bucket ?? "—"}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm font-medium text-muted-foreground mb-1">Offline Periods</p>
+                <p className="text-3xl font-bold text-red-600">
+                  {uptime?.offline_periods?.length ?? 0}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  {uptime?.offline_periods?.length
+                    ? `${uptime.offline_periods.reduce((a, p) => a + p.duration_hours, 0).toFixed(0)}h total downtime`
+                    : "No outages detected"}
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-5">
+                <p className="text-sm font-medium text-muted-foreground mb-1">Flatlines</p>
+                <p className="text-3xl font-bold text-yellow-600">
+                  {uptime?.flatline_periods?.length ?? 0}
+                </p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Stuck-sensor periods
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ── Row 2: Diurnal Pattern + Episode Stats ── */}
+          <div className="grid gap-6 lg:grid-cols-3">
+            {/* Diurnal chart — 2 cols */}
+            <Card className="lg:col-span-2">
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Diurnal Pollution Pattern</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Hourly PM₂.₅ distribution (mean with p10–p90 band)
+                  {diurnal?.timezone ? ` • ${diurnal.timezone}` : ""}
+                </p>
+              </CardHeader>
+              <CardContent>
+                {diurnalChart.length === 0 ? (
+                  <div className="py-12 text-center text-muted-foreground text-sm">
+                    No diurnal data available for this station
+                  </div>
+                ) : (
+                  <>
+                    <div className="h-72">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <ComposedChart data={diurnalChart} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                          <XAxis dataKey="hour" tick={{ fontSize: 11 }} interval={2} />
+                          <YAxis tick={{ fontSize: 11 }} label={{ value: "μg/m³", angle: -90, position: "insideLeft", fontSize: 11 }} />
+                          <Tooltip
+                            formatter={(v: number, name: string) => [
+                              `${v} μg/m³`,
+                              name === "mean" ? "Mean" : name === "p10" ? "P10" : name === "p90" ? "P90" : name === "p50" ? "Median" : name,
+                            ]}
+                          />
+                          <Area dataKey="p90" stroke="none" fill="hsl(var(--primary))" fillOpacity={0.1} />
+                          <Area dataKey="p10" stroke="none" fill="#fff" fillOpacity={1} />
+                          <Line dataKey="p50" stroke="hsl(var(--primary))" strokeWidth={1} strokeDasharray="4 2" dot={false} name="Median" />
+                          <Line dataKey="mean" stroke="hsl(var(--primary))" strokeWidth={2} dot={false} name="Mean" />
+                        </ComposedChart>
+                      </ResponsiveContainer>
+                    </div>
+
+                    {/* Peak / cleanest */}
+                    <div className="flex gap-4 mt-4">
+                      {peakHour && (
+                        <div className="flex-1 rounded-lg bg-red-50 p-3">
+                          <p className="text-xs font-medium text-red-700">Peak Hour</p>
+                          <p className="text-lg font-bold text-red-700">
+                            {String(peakHour.hour_local).padStart(2, "0")}:00
+                          </p>
+                          <p className="text-xs text-red-600">{peakHour.mean.toFixed(1)} μg/m³ avg</p>
+                        </div>
+                      )}
+                      {cleanestHour && (
+                        <div className="flex-1 rounded-lg bg-green-50 p-3">
+                          <p className="text-xs font-medium text-green-700">Cleanest Hour</p>
+                          <p className="text-lg font-bold text-green-700">
+                            {String(cleanestHour.hour_local).padStart(2, "0")}:00
+                          </p>
+                          <p className="text-xs text-green-600">{cleanestHour.mean.toFixed(1)} μg/m³ avg</p>
+                        </div>
+                      )}
+                    </div>
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Episode stats — 1 col */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Pollution Episodes</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Last 30 days • Threshold: {episodes?.threshold ?? 15} μg/m³
+                </p>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="rounded-lg bg-muted/50 p-3 text-center">
+                    <p className="text-2xl font-bold">{episodes?.total_episodes ?? 0}</p>
+                    <p className="text-xs text-muted-foreground">Episodes</p>
+                  </div>
+                  <div className="rounded-lg bg-muted/50 p-3 text-center">
+                    <p className="text-2xl font-bold">{episodes?.total_episode_hours ?? 0}h</p>
+                    <p className="text-xs text-muted-foreground">Total Duration</p>
+                  </div>
+                </div>
+
+                {/* Top worst days */}
+                {episodes?.top_days && episodes.top_days.length > 0 ? (
+                  <div>
+                    <p className="text-sm font-medium mb-2">Worst Days</p>
+                    <div className="space-y-2 max-h-48 overflow-y-auto">
+                      {episodes.top_days.map((day, i) => (
+                        <div key={day.date} className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2">
+                          <div>
+                            <p className="text-sm font-medium">{day.date}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {day.hours_above_threshold}h above threshold
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-sm font-bold">{day.mean_value.toFixed(0)} μg/m³</p>
+                            <Badge variant={day.severity_score >= 0.1 ? "destructive" : "secondary"} className="text-[10px]">
+                              {(day.severity_score * 100).toFixed(0)}% severity
+                            </Badge>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="py-4 text-center text-sm text-muted-foreground">
+                    No episodes detected — clean period
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ── Row 3: Offline Periods + Episodes Detail ── */}
+          <div className="grid gap-6 lg:grid-cols-2">
+            {/* Offline periods */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Offline Periods</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Gaps in data collection
+                </p>
+              </CardHeader>
+              <CardContent>
+                {!uptime?.offline_periods?.length ? (
+                  <div className="py-6 text-center text-sm text-muted-foreground">
+                    No offline periods — continuous data collection
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-64 overflow-y-auto">
+                    {uptime.offline_periods.slice(0, 15).map((p, i) => {
+                      const days = Math.floor(p.duration_hours / 24);
+                      const hours = Math.round(p.duration_hours % 24);
+                      const durationStr = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+                      return (
+                        <div key={i} className="flex items-center justify-between rounded-lg border border-red-100 bg-red-50/50 px-3 py-2">
+                          <div className="text-sm">
+                            <span className="font-medium">{fmtDt(p.start)}</span>
+                            <span className="text-muted-foreground"> → </span>
+                            <span className="font-medium">{fmtDt(p.end)}</span>
+                          </div>
+                          <Badge variant="outline" className="text-xs text-red-600 border-red-200">
+                            {durationStr}
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                    {uptime.offline_periods.length > 15 && (
+                      <p className="text-xs text-muted-foreground text-center pt-1">
+                        + {uptime.offline_periods.length - 15} more periods
+                      </p>
+                    )}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Episodes list */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Episode Details</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Continuous periods above {episodes?.threshold ?? 15} μg/m³
+                </p>
+              </CardHeader>
+              <CardContent>
+                {!episodes?.episodes?.length ? (
+                  <div className="py-6 text-center text-sm text-muted-foreground">
+                    No hourly-level episodes detected
+                  </div>
+                ) : (
+                  <div className="space-y-3 max-h-64 overflow-y-auto">
+                    {episodes.episodes.map((ep, i) => (
+                      <div key={i} className="rounded-lg border border-border p-3 space-y-2">
+                        <div className="flex items-center justify-between">
+                          <Badge variant={ep.severity_score >= 0.1 ? "destructive" : "secondary"} className="text-xs">
+                            {(ep.severity_score * 100).toFixed(0)}% severity
+                          </Badge>
+                          <span className="text-xs text-muted-foreground">{ep.duration_hours}h duration</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 text-sm">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Start</p>
+                            <p className="font-medium">{fmtDt(ep.start_datetime_local)}</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">End</p>
+                            <p className="font-medium">{fmtDt(ep.end_datetime_local)}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-x-4 text-sm">
+                          <div>
+                            <p className="text-xs text-muted-foreground">Peak</p>
+                            <p className="font-bold">{ep.peak_value.toFixed(0)} μg/m³</p>
+                          </div>
+                          <div>
+                            <p className="text-xs text-muted-foreground">Mean</p>
+                            <p className="font-medium">{ep.mean_value.toFixed(0)} μg/m³</p>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* ── Row 4: Flatline periods (if any) ── */}
+          {uptime?.flatline_periods && uptime.flatline_periods.length > 0 && (
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-base">Flatline (Stuck Sensor) Periods</CardTitle>
+                <p className="text-xs text-muted-foreground">
+                  Periods where the sensor reported a constant value
+                </p>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-2 max-h-48 overflow-y-auto">
+                  {uptime.flatline_periods.map((p, i) => {
+                    const days = Math.floor(p.duration_hours / 24);
+                    const hours = Math.round(p.duration_hours % 24);
+                    const durationStr = days > 0 ? `${days}d ${hours}h` : `${hours}h`;
+                    return (
+                      <div key={i} className="flex items-center justify-between rounded-lg border border-yellow-100 bg-yellow-50/50 px-3 py-2">
+                        <div className="text-sm">
+                          <span className="font-medium">{fmtDt(p.start)}</span>
+                          <span className="text-muted-foreground"> → </span>
+                          <span className="font-medium">{fmtDt(p.end)}</span>
+                          <span className="text-xs text-yellow-700 ml-2">stuck at {p.value.toFixed(1)} μg/m³</span>
+                        </div>
+                        <Badge variant="outline" className="text-xs text-yellow-600 border-yellow-200">
+                          {durationStr}
+                        </Badge>
+                      </div>
+                    );
+                  })}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+        </>
+      )}
     </div>
-  )
+  );
 }

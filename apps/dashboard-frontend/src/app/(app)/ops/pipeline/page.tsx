@@ -5,31 +5,36 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 
 import {
   fetchPipelineSummary,
-  fetchRuns,
-  fetchRunReport,
   fetchExecutions,
   triggerJob,
   fetchTileDates,
   fetchPredictionData,
   fetchModelHistory,
   fetchModelHistoryEntry,
+  fetchFeaturesList,
+  fetchFeatureDates,
+  fetchRuns,
+  fetchRunReport,
   getExecutionStatus,
   type TabType,
 } from '@/components/ops-pipeline'
 
 import { HealthAlert } from '@/components/ops-pipeline/StatusBadges'
 import { OverviewTab } from '@/components/ops-pipeline/OverviewTab'
-import { RunsTab } from '@/components/ops-pipeline/RunsTab'
+import { FeaturesTab } from '@/components/ops-pipeline/FeaturesTab'
 import { ExecutionsTab } from '@/components/ops-pipeline/ExecutionsTab'
 import { ResultsTab } from '@/components/ops-pipeline/ResultsTab'
 import { ModelHistoryTab } from '@/components/ops-pipeline/ModelHistoryTab'
+import { DailyStatusTab } from '@/components/ops-pipeline/DailyStatusTab'
 
 export default function OpsPipelinePage() {
   const queryClient = useQueryClient()
-  const [selectedRunDate, setSelectedRunDate] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('overview')
   const [selectedPredDate, setSelectedPredDate] = useState<string | null>(null)
   const [selectedModelRefDate, setSelectedModelRefDate] = useState<string | null>(null)
+  const [selectedFeature, setSelectedFeature] = useState<string | null>(null)
+  const [selectedFeatureDate, setSelectedFeatureDate] = useState<string | null>(null)
+  const [selectedRunDate, setSelectedRunDate] = useState<string | null>(null)
 
   // Queries
   const { data: summary, isLoading: summaryLoading } = useQuery({
@@ -38,9 +43,16 @@ export default function OpsPipelinePage() {
     refetchInterval: 30000,
   })
 
-  const { data: runs, isLoading: runsLoading } = useQuery({
-    queryKey: ["ops-pipeline-runs"],
-    queryFn: () => fetchRuns(30),
+  const { data: featuresList, isLoading: featuresListLoading } = useQuery({
+    queryKey: ["ops-pipeline-features-list"],
+    queryFn: fetchFeaturesList,
+    enabled: activeTab === 'features',
+  })
+
+  const { data: featureDates, isLoading: featureDatesLoading } = useQuery({
+    queryKey: ["ops-pipeline-feature-dates", selectedFeature],
+    queryFn: () => selectedFeature ? fetchFeatureDates(selectedFeature, 365) : null,
+    enabled: !!selectedFeature && activeTab === 'features',
   })
 
   const { data: dailyExecs, isLoading: dailyExecsLoading } = useQuery({
@@ -53,12 +65,6 @@ export default function OpsPipelinePage() {
     queryKey: ["ops-pipeline-executions-retrain"],
     queryFn: () => fetchExecutions('retrain'),
     refetchInterval: 10000,
-  })
-
-  const { data: selectedRun, isLoading: selectedRunLoading } = useQuery({
-    queryKey: ["ops-pipeline-run", selectedRunDate],
-    queryFn: () => selectedRunDate ? fetchRunReport(selectedRunDate) : null,
-    enabled: !!selectedRunDate,
   })
 
   const { data: tileDates, isLoading: tileDatesLoading } = useQuery({
@@ -85,6 +91,18 @@ export default function OpsPipelinePage() {
     enabled: !!selectedModelRefDate && activeTab === 'model-history',
   })
 
+  const { data: runs, isLoading: runsLoading } = useQuery({
+    queryKey: ["ops-pipeline-runs"],
+    queryFn: () => fetchRuns(90),
+    enabled: activeTab === 'daily-status',
+  })
+
+  const { data: selectedRun, isLoading: selectedRunLoading } = useQuery({
+    queryKey: ["ops-pipeline-run-report", selectedRunDate],
+    queryFn: () => selectedRunDate ? fetchRunReport(selectedRunDate) : null,
+    enabled: !!selectedRunDate && activeTab === 'daily-status',
+  })
+
   // Mutations
   const triggerRetrainMutation = useMutation({
     mutationFn: () => triggerJob('retrain'),
@@ -105,21 +123,22 @@ export default function OpsPipelinePage() {
   ].filter(a => a.condition)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       {/* Tab Navigation */}
       <div className="border-b border-gray-200">
-        <nav className="flex space-x-8">
+        <nav className="flex space-x-6">
           {[
             { id: 'overview', name: 'Overview' },
             { id: 'model-history', name: 'Model History' },
-            { id: 'runs', name: 'Run History' },
-            { id: 'executions', name: 'Job Executions' },
+            { id: 'executions', name: 'Executions' },
+            { id: 'daily-status', name: 'Daily Status' },
+            { id: 'features', name: 'Features' },
             { id: 'results', name: 'Results' },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as TabType)}
-              className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
+              className={`py-2 px-1 border-b-2 font-medium text-xs transition-colors ${
                 activeTab === tab.id
                   ? 'border-blue-500 text-blue-600'
                   : 'border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300'
@@ -161,14 +180,16 @@ export default function OpsPipelinePage() {
         />
       )}
 
-      {activeTab === 'runs' && (
-        <RunsTab
-          runs={runs}
-          runsLoading={runsLoading}
-          selectedRunDate={selectedRunDate}
-          setSelectedRunDate={setSelectedRunDate}
-          selectedRun={selectedRun}
-          selectedRunLoading={selectedRunLoading}
+      {activeTab === 'features' && (
+        <FeaturesTab
+          featuresList={featuresList}
+          featuresListLoading={featuresListLoading}
+          selectedFeature={selectedFeature}
+          setSelectedFeature={setSelectedFeature}
+          featureDates={featureDates}
+          featureDatesLoading={featureDatesLoading}
+          selectedFeatureDate={selectedFeatureDate}
+          setSelectedFeatureDate={setSelectedFeatureDate}
         />
       )}
 
@@ -177,6 +198,17 @@ export default function OpsPipelinePage() {
           dailyExecs={dailyExecs}
           dailyExecsLoading={dailyExecsLoading}
           retrainExecs={retrainExecs}
+        />
+      )}
+
+      {activeTab === 'daily-status' && (
+        <DailyStatusTab
+          runs={runs}
+          runsLoading={runsLoading}
+          selectedRunDate={selectedRunDate}
+          setSelectedRunDate={setSelectedRunDate}
+          selectedRun={selectedRun}
+          selectedRunLoading={selectedRunLoading}
         />
       )}
 

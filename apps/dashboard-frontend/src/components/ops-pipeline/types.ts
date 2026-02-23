@@ -23,11 +23,16 @@ export interface RunReportDetails {
     available: boolean
     n_stations: number
     n_obs: number
+    pm25_min?: number
+    pm25_max?: number
+    pm25_mean?: number
+    pm25_median?: number
+    error?: string
   }
   feature_partitions?: {
-    met?: { status: string; available?: boolean; missing_rate?: number }
-    aod?: { status: string; available?: boolean; missing_rate?: number }
-    tropomi?: { status: string; available?: boolean; missing_rate?: number }
+    met?: { status: string; available?: boolean; missing_rate?: number; n_rows?: number; n_cols?: number; key_features_missing?: Record<string, number>; error?: string }
+    aod?: { status: string; available?: boolean; missing_rate?: number; n_rows?: number; n_cols?: number; key_features_missing?: Record<string, number>; error?: string }
+    tropomi?: { status: string; available?: boolean; missing_rate?: number; n_rows?: number; n_cols?: number; key_features_missing?: Record<string, number>; error?: string }
   }
   master_partition?: {
     status: string | boolean
@@ -35,13 +40,44 @@ export interface RunReportDetails {
     master_rows?: number
     n_features?: number
     total_missing_rate?: number
+    missing_by_family?: { met: number; aod: number; tropomi: number }
   }
   inference?: {
     status: string | boolean
     available?: boolean
     error?: string
+    n_grid_points?: number
+    pred_min?: number
+    pred_max?: number
+    pred_mean?: number
+    pred_median?: number
+    pred_p95?: number
+    pct_negative?: number
   }
   runtime_seconds?: number
+}
+
+export interface DataQuality {
+  total_features: number
+  missing_features: number
+  available_features: number
+  nan_fraction: number
+  pakistan_cells: number
+  stage_coverage: {
+    met?: number
+    aod?: number
+    tropomi?: number
+  }
+  stage_nan_fraction?: {
+    met?: number
+    aod?: number
+    tropomi?: number
+  }
+  stage_feature_count?: {
+    met?: number
+    aod?: number
+    tropomi?: number
+  }
 }
 
 export interface RunReport {
@@ -59,6 +95,7 @@ export interface RunReport {
     created_at: string
     source: string
   }
+  data_quality?: DataQuality
   details?: RunReportDetails
 }
 
@@ -145,7 +182,27 @@ export interface TileDatesResponse {
   tilejson_url_template: string
 }
 
-export type TabType = 'overview' | 'runs' | 'executions' | 'results' | 'model-history'
+export type TabType = 'overview' | 'features' | 'executions' | 'results' | 'model-history' | 'daily-status'
+
+export interface FeatureInfo {
+  name: string
+  stage: string
+  unit: string
+  vmin: number
+  vmax: number
+  colormap: string
+}
+
+export interface FeaturesListResponse {
+  features: FeatureInfo[]
+  count: number
+}
+
+export interface FeatureDatesResponse {
+  dates: string[]
+  count: number
+  feature: string
+}
 
 export interface ModelHistoryEntry {
   schema_version: string

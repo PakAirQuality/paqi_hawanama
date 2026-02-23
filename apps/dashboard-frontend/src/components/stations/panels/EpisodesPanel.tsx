@@ -1,26 +1,50 @@
 "use client";
 
-import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { getAqiLabel } from "@/lib/api";
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
 
-type PollutionEpisode = {
-  start_ts: string;
-  end_ts: string;
+type TopDay = {
+  date: string;
+  mean_value: number;
+  max_value: number;
+  hours_above_threshold: number;
+  severity_score: number;
+};
+
+type EpisodeHour = {
+  datetime_local: string;
+  value: number;
+  threshold: number;
+  severity_score: number;
+};
+
+type Episode = {
+  start_datetime_local: string;
+  end_datetime_local: string;
   duration_hours: number;
-  max_pm25: number;
-  max_aqi: number;
-  severity_label: string;
-  cause_guess?: string;
+  peak_value: number;
+  peak_datetime_local: string;
+  mean_value: number;
+  severity_score: number;
+  hours: EpisodeHour[];
 };
 
 type EpisodesData = {
   station_id: string;
-  episodes: PollutionEpisode[];
+  pollutant: string;
+  level: string;
+  threshold: number;
+  window: {
+    from: string;
+    to: string;
+  };
+  top_days: TopDay[];
+  episodes: Episode[];
+  total_episodes: number;
+  total_episode_hours: number;
 };
 
 async function fetchEpisodes(stationId: string): Promise<EpisodesData> {
@@ -29,10 +53,27 @@ async function fetchEpisodes(stationId: string): Promise<EpisodesData> {
   return res.json();
 }
 
+function formatSeverity(score: number): string {
+  return `${(score * 100).toFixed(1)}%`;
+}
+
+function severityBadgeVariant(score: number): "default" | "secondary" | "destructive" | "outline" {
+  if (score >= 0.1) return "destructive";
+  if (score >= 0.05) return "default";
+  return "secondary";
+}
+
+function formatLocalDatetime(iso: string): string {
+  const d = new Date(iso);
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export function EpisodesPanel({ stationId }: { stationId: string }) {
-  const [timeFilter, setTimeFilter] = useState('30d'); // '7d', '30d', 'season'
-  const [severityFilter, setSeverityFilter] = useState('all'); // 'all', 'very-unhealthy+'
-  
   const { data, isLoading, error } = useQuery({
     queryKey: ["station-episodes", stationId],
     queryFn: () => fetchEpisodes(stationId),
@@ -66,73 +107,13 @@ export function EpisodesPanel({ stationId }: { stationId: string }) {
     );
   }
 
-  // Filter episodes based on selected criteria
-  const now = new Date();
-  const filterDate = timeFilter === '7d' ? 
-    new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000) :
-    timeFilter === '30d' ?
-    new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000) :
-    new Date(now.getTime() - 90 * 24 * 60 * 60 * 1000); // season = 90 days
-
-  const filteredEpisodes = data.episodes
-    .filter(episode => new Date(episode.start_ts) >= filterDate)
-    .filter(episode => {
-      if (severityFilter === 'very-unhealthy+') {
-        return episode.max_aqi >= 201; // Very Unhealthy or worse
-      }
-      return true;
-    })
-    .sort((a, b) => new Date(b.start_ts).getTime() - new Date(a.start_ts).getTime());
-
-  // Calculate statistics
-  const totalEpisodes = filteredEpisodes.length;
-  const totalHours = filteredEpisodes.reduce((acc, ep) => acc + ep.duration_hours, 0);
-  const avgDuration = totalEpisodes > 0 ? totalHours / totalEpisodes : 0;
-  const severeCases = filteredEpisodes.filter(ep => ep.max_aqi >= 201).length;
-
-  const getSeverityColor = (severity: string) => {
-    switch (severity.toLowerCase()) {
-      case 'moderate': return 'bg-yellow-100 text-yellow-800';
-      case 'unhealthy for sensitive groups': return 'bg-orange-100 text-orange-800';
-      case 'unhealthy': return 'bg-red-100 text-red-800';
-      case 'very unhealthy': return 'bg-purple-100 text-purple-800';
-      case 'hazardous': return 'bg-red-200 text-red-900';
-      default: return 'bg-gray-100 text-gray-800';
-    }
-  };
+  const hasEpisodes = data.episodes.length > 0;
+  const hasTopDays = data.top_days.length > 0;
 
   return (
     <div className="space-y-6">
-      {/* Filters */}
-      <Card>
-        <CardHeader className="pb-4">
-          <div className="flex flex-wrap gap-4 items-center justify-between">
-            <CardTitle>Pollution Episodes</CardTitle>
-            <div className="flex flex-wrap gap-2">
-              <select
-                value={timeFilter}
-                onChange={(e) => setTimeFilter(e.target.value)}
-                className="px-3 py-1 border rounded-md text-sm bg-background"
-              >
-                <option value="7d">Last 7 days</option>
-                <option value="30d">Last 30 days</option>
-                <option value="season">Last 3 months</option>
-              </select>
-              <select
-                value={severityFilter}
-                onChange={(e) => setSeverityFilter(e.target.value)}
-                className="px-3 py-1 border rounded-md text-sm bg-background"
-              >
-                <option value="all">All episodes</option>
-                <option value="very-unhealthy+">Very Unhealthy+</option>
-              </select>
-            </div>
-          </div>
-        </CardHeader>
-      </Card>
-
-      {/* Statistics */}
-      <div className="grid gap-4 md:grid-cols-4">
+      {/* Summary Stats */}
+      <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
@@ -140,184 +121,161 @@ export function EpisodesPanel({ stationId }: { stationId: string }) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalEpisodes}</div>
-            <p className="text-sm text-muted-foreground">
-              {timeFilter === '7d' ? 'Last 7 days' : timeFilter === '30d' ? 'Last 30 days' : 'Last 3 months'}
-            </p>
+            <div className="text-2xl font-bold">{data.total_episodes}</div>
+            <p className="text-sm text-muted-foreground">Last 30 days</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Duration
+              Total Episode Hours
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{totalHours.toFixed(1)}h</div>
-            <p className="text-sm text-muted-foreground">
-              Poor air quality
-            </p>
+            <div className="text-2xl font-bold">{data.total_episode_hours}h</div>
+            <p className="text-sm text-muted-foreground">Above threshold</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Average Duration
+              Threshold
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">
-              {avgDuration.toFixed(1)}h
-            </div>
-            <p className="text-sm text-muted-foreground">
-              Per episode
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              Severe Cases
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{severeCases}</div>
-            <p className="text-sm text-muted-foreground">
-              Very Unhealthy+
-            </p>
+            <div className="text-2xl font-bold">{data.threshold} &micro;g/m&sup3;</div>
+            <p className="text-sm text-muted-foreground">PM2.5 ({data.level}ly)</p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Episodes List */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Recent Episodes</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            High pollution events sorted by most recent
-          </p>
-        </CardHeader>
-        <CardContent>
-          {filteredEpisodes.length === 0 ? (
-            <div className="text-center py-8">
-              <div className="text-6xl mb-4">🌱</div>
-              <p className="text-muted-foreground">
-                No pollution episodes found for the selected period.
+      {/* No episodes state */}
+      {!hasEpisodes && !hasTopDays && (
+        <Card>
+          <CardContent className="py-12">
+            <div className="text-center">
+              <p className="text-lg font-medium">No episodes detected</p>
+              <p className="text-sm text-muted-foreground mt-2">
+                No pollution episodes exceeded the {data.threshold} &micro;g/m&sup3; threshold
+                during the 30-day window ({new Date(data.window.from).toLocaleDateString()} &ndash;{" "}
+                {new Date(data.window.to).toLocaleDateString()}). This is a positive sign for air
+                quality at this station.
               </p>
             </div>
-          ) : (
-            <div className="space-y-4 max-h-96 overflow-y-auto">
-              {filteredEpisodes.map((episode, index) => (
-                <div key={index} className="border rounded-lg p-4 hover:bg-muted/50 transition-colors">
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Top Days */}
+      {hasTopDays && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Worst Days</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Days with the highest pollution levels
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {data.top_days.map((day) => (
+                <div
+                  key={day.date}
+                  className="flex items-center justify-between border rounded-lg p-3 hover:bg-muted/50 transition-colors"
+                >
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium">
+                      {new Date(day.date + "T00:00:00").toLocaleDateString(undefined, {
+                        weekday: "short",
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </p>
+                    <p className="text-sm text-muted-foreground">
+                      Mean: {day.mean_value.toFixed(1)} &micro;g/m&sup3; &middot; Max:{" "}
+                      {day.max_value.toFixed(1)} &micro;g/m&sup3; &middot;{" "}
+                      {day.hours_above_threshold}h above threshold
+                    </p>
+                  </div>
+                  <Badge variant={severityBadgeVariant(day.severity_score)}>
+                    {formatSeverity(day.severity_score)}
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Episodes List */}
+      {hasEpisodes && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Episodes</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Continuous periods above the {data.threshold} &micro;g/m&sup3; threshold
+            </p>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-4 max-h-[32rem] overflow-y-auto">
+              {data.episodes.map((episode, index) => (
+                <div
+                  key={index}
+                  className="border rounded-lg p-4 hover:bg-muted/50 transition-colors"
+                >
                   <div className="flex items-start justify-between">
                     <div className="space-y-2 flex-1">
                       <div className="flex items-center space-x-3">
-                        <div className={`px-2 py-1 rounded text-xs font-medium ${getSeverityColor(episode.severity_label)}`}>
-                          {episode.severity_label}
-                        </div>
+                        <Badge variant={severityBadgeVariant(episode.severity_score)}>
+                          Severity: {formatSeverity(episode.severity_score)}
+                        </Badge>
                         <span className="text-sm text-muted-foreground">
-                          {episode.duration_hours.toFixed(1)} hours
+                          {episode.duration_hours} hours
                         </span>
                       </div>
-                      
+
                       <div className="grid gap-2 md:grid-cols-2">
                         <div>
-                          <p className="text-sm font-medium">Start Time</p>
+                          <p className="text-sm font-medium">Start</p>
                           <p className="text-sm text-muted-foreground">
-                            {new Date(episode.start_ts).toLocaleString()}
+                            {formatLocalDatetime(episode.start_datetime_local)}
                           </p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium">End Time</p>
+                          <p className="text-sm font-medium">End</p>
                           <p className="text-sm text-muted-foreground">
-                            {new Date(episode.end_ts).toLocaleString()}
+                            {formatLocalDatetime(episode.end_datetime_local)}
                           </p>
                         </div>
                       </div>
 
-                      <div className="grid gap-2 md:grid-cols-2">
+                      <div className="grid gap-2 md:grid-cols-3">
                         <div>
-                          <p className="text-sm font-medium">Peak PM₂.₅</p>
+                          <p className="text-sm font-medium">Peak Value</p>
                           <p className="text-sm text-muted-foreground">
-                            {episode.max_pm25.toFixed(1)} μg/m³
+                            {episode.peak_value.toFixed(1)} &micro;g/m&sup3;
                           </p>
                         </div>
                         <div>
-                          <p className="text-sm font-medium">Peak AQI</p>
+                          <p className="text-sm font-medium">Mean Value</p>
                           <p className="text-sm text-muted-foreground">
-                            {episode.max_aqi} ({getAqiLabel(episode.max_aqi)})
+                            {episode.mean_value.toFixed(1)} &micro;g/m&sup3;
+                          </p>
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">Peak Time</p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatLocalDatetime(episode.peak_datetime_local)}
                           </p>
                         </div>
                       </div>
-
-                      {episode.cause_guess && (
-                        <div>
-                          <p className="text-sm font-medium">Possible Cause</p>
-                          <p className="text-sm text-muted-foreground">
-                            {episode.cause_guess}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="ml-4">
-                      <Badge variant="outline" className="text-xs">
-                        AQI {episode.max_aqi}
-                      </Badge>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Insights */}
-      {filteredEpisodes.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>Episode Insights</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {severeCases > 0 && (
-              <div className="p-3 bg-red-50 rounded-lg">
-                <p className="text-sm text-red-700">
-                  <strong>Health Alert:</strong> {severeCases} severe pollution episodes 
-                  recorded in the selected period. Consider air quality monitoring alerts.
-                </p>
-              </div>
-            )}
-
-            {avgDuration > 12 && (
-              <div className="p-3 bg-orange-50 rounded-lg">
-                <p className="text-sm text-orange-700">
-                  <strong>Long Duration:</strong> Average episode duration of {avgDuration.toFixed(1)} hours 
-                  indicates persistent pollution sources.
-                </p>
-              </div>
-            )}
-
-            {totalEpisodes === 0 && (
-              <div className="p-3 bg-green-50 rounded-lg">
-                <p className="text-sm text-green-700">
-                  <strong>Good News:</strong> No significant pollution episodes recorded 
-                  in the selected period.
-                </p>
-              </div>
-            )}
-
-            {totalEpisodes > 0 && avgDuration <= 12 && severeCases === 0 && (
-              <div className="p-3 bg-blue-50 rounded-lg">
-                <p className="text-sm text-blue-700">
-                  <strong>Manageable Levels:</strong> Episodes are relatively short-lived 
-                  and of moderate severity. Good overall air quality management.
-                </p>
-              </div>
-            )}
           </CardContent>
         </Card>
       )}

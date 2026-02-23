@@ -2,8 +2,6 @@
 
 import React, { useState, useEffect } from 'react'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts'
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
 
@@ -46,15 +44,16 @@ const CITIES = [
 ]
 
 // Year colors matching the Python plot
-const YEAR_COLORS = {
+const YEAR_COLORS: Record<number, string> = {
   2018: "#D803D8",
-  2019: "#CD6D00", 
-  2020: "#D803D8",
+  2019: "#CD6D00",
+  2020: "#9333ea",
   2021: "#0ECFCF",
   2022: "#064671",
   2023: "#0C6C1D",
   2024: "#5429CD",
-  2025: "#AE0000"
+  2025: "#AE0000",
+  2026: "#0891b2", // Vibrant teal for current year
 }
 
 const formatCityName = (slug: string): string => {
@@ -116,23 +115,24 @@ const transformHistoricalToSeasonal = (historicalData: any): SeasonalTrendsRespo
   }
 }
 
-export const YearOverYearChart: React.FC<YearOverYearChartProps> = ({ 
-  selectedCity = "lahore", 
-  onCityChange 
+export const YearOverYearChart: React.FC<YearOverYearChartProps> = ({
+  selectedCity = "lahore",
+  onCityChange
 }) => {
   const [data, setData] = useState<SeasonalTrendsResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [currentCity, setCurrentCity] = useState(selectedCity)
   const [visibleYears, setVisibleYears] = useState<Set<number>>(new Set())
+  const [highlightedYear, setHighlightedYear] = useState<number | null>(null)
 
   const fetchSeasonalData = async (citySlug: string) => {
     setLoading(true)
     setError(null)
     
     try {
-      // Fetch 5 years of historical data (43800 hours = 5 years)
-      const response = await fetch(`${API_BASE}/api/v1/cities/${citySlug}/historical-from-stations?hours=43800`)
+      // Fetch 5 years of historical data, daily resolution only (much smaller payload)
+      const response = await fetch(`${API_BASE}/api/v1/cities/${citySlug}/historical-from-stations?hours=43800&resolution=daily`)
       
       if (!response.ok) {
         throw new Error(`Failed to fetch data for ${citySlug}`)
@@ -143,9 +143,12 @@ export const YearOverYearChart: React.FC<YearOverYearChartProps> = ({
       // Transform the data to match the expected format
       const transformedData = transformHistoricalToSeasonal(historicalData)
       setData(transformedData)
-      
-      // Initialize all years as visible
-      setVisibleYears(new Set(transformedData.available_years))
+
+      // Initialize only the 3 most recent years as visible
+      const sortedYears = [...transformedData.available_years].sort((a, b) => b - a)
+      const recentYears = sortedYears.slice(0, 3)
+      setVisibleYears(new Set(recentYears))
+      setHighlightedYear(null) // No year highlighted by default - all equal
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data')
     } finally {
@@ -209,148 +212,175 @@ export const YearOverYearChart: React.FC<YearOverYearChartProps> = ({
 
   if (loading) {
     return (
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle>Real-time PM₂.₅ Trends</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center h-64">
-            <div className="text-gray-500">Loading seasonal trends...</div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="px-4 lg:px-8 py-8">
+        <h2 className="text-xl font-semibold text-slate-900">Real-time PM₂.₅ Trends</h2>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-slate-500">Loading seasonal trends...</div>
+        </div>
+      </div>
     )
   }
 
   if (error) {
     return (
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle>Real-time PM₂.₅ Trends</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-center h-64">
-            <div className="text-red-500">Error: {error}</div>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="px-4 lg:px-8 py-8">
+        <h2 className="text-xl font-semibold text-slate-900">Real-time PM₂.₅ Trends</h2>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-red-500">Error: {error}</div>
+        </div>
+      </div>
     )
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Real-time PM₂.₅ Trends</CardTitle>
-            <p className="text-sm text-gray-600 mt-1">
-              Year-over-year comparison for {data?.city_name || formatCityName(currentCity)}
+    <div className="px-4 lg:px-8 py-8">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+        <div>
+          <h2 className="text-xl font-semibold text-slate-900">Real-time PM₂.₅ Trends</h2>
+          <p className="text-sm text-slate-600 mt-1">
+            Year-over-year comparison for {data?.city_name || formatCityName(currentCity)}
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {data && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
+                {data.available_years.length} years
+              </span>
+              <button
+                onClick={toggleAllYears}
+                className="px-3 py-1.5 text-sm bg-slate-100 hover:bg-slate-200 rounded-md transition-colors text-slate-700"
+              >
+                {visibleYears.size === data.available_years.length ? 'Hide All' : 'Show All'}
+              </button>
+            </div>
+          )}
+          <select
+            value={currentCity}
+            onChange={(e) => handleCityChange(e.target.value)}
+            className="px-3 py-2 border border-slate-300 rounded-md text-sm bg-white"
+          >
+            {CITIES.map(city => (
+              <option key={city} value={city}>
+                {formatCityName(city)}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {/* Chart - large like the map */}
+      <div className="h-[calc(100vh-300px)] min-h-[400px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart
+            data={chartData}
+            onClick={(e) => {
+              // Click on empty area to deselect
+              if (!e?.activePayload) {
+                setHighlightedYear(null)
+              }
+            }}
+          >
+            <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
+            <XAxis
+              dataKey="date"
+              interval="preserveStartEnd"
+              tick={{ fontSize: 12 }}
+              angle={-45}
+              textAnchor="end"
+              height={60}
+            />
+            <YAxis
+              label={{ value: 'PM₂.₅ (μg/m³)', angle: -90, position: 'insideLeft' }}
+              tick={{ fontSize: 12 }}
+            />
+            <Tooltip
+              labelFormatter={(label) => `Date: ${label}`}
+              formatter={(value: any, name: any) => [
+                value ? `${value.toFixed(1)} μg/m³` : 'No data',
+                `Year ${name}`
+              ]}
+              cursor={{ strokeDasharray: '3 3' }}
+            />
+            <Legend />
+
+            {/* Render non-highlighted lines first */}
+            {data?.available_years
+              .filter(year => visibleYears.has(year) && year !== highlightedYear)
+              .map(year => (
+                <Line
+                  key={year}
+                  type="monotone"
+                  dataKey={year}
+                  stroke={YEAR_COLORS[year] || '#666666'}
+                  strokeWidth={highlightedYear ? 1.5 : 2}
+                  strokeOpacity={highlightedYear ? 0.35 : 1}
+                  dot={false}
+                  name={year.toString()}
+                  connectNulls={false}
+                  activeDot={{
+                    r: 6,
+                    cursor: 'pointer',
+                    onClick: () => setHighlightedYear(year)
+                  }}
+                />
+              ))}
+
+            {/* Highlighted line rendered last (on top) */}
+            {highlightedYear && visibleYears.has(highlightedYear) && (
+              <Line
+                key={`highlighted-${highlightedYear}`}
+                type="monotone"
+                dataKey={highlightedYear}
+                stroke={YEAR_COLORS[highlightedYear] || '#666666'}
+                strokeWidth={4}
+                dot={false}
+                name={highlightedYear.toString()}
+                connectNulls={false}
+                activeDot={{
+                  r: 8,
+                  cursor: 'pointer',
+                  onClick: () => setHighlightedYear(null)
+                }}
+              />
+            )}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      {/* Year toggles */}
+      {data && data.available_years.length > 0 && (
+        <div className="mt-6 space-y-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium text-slate-700 mr-2">Toggle Years:</span>
+            {data.available_years.map(year => (
+              <button
+                key={year}
+                onClick={() => toggleYear(year)}
+                className={`px-3 py-1.5 text-sm rounded-full border transition-all ${
+                  visibleYears.has(year)
+                    ? ''
+                    : 'bg-slate-100 border-slate-300 text-slate-600 hover:bg-slate-200'
+                } ${highlightedYear === year ? 'ring-2 ring-offset-1' : ''}`}
+                style={visibleYears.has(year) ? {
+                  backgroundColor: `${YEAR_COLORS[year]}20`,
+                  borderColor: YEAR_COLORS[year] || '#666666',
+                  color: YEAR_COLORS[year] || '#666666',
+                } : undefined}
+              >
+                {year}
+                {highlightedYear === year && ' ★'}
+              </button>
+            ))}
+          </div>
+          <div className="text-xs text-slate-500">
+            <p>
+              Click on a data point in the chart to highlight that year. Click again to deselect.
             </p>
           </div>
-          <div className="flex items-center gap-3">
-            {data && (
-              <div className="flex items-center gap-2">
-                <Badge variant="outline">
-                  {data.available_years.length} years of data
-                </Badge>
-                <button
-                  onClick={toggleAllYears}
-                  className="px-3 py-1 text-sm bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md transition-colors"
-                >
-                  {visibleYears.size === data.available_years.length ? 'Hide All' : 'Show All'}
-                </button>
-              </div>
-            )}
-            <select
-              value={currentCity}
-              onChange={(e) => handleCityChange(e.target.value)}
-              className="px-3 py-2 border rounded-md text-sm"
-            >
-              {CITIES.map(city => (
-                <option key={city} value={city}>
-                  {formatCityName(city)}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
-      </CardHeader>
-      <CardContent>
-        <div className="h-80">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData}>
-              <CartesianGrid strokeDasharray="3 3" opacity={0.3} />
-              <XAxis 
-                dataKey="date"
-                interval="preserveStartEnd"
-                tick={{ fontSize: 12 }}
-                angle={-45}
-                textAnchor="end"
-                height={60}
-              />
-              <YAxis 
-                label={{ value: 'PM₂.₅ (μg/m³)', angle: -90, position: 'insideLeft' }}
-                tick={{ fontSize: 12 }}
-              />
-              <Tooltip 
-                labelFormatter={(label) => `Date: ${label}`}
-                formatter={(value: any, name: any) => [
-                  value ? `${value.toFixed(1)} μg/m³` : 'No data',
-                  `Year ${name}`
-                ]}
-              />
-              <Legend />
-              
-              {data?.available_years
-                .filter(year => visibleYears.has(year))
-                .map(year => (
-                  <Line
-                    key={year}
-                    type="monotone"
-                    dataKey={year}
-                    stroke={YEAR_COLORS[year as keyof typeof YEAR_COLORS] || '#666666'}
-                    strokeWidth={year === 2025 ? 3 : 1.5}
-                    dot={false}
-                    name={year.toString()}
-                    connectNulls={false}
-                  />
-                ))}
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-        
-        {data && data.available_years.length > 0 && (
-          <div className="mt-4 space-y-3">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-gray-700 mr-2">Toggle Years:</span>
-              {data.available_years.map(year => (
-                <button
-                  key={year}
-                  onClick={() => toggleYear(year)}
-                  className={`px-3 py-1 text-sm rounded-full border transition-colors ${
-                    visibleYears.has(year)
-                      ? 'bg-blue-100 border-blue-300 text-blue-800'
-                      : 'bg-gray-100 border-gray-300 text-gray-600 hover:bg-gray-200'
-                  }`}
-                  style={visibleYears.has(year) ? {
-                    backgroundColor: `${YEAR_COLORS[year as keyof typeof YEAR_COLORS]}20`,
-                    borderColor: YEAR_COLORS[year as keyof typeof YEAR_COLORS] || '#666666',
-                    color: YEAR_COLORS[year as keyof typeof YEAR_COLORS] || '#666666'
-                  } : undefined}
-                >
-                  {year}
-                </button>
-              ))}
-            </div>
-            <div className="text-xs text-gray-500">
-              <p>
-                Data shows seasonal PM₂.₅ patterns from {data.start_year} to {data.end_year}.
-                Current year ({new Date().getFullYear()}) is highlighted in red.
-              </p>
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
+      )}
+    </div>
   )
 }

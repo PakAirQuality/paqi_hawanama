@@ -51,30 +51,30 @@ export function OverviewTab({
         <button
           onClick={handleRetrainClick}
           disabled={triggerRetrainMutation.isPending || hasRunningRetrain}
-          className="flex items-center space-x-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex items-center space-x-1.5 px-3 py-1.5 bg-purple-600 text-white text-xs rounded-md hover:bg-purple-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {(triggerRetrainMutation.isPending || hasRunningRetrain) ? (
-            <Loader2 className="w-4 h-4 animate-spin" />
+            <Loader2 className="w-3.5 h-3.5 animate-spin" />
           ) : (
-            <RefreshCw className="w-4 h-4" />
+            <RefreshCw className="w-3.5 h-3.5" />
           )}
-          <span>{hasRunningRetrain ? 'Retraining...' : 'Run Model Retrain'}</span>
+          <span>{hasRunningRetrain ? 'Retraining...' : 'Run Retrain'}</span>
         </button>
       </div>
 
       {/* Status Cards */}
-      <div className="grid gap-4 md:grid-cols-4">
+      <div className="grid gap-3 md:grid-cols-4">
         {/* Last Published */}
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <Calendar className="w-4 h-4 text-gray-500" />
-              <h3 className="text-sm font-medium text-gray-600">Last Published</h3>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2 mb-1">
+              <Calendar className="w-3.5 h-3.5 text-gray-500" />
+              <h3 className="text-xs font-medium text-gray-600">Last Published</h3>
             </div>
             {summaryLoading ? (
-              <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
             ) : (
-              <div className="text-2xl font-bold text-gray-900">
+              <div className="text-lg font-bold text-gray-900">
                 {summary?.predictions_pointer?.last_published_date || 'N/A'}
               </div>
             )}
@@ -83,37 +83,37 @@ export function OverviewTab({
 
         {/* Latest Run Status */}
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <BarChart3 className="w-4 h-4 text-gray-500" />
-              <h3 className="text-sm font-medium text-gray-600">Latest Run</h3>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2 mb-1">
+              <BarChart3 className="w-3.5 h-3.5 text-gray-500" />
+              <h3 className="text-xs font-medium text-gray-600">Latest Run</h3>
             </div>
             {summaryLoading ? (
-              <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
             ) : latestRun ? (
-              <div className="space-y-1">
+              <div className="space-y-0.5">
                 <StatusBadge success={latestRun.success} />
-                <div className="text-sm text-gray-500">
+                <div className="text-xs text-gray-500">
                   {latestRun.date} ({formatDuration(latestRun.details?.runtime_seconds ?? 0)})
                 </div>
               </div>
             ) : (
-              <div className="text-gray-400">No runs</div>
+              <div className="text-gray-400 text-sm">No runs</div>
             )}
           </CardContent>
         </Card>
 
         {/* Model Waterline */}
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <Database className="w-4 h-4 text-gray-500" />
-              <h3 className="text-sm font-medium text-gray-600">Model Waterline</h3>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2 mb-1">
+              <Database className="w-3.5 h-3.5 text-gray-500" />
+              <h3 className="text-xs font-medium text-gray-600">Model Waterline</h3>
             </div>
             {summaryLoading ? (
-              <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
             ) : (
-              <div className="text-2xl font-bold text-gray-900">
+              <div className="text-lg font-bold text-gray-900">
                 {summary?.model_pointer?.waterline || 'N/A'}
               </div>
             )}
@@ -122,15 +122,15 @@ export function OverviewTab({
 
         {/* Git Commit */}
         <Card>
-          <CardContent className="p-6">
-            <div className="flex items-center space-x-2 mb-2">
-              <GitCommit className="w-4 h-4 text-gray-500" />
-              <h3 className="text-sm font-medium text-gray-600">Git Commit</h3>
+          <CardContent className="p-4">
+            <div className="flex items-center space-x-2 mb-1">
+              <GitCommit className="w-3.5 h-3.5 text-gray-500" />
+              <h3 className="text-xs font-medium text-gray-600">Git Commit</h3>
             </div>
             {summaryLoading ? (
-              <div className="h-8 bg-gray-200 rounded animate-pulse"></div>
+              <div className="h-6 bg-gray-200 rounded animate-pulse"></div>
             ) : (
-              <div className="text-lg font-mono text-gray-900">
+              <div className="text-base font-mono text-gray-900">
                 {summary?.model_pointer?.git_commit || 'N/A'}
               </div>
             )}
@@ -139,132 +139,127 @@ export function OverviewTab({
       </div>
 
       {/* Model & Run Details */}
-      <div className="grid gap-6 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-2">
         {/* Model Pointer */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-              <Database className="w-5 h-5" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center space-x-2">
+              <Database className="w-4 h-4" />
               <span>Current Model</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {summaryLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {[...Array(4)].map((_, i) => (
-                  <div key={i} className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div key={i} className="h-3 bg-gray-200 rounded animate-pulse"></div>
                 ))}
               </div>
             ) : summary?.model_pointer ? (
-              <div className="space-y-3">
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Model URI</span>
+              <div className="space-y-1">
+                <div className="flex justify-between items-center py-1.5 border-b border-gray-100 gap-2">
+                  <span className="text-xs text-gray-600 shrink-0">Model URI</span>
                   <a
                     href={summary.model_pointer.model_uri.replace('gs://', 'https://console.cloud.google.com/storage/browser/')}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-sm font-mono text-blue-600 hover:text-blue-800 hover:underline"
+                    className="text-xs font-mono text-blue-600 hover:text-blue-800 hover:underline truncate max-w-[160px]"
                     title={summary.model_pointer.model_uri}
                   >
-                    ...{summary.model_pointer.model_uri.split('/').slice(-1)[0]}
+                    {summary.model_pointer.model_uri.split('/').slice(-2).join('/')}
                   </a>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Waterline</span>
-                  <span className="text-sm font-medium text-gray-900">{summary.model_pointer.waterline}</span>
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Waterline</span>
+                  <span className="text-xs font-medium text-gray-900">{summary.model_pointer.waterline}</span>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Cutoff Days</span>
-                  <span className="text-sm font-medium text-gray-900">{summary.model_pointer.cutoff_days}</span>
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Cutoff Days</span>
+                  <span className="text-xs font-medium text-gray-900">{summary.model_pointer.cutoff_days}</span>
                 </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-sm text-gray-600">Created</span>
-                  <span className="text-sm text-gray-900">{formatDate(summary.model_pointer.created_at_utc)}</span>
+                <div className="flex justify-between py-1.5">
+                  <span className="text-xs text-gray-600">Created</span>
+                  <span className="text-xs text-gray-900">{formatDate(summary.model_pointer.created_at_utc)}</span>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No model pointer found</div>
+              <div className="text-center py-4 text-gray-500 text-sm">No model pointer found</div>
             )}
           </CardContent>
         </Card>
 
         {/* Model Metrics */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-              <BarChart3 className="w-5 h-5" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center space-x-2">
+              <BarChart3 className="w-4 h-4" />
               <span>Model Metrics</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {modelDetailsLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div key={i} className="h-3 bg-gray-200 rounded animate-pulse"></div>
                 ))}
               </div>
             ) : modelDetails?.training_mode === 'operational' ? (
               // Operational waterline format
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {/* Validation Metrics */}
                 <div>
-                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                    Validation Window ({modelDetails.val_date_range?.[0]} to {modelDetails.val_date_range?.[1]})
+                  <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                    Validation ({modelDetails.val_date_range?.[0]} → {modelDetails.val_date_range?.[1]})
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 bg-blue-50 rounded-lg">
-                      <div className="text-xs text-blue-600">R²</div>
-                      <div className="text-xl font-bold text-blue-900">
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="p-2 bg-blue-50 rounded">
+                      <div className="text-[10px] text-blue-600">R²</div>
+                      <div className="text-base font-bold text-blue-900">
                         {modelDetails.val_metrics?.r2?.toFixed(3) ?? 'N/A'}
                       </div>
                     </div>
-                    <div className="p-3 bg-green-50 rounded-lg">
-                      <div className="text-xs text-green-600">MAE</div>
-                      <div className="text-xl font-bold text-green-900">
+                    <div className="p-2 bg-green-50 rounded">
+                      <div className="text-[10px] text-green-600">MAE</div>
+                      <div className="text-base font-bold text-green-900">
                         {modelDetails.val_metrics?.mae?.toFixed(1) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-green-500">μg/m³</div>
                     </div>
-                    <div className="p-3 bg-purple-50 rounded-lg">
-                      <div className="text-xs text-purple-600">RMSE</div>
-                      <div className="text-xl font-bold text-purple-900">
+                    <div className="p-2 bg-purple-50 rounded">
+                      <div className="text-[10px] text-purple-600">RMSE</div>
+                      <div className="text-base font-bold text-purple-900">
                         {modelDetails.val_metrics?.rmse?.toFixed(1) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-purple-500">μg/m³</div>
                     </div>
-                    <div className="p-3 bg-amber-50 rounded-lg">
-                      <div className="text-xs text-amber-600">Bias</div>
-                      <div className="text-xl font-bold text-amber-900">
+                    <div className="p-2 bg-amber-50 rounded">
+                      <div className="text-[10px] text-amber-600">Bias</div>
+                      <div className="text-base font-bold text-amber-900">
                         {modelDetails.val_metrics?.bias?.toFixed(1) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-amber-500">μg/m³</div>
                     </div>
                   </div>
                 </div>
 
                 {/* Skill Metrics */}
                 <div className="pt-2 border-t border-gray-100">
-                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                    Skill Metrics (MAE-based)
+                  <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1.5">
+                    Skill (MAE-based)
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 bg-teal-50 rounded-lg">
-                      <div className="text-xs text-teal-600">vs Station-Month Baseline</div>
-                      <div className="text-xl font-bold text-teal-900">
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="p-2 bg-teal-50 rounded">
+                      <div className="text-[10px] text-teal-600">vs Station-Month</div>
+                      <div className="text-base font-bold text-teal-900">
                         {modelDetails.val_metrics?.skill_vs_station_month != null
                           ? `${(modelDetails.val_metrics.skill_vs_station_month * 100).toFixed(1)}%`
                           : 'N/A'}
                       </div>
-                      <div className="text-xs text-teal-500">skill improvement</div>
                     </div>
-                    <div className="p-3 bg-indigo-50 rounded-lg">
-                      <div className="text-xs text-indigo-600">vs Persistence (yesterday)</div>
-                      <div className="text-xl font-bold text-indigo-900">
+                    <div className="p-2 bg-indigo-50 rounded">
+                      <div className="text-[10px] text-indigo-600">vs Persistence</div>
+                      <div className="text-base font-bold text-indigo-900">
                         {modelDetails.val_metrics?.skill_vs_yesterday != null
                           ? `${(modelDetails.val_metrics.skill_vs_yesterday * 100).toFixed(1)}%`
                           : 'N/A'}
                       </div>
-                      <div className="text-xs text-indigo-500">skill improvement</div>
                     </div>
                   </div>
                 </div>
@@ -272,17 +267,17 @@ export function OverviewTab({
                 {/* Monthly Breakdown */}
                 {modelDetails.val_monthly && Object.keys(modelDetails.val_monthly).length > 0 && (
                   <div className="pt-2 border-t border-gray-100">
-                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
-                      Monthly Validation (MAE μg/m³)
+                    <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">
+                      Monthly MAE (μg/m³)
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-1">
                       {Object.entries(modelDetails.val_monthly).map(([month, metrics]) => {
                         const monthNames = ['', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
                         return (
                           <Badge
                             key={month}
                             variant="outline"
-                            className="text-xs bg-gray-50"
+                            className="text-[10px] px-1.5 py-0 bg-gray-50"
                             title={`R²: ${metrics.r2?.toFixed(3)}, RMSE: ${metrics.rmse?.toFixed(1)}, n=${metrics.n_predictions}`}
                           >
                             {monthNames[parseInt(month)]}: {metrics.mae?.toFixed(1)}
@@ -295,47 +290,47 @@ export function OverviewTab({
               </div>
             ) : modelDetails?.training_mode === 'cv' ? (
               // CV training format
-              <div className="space-y-4">
+              <div className="space-y-3">
                 {/* CV Summary */}
                 <div>
-                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1.5">
                     Cross-Validation (expanding window)
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="p-3 bg-blue-50 rounded-lg">
-                      <div className="text-xs text-blue-600">R²</div>
-                      <div className="text-xl font-bold text-blue-900">
+                  <div className="grid grid-cols-4 gap-2">
+                    <div className="p-2 bg-blue-50 rounded">
+                      <div className="text-[10px] text-blue-600">R²</div>
+                      <div className="text-base font-bold text-blue-900">
                         {modelDetails.cv?.summary?.r2?.mean?.toFixed(3) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-blue-500">
+                      <div className="text-[10px] text-blue-500">
                         ±{modelDetails.cv?.summary?.r2?.std?.toFixed(3) ?? '0'}
                       </div>
                     </div>
-                    <div className="p-3 bg-green-50 rounded-lg">
-                      <div className="text-xs text-green-600">MAE</div>
-                      <div className="text-xl font-bold text-green-900">
+                    <div className="p-2 bg-green-50 rounded">
+                      <div className="text-[10px] text-green-600">MAE</div>
+                      <div className="text-base font-bold text-green-900">
                         {modelDetails.cv?.summary?.mae?.mean?.toFixed(1) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-green-500">
-                        ±{modelDetails.cv?.summary?.mae?.std?.toFixed(1) ?? '0'} μg/m³
+                      <div className="text-[10px] text-green-500">
+                        ±{modelDetails.cv?.summary?.mae?.std?.toFixed(1) ?? '0'}
                       </div>
                     </div>
-                    <div className="p-3 bg-purple-50 rounded-lg">
-                      <div className="text-xs text-purple-600">RMSE</div>
-                      <div className="text-xl font-bold text-purple-900">
+                    <div className="p-2 bg-purple-50 rounded">
+                      <div className="text-[10px] text-purple-600">RMSE</div>
+                      <div className="text-base font-bold text-purple-900">
                         {modelDetails.cv?.summary?.rmse?.mean?.toFixed(1) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-purple-500">
-                        ±{modelDetails.cv?.summary?.rmse?.std?.toFixed(1) ?? '0'} μg/m³
+                      <div className="text-[10px] text-purple-500">
+                        ±{modelDetails.cv?.summary?.rmse?.std?.toFixed(1) ?? '0'}
                       </div>
                     </div>
-                    <div className="p-3 bg-amber-50 rounded-lg">
-                      <div className="text-xs text-amber-600">Bias</div>
-                      <div className="text-xl font-bold text-amber-900">
+                    <div className="p-2 bg-amber-50 rounded">
+                      <div className="text-[10px] text-amber-600">Bias</div>
+                      <div className="text-base font-bold text-amber-900">
                         {modelDetails.cv?.summary?.bias?.mean?.toFixed(1) ?? 'N/A'}
                       </div>
-                      <div className="text-xs text-amber-500">
-                        ±{modelDetails.cv?.summary?.bias?.std?.toFixed(1) ?? '0'} μg/m³
+                      <div className="text-[10px] text-amber-500">
+                        ±{modelDetails.cv?.summary?.bias?.std?.toFixed(1) ?? '0'}
                       </div>
                     </div>
                   </div>
@@ -343,15 +338,15 @@ export function OverviewTab({
 
                 {/* Validation Folds */}
                 <div>
-                  <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                  <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">
                     Validation Folds
                   </div>
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-1">
                     {modelDetails.cv?.folds && Object.entries(modelDetails.cv.folds).map(([year, fold]) => (
                       <Badge
                         key={year}
                         variant="outline"
-                        className="text-xs bg-gray-50"
+                        className="text-[10px] px-1.5 py-0 bg-gray-50"
                         title={`Train: ${fold.train_years.join(', ')} → Val: ${year}\nR²: ${fold.val_metrics?.r2?.toFixed(3)}, MAE: ${fold.val_metrics?.mae?.toFixed(1)}`}
                       >
                         {year}: R²={fold.val_metrics?.r2?.toFixed(2)}
@@ -363,10 +358,10 @@ export function OverviewTab({
                 {/* Test Set Performance */}
                 {modelDetails.final_model?.test_overall && (
                   <div className="pt-2 border-t border-gray-100">
-                    <div className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-2">
+                    <div className="text-[10px] font-medium text-gray-500 uppercase tracking-wide mb-1">
                       Held-out Test ({modelDetails.test_samples?.toLocaleString()} samples)
                     </div>
-                    <div className="flex gap-4 text-sm">
+                    <div className="flex gap-3 text-xs">
                       <span className="text-gray-600">
                         R²: <span className="font-medium text-gray-900">{modelDetails.final_model.test_overall.r2?.toFixed(3)}</span>
                       </span>
@@ -381,131 +376,131 @@ export function OverviewTab({
                 )}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No model metrics available</div>
+              <div className="text-center py-4 text-gray-500 text-sm">No model metrics available</div>
             )}
           </CardContent>
         </Card>
       </div>
 
       {/* Training Details, Model Type & Hyperparameters - Three Cards */}
-      <div className="grid gap-6 lg:grid-cols-3">
+      <div className="grid gap-4 lg:grid-cols-3">
         {/* Training Details */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-              <Calendar className="w-5 h-5" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center space-x-2">
+              <Calendar className="w-4 h-4" />
               <span>Training Details</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {modelDetailsLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {[...Array(4)].map((_, i) => (
-                  <div key={i} className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div key={i} className="h-3 bg-gray-200 rounded animate-pulse"></div>
                 ))}
               </div>
             ) : modelDetails ? (
-              <div className="space-y-3">
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Reference Date</span>
-                  <span className="text-sm font-medium text-gray-900">{modelDetails.reference_date || 'N/A'}</span>
+              <div className="space-y-1">
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Reference Date</span>
+                  <span className="text-xs font-medium text-gray-900">{modelDetails.reference_date || 'N/A'}</span>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Cutoff Days</span>
-                  <span className="text-sm font-medium text-gray-900">{modelDetails.cutoff_days || 'N/A'}</span>
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Cutoff Days</span>
+                  <span className="text-xs font-medium text-gray-900">{modelDetails.cutoff_days || 'N/A'}</span>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Train Range</span>
-                  <span className="text-sm font-mono text-gray-900">
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Train Range</span>
+                  <span className="text-xs font-mono text-gray-900">
                     {modelDetails.train_date_range ? `${modelDetails.train_date_range[0]} → ${modelDetails.train_date_range[1]}` : 'N/A'}
                   </span>
                 </div>
-                <div className="flex justify-between py-2">
-                  <span className="text-sm text-gray-600">Validation Range</span>
-                  <span className="text-sm font-mono text-gray-900">
+                <div className="flex justify-between py-1.5">
+                  <span className="text-xs text-gray-600">Val Range</span>
+                  <span className="text-xs font-mono text-gray-900">
                     {modelDetails.val_date_range ? `${modelDetails.val_date_range[0]} → ${modelDetails.val_date_range[1]}` : 'N/A'}
                   </span>
                 </div>
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No training details available</div>
+              <div className="text-center py-4 text-gray-500 text-sm">No training details available</div>
             )}
           </CardContent>
         </Card>
 
         {/* Model Type */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-              <Settings2 className="w-5 h-5" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center space-x-2">
+              <Settings2 className="w-4 h-4" />
               <span>Model Type</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {modelDetailsLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div key={i} className="h-3 bg-gray-200 rounded animate-pulse"></div>
                 ))}
               </div>
             ) : modelDetails ? (
-              <div className="space-y-3">
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Algorithm</span>
-                  <span className="text-sm font-medium text-gray-900">LightGBM</span>
+              <div className="space-y-1">
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Algorithm</span>
+                  <span className="text-xs font-medium text-gray-900">LightGBM</span>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Training Mode</span>
-                  <Badge variant="outline" className="text-xs">
-                    {modelDetails.training_mode === 'operational' ? 'Operational Waterline' : 'Cross-Validation'}
+                <div className="flex justify-between items-center py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Training Mode</span>
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                    {modelDetails.training_mode === 'operational' ? 'Operational' : 'Cross-Val'}
                   </Badge>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Features</span>
-                  <span className="text-sm font-medium text-gray-900">{modelDetails.n_features}</span>
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Features</span>
+                  <span className="text-xs font-medium text-gray-900">{modelDetails.n_features}</span>
                 </div>
-                <div className="flex justify-between py-2 border-b border-gray-100">
-                  <span className="text-sm text-gray-600">Training Samples</span>
-                  <span className="text-sm font-medium text-gray-900">{modelDetails.train_samples?.toLocaleString()}</span>
+                <div className="flex justify-between py-1.5 border-b border-gray-100">
+                  <span className="text-xs text-gray-600">Train Samples</span>
+                  <span className="text-xs font-medium text-gray-900">{modelDetails.train_samples?.toLocaleString()}</span>
                 </div>
                 {modelDetails.val_samples && (
-                  <div className="flex justify-between py-2 border-b border-gray-100">
-                    <span className="text-sm text-gray-600">Validation Samples</span>
-                    <span className="text-sm font-medium text-gray-900">{modelDetails.val_samples?.toLocaleString()}</span>
+                  <div className="flex justify-between py-1.5 border-b border-gray-100">
+                    <span className="text-xs text-gray-600">Val Samples</span>
+                    <span className="text-xs font-medium text-gray-900">{modelDetails.val_samples?.toLocaleString()}</span>
                   </div>
                 )}
                 {modelDetails.train_years && modelDetails.train_years.length > 0 && (
-                  <div className="flex justify-between py-2">
-                    <span className="text-sm text-gray-600">Training Years</span>
-                    <span className="text-sm font-medium text-gray-900">
+                  <div className="flex justify-between py-1.5">
+                    <span className="text-xs text-gray-600">Train Years</span>
+                    <span className="text-xs font-medium text-gray-900">
                       {modelDetails.train_years[0]} - {modelDetails.train_years[modelDetails.train_years.length - 1]}
                     </span>
                   </div>
                 )}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No model type available</div>
+              <div className="text-center py-4 text-gray-500 text-sm">No model type available</div>
             )}
           </CardContent>
         </Card>
 
         {/* Hyperparameters */}
         <Card>
-          <CardHeader>
-            <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-              <Settings2 className="w-5 h-5" />
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base font-semibold flex items-center space-x-2">
+              <Settings2 className="w-4 h-4" />
               <span>Hyperparameters</span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="pt-0">
             {modelDetailsLoading ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                 {[...Array(5)].map((_, i) => (
-                  <div key={i} className="h-4 bg-gray-200 rounded animate-pulse"></div>
+                  <div key={i} className="h-3 bg-gray-200 rounded animate-pulse"></div>
                 ))}
               </div>
             ) : modelDetails?.lgbm_params_used ? (
-              <div className="space-y-2">
+              <div className="space-y-0.5">
                 {(() => {
                   const params = modelDetails.lgbm_params_used
                   // Define display order for key hyperparameters
@@ -533,22 +528,22 @@ export function OverviewTab({
                       key={key}
                       className={`flex justify-between py-1 ${idx < entries.length - 1 ? 'border-b border-gray-100' : ''}`}
                     >
-                      <span className="text-sm text-gray-600">{key}</span>
-                      <span className="text-sm font-mono text-gray-900">{formatValue(key, value)}</span>
+                      <span className="text-xs text-gray-600">{key}</span>
+                      <span className="text-xs font-mono text-gray-900">{formatValue(key, value)}</span>
                     </div>
                   ))
                 })()}
               </div>
             ) : modelDetails?.best_params ? (
               // CV training format uses best_params
-              <div className="space-y-2">
+              <div className="space-y-0.5">
                 {Object.entries(modelDetails.best_params).slice(0, 10).map(([key, value], idx, arr) => (
                   <div
                     key={key}
                     className={`flex justify-between py-1 ${idx < arr.length - 1 ? 'border-b border-gray-100' : ''}`}
                   >
-                    <span className="text-sm text-gray-600">{key}</span>
-                    <span className="text-sm font-mono text-gray-900">
+                    <span className="text-xs text-gray-600">{key}</span>
+                    <span className="text-xs font-mono text-gray-900">
                       {typeof value === 'number'
                         ? (key === 'n_estimators' ? value.toLocaleString() : key === 'learning_rate' ? value.toFixed(3) : Number.isInteger(value) ? value : value.toFixed(2))
                         : String(value)}
@@ -557,7 +552,7 @@ export function OverviewTab({
                 ))}
               </div>
             ) : (
-              <div className="text-center py-8 text-gray-500">No hyperparameters available</div>
+              <div className="text-center py-4 text-gray-500 text-sm">No hyperparameters available</div>
             )}
           </CardContent>
         </Card>

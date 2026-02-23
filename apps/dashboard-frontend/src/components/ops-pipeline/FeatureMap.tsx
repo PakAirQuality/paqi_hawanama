@@ -5,23 +5,13 @@ import { Loader2 } from 'lucide-react'
 import { API_BASE, API_TOKEN } from './api'
 import type { FeatureInfo } from './types'
 
+const MAPBOX_TOKEN = '***REMOVED***'
+const INITIAL_CENTER: [number, number] = [69.3459, 30.3]
+const INITIAL_ZOOM = 3.5
+
 interface FeatureMapProps {
   selectedDate: string
   feature: FeatureInfo
-}
-
-// Approximate CSS gradient for common colormaps
-const COLORMAP_GRADIENTS: Record<string, string> = {
-  'RdBu_r': 'linear-gradient(to right, #053061, #2166ac, #4393c3, #92c5de, #d1e5f0, #f7f7f7, #fddbc7, #f4a582, #d6604d, #b2182b, #67001f)',
-  'viridis': 'linear-gradient(to right, #440154, #482777, #3f4a8a, #31678e, #26838f, #1f9d8a, #6cce5a, #b6de2b, #fee825)',
-  'YlOrRd': 'linear-gradient(to right, #ffffcc, #ffeda0, #fed976, #feb24c, #fd8d3c, #fc4e2a, #e31a1c, #bd0026, #800026)',
-  'Blues': 'linear-gradient(to right, #f7fbff, #deebf7, #c6dbef, #9ecae1, #6baed6, #4292c6, #2171b5, #08519c, #08306b)',
-  'Reds': 'linear-gradient(to right, #fff5f0, #fee0d2, #fcbba1, #fc9272, #fb6a4a, #ef3b2c, #cb181d, #a50f15, #67000d)',
-  'Purples': 'linear-gradient(to right, #fcfbfd, #efedf5, #dadaeb, #bcbddc, #9e9ac8, #807dba, #6a51a3, #54278f, #3f007d)',
-}
-
-function getGradient(colormap: string): string {
-  return COLORMAP_GRADIENTS[colormap] || COLORMAP_GRADIENTS['viridis']
 }
 
 interface SelectedDistrict {
@@ -45,13 +35,37 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
 
       if (mapRef.current) return
 
+      // Mapbox light style (same as main dashboard)
+      const mapStyle = {
+        version: 8 as const,
+        sources: {
+          'mapbox-streets': {
+            type: 'raster' as const,
+            tiles: [
+              `https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`
+            ],
+            tileSize: 512,
+            attribution: '© Mapbox © OpenStreetMap'
+          }
+        },
+        layers: [
+          {
+            id: 'mapbox-tiles',
+            type: 'raster' as const,
+            source: 'mapbox-streets',
+            minzoom: 0,
+            maxzoom: 22
+          }
+        ]
+      }
+
       const map = new maplibregl.default.Map({
         container: mapContainer.current!,
-        style: "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json",
-        center: [69.5, 30.5],
-        zoom: 5,
+        style: mapStyle,
+        center: INITIAL_CENTER,
+        zoom: INITIAL_ZOOM,
         minZoom: 2,
-        maxZoom: 12,
+        maxZoom: 10,
         transformRequest: (url: string) => {
           if (url.includes('/ops/pipeline/tiles/')) {
             return {
@@ -74,9 +88,6 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
         const adm1Response = await fetch('/pakistan_adm1.geojson')
         const adm1GeoJSON = await adm1Response.json()
 
-        // Create mask from ADM1 boundaries (provinces combined)
-        const maskGeoJSON = createMaskFromFeatureCollection(adm1GeoJSON)
-
         // Add sources
         map.addSource('pakistan-districts', {
           type: 'geojson',
@@ -87,11 +98,6 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
         map.addSource('pakistan-adm1', {
           type: 'geojson',
           data: adm1GeoJSON
-        })
-
-        map.addSource('pakistan-mask', {
-          type: 'geojson',
-          data: maskGeoJSON
         })
 
         // Feature tile source
@@ -105,7 +111,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
           maxzoom: 12,
         })
 
-        // 1. Feature raster layer
+        // 1. Feature raster layer (server-side clipped to Pakistan boundary)
         map.addLayer({
           id: 'feature-raster',
           type: 'raster',
@@ -116,18 +122,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
           },
         })
 
-        // 2. Mask layer - covers everything outside Pakistan
-        map.addLayer({
-          id: 'outside-pakistan-mask',
-          type: 'fill',
-          source: 'pakistan-mask',
-          paint: {
-            'fill-color': '#f8fafc',
-            'fill-opacity': 1
-          }
-        })
-
-        // 3. District fill layer (transparent, for interaction)
+        // 2. District fill layer (transparent, for interaction)
         map.addLayer({
           id: 'districts-fill',
           type: 'fill',
@@ -170,7 +165,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
           }
         })
 
-        // 6. District borders
+        // 6. District borders - subtle
         map.addLayer({
           id: 'districts-borders',
           type: 'line',
@@ -179,37 +174,32 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
             'line-color': [
               'case',
               ['boolean', ['feature-state', 'selected'], false],
-              '#1d4ed8',
-              ['boolean', ['feature-state', 'hover'], false],
               '#475569',
+              ['boolean', ['feature-state', 'hover'], false],
+              '#64748b',
               '#94a3b8'
             ],
             'line-width': [
               'case',
               ['boolean', ['feature-state', 'selected'], false],
-              2,
-              ['boolean', ['feature-state', 'hover'], false],
               1.5,
-              0.5
+              ['boolean', ['feature-state', 'hover'], false],
+              1,
+              0.3
             ],
-            'line-opacity': 0.8
+            'line-opacity': 0.5
           }
         })
 
-        // 7. Province borders (thicker)
+        // 7. Province borders - subtle
         map.addLayer({
           id: 'province-borders',
           type: 'line',
           source: 'pakistan-adm1',
           paint: {
-            'line-color': '#334155',
-            'line-width': [
-              'interpolate', ['linear'], ['zoom'],
-              4, 1,
-              6, 1.5,
-              8, 2
-            ],
-            'line-opacity': 0.9
+            'line-color': '#94a3b8',
+            'line-width': 1,
+            'line-opacity': 0.7
           }
         })
 
@@ -363,44 +353,29 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
 
       {/* Selected district info panel */}
       {selectedDistrict && (
-        <div className="absolute top-3 left-3 bg-white rounded-lg shadow-lg border border-slate-200 p-4 min-w-[200px]">
-          <div className="text-sm font-semibold text-slate-800 mb-1">
-            {selectedDistrict.name}
+        <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200/60 overflow-hidden min-w-[200px]">
+          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+            <h3 className="text-lg font-bold text-slate-800">{selectedDistrict.name}</h3>
           </div>
-          <div className="text-2xl font-bold text-slate-900">
-            {selectedDistrict.value !== null ? (
-              <>
-                {typeof selectedDistrict.value === 'number'
-                  ? selectedDistrict.value.toPrecision(4)
-                  : selectedDistrict.value}
-                <span className="text-sm font-medium text-slate-500 ml-1">{feature.unit}</span>
-              </>
-            ) : (
-              <span className="text-sm text-slate-400">No data</span>
-            )}
+          <div className="px-4 py-4">
+            <div className="text-xs text-slate-500 uppercase tracking-wide font-medium">{feature.name}</div>
+            <div className="flex items-baseline gap-1.5 mt-1">
+              <span className="text-3xl font-bold text-slate-900">
+                {selectedDistrict.value !== null
+                  ? (typeof selectedDistrict.value === 'number' ? selectedDistrict.value.toPrecision(4) : selectedDistrict.value)
+                  : '—'}
+              </span>
+              <span className="text-sm text-slate-500">{feature.unit}</span>
+            </div>
           </div>
-          <div className="text-xs text-slate-500 mt-1">{feature.name}</div>
         </div>
       )}
 
       {/* Hover tooltip */}
       {hoveredDistrict && !selectedDistrict && (
-        <div className="absolute top-3 left-3 bg-white/95 backdrop-blur-sm rounded-lg shadow-md border border-slate-200 px-3 py-2">
-          <span className="text-sm font-medium text-slate-700">{hoveredDistrict}</span>
-        </div>
-      )}
-
-      {/* Bottom legend bar */}
-      {mapLoaded && (
-        <div className="absolute bottom-0 left-0 right-0 bg-white/90 px-4 py-2">
-          <div className="flex items-center gap-3">
-            <span className="text-[11px] font-medium text-slate-600 whitespace-nowrap">{feature.name} ({feature.unit})</span>
-            <div className="flex-1 flex items-center gap-1">
-              <span className="text-[10px] text-slate-500">{feature.vmin}</span>
-              <div className="flex-1 h-2 rounded-sm" style={{ background: getGradient(feature.colormap) }} />
-              <span className="text-[10px] text-slate-500">{feature.vmax}</span>
-            </div>
-          </div>
+        <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200/60 overflow-hidden px-4 py-3">
+          <h3 className="text-lg font-bold text-slate-800">{hoveredDistrict}</h3>
+          <p className="text-sm text-slate-500 mt-1">Click for details</p>
         </div>
       )}
 
@@ -423,36 +398,3 @@ function getCentroid(ring: number[][]): [number, number] {
   return [x / ring.length, y / ring.length]
 }
 
-// Create inverse mask from FeatureCollection (all provinces combined)
-function createMaskFromFeatureCollection(featureCollection: any): any {
-  const worldOuter = [
-    [-180, -90],
-    [180, -90],
-    [180, 90],
-    [-180, 90],
-    [-180, -90]
-  ]
-
-  let holes: number[][][] = []
-  const features = featureCollection.features || [featureCollection]
-
-  for (const feature of features) {
-    const geom = feature.geometry
-    if (geom.type === 'Polygon') {
-      holes.push(geom.coordinates[0])
-    } else if (geom.type === 'MultiPolygon') {
-      for (const poly of geom.coordinates) {
-        holes.push(poly[0])
-      }
-    }
-  }
-
-  return {
-    type: 'Feature',
-    properties: {},
-    geometry: {
-      type: 'Polygon',
-      coordinates: [worldOuter, ...holes]
-    }
-  }
-}

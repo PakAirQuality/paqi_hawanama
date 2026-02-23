@@ -2,23 +2,61 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, ReferenceLine } from 'recharts';
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
 
+type OfflinePeriod = {
+  start: string;
+  end: string;
+  duration_hours: number;
+  reason: string;
+};
+
+type FlatlinePeriod = {
+  start: string;
+  end: string;
+  duration_hours: number;
+  reason: string;
+};
+
 type UptimeData = {
   station_id: string;
-  uptime_30d: number;
-  daily_uptime: Array<{
-    date: string;
-    uptime_percent: number;
-  }>;
+  bucket: string;
+  window: {
+    from: string;
+    to: string;
+  };
+  coverage: {
+    expected_buckets: number;
+    buckets_with_data: number;
+    coverage_pct: number;
+    missing_buckets: number;
+  };
+  offline_periods: OfflinePeriod[];
+  flatline_periods: FlatlinePeriod[];
 };
 
 async function fetchUptime(stationId: string): Promise<UptimeData> {
   const res = await fetch(`${API_BASE}/api/v1/internal/stations/${stationId}/uptime`);
   if (!res.ok) throw new Error("Failed to load uptime data");
   return res.json();
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function formatDuration(hours: number): string {
+  if (hours < 24) return `${hours.toFixed(1)}h`;
+  const days = Math.floor(hours / 24);
+  const remainingHours = hours % 24;
+  return remainingHours > 0 ? `${days}d ${remainingHours.toFixed(0)}h` : `${days}d`;
 }
 
 export function UptimePanel({ stationId }: { stationId: string }) {
@@ -30,8 +68,8 @@ export function UptimePanel({ stationId }: { stationId: string }) {
   if (isLoading) {
     return (
       <div className="space-y-6">
-        <div className="grid gap-6 md:grid-cols-3">
-          {[...Array(3)].map((_, i) => (
+        <div className="grid gap-6 md:grid-cols-4">
+          {[...Array(4)].map((_, i) => (
             <Card key={i} className="animate-pulse">
               <CardHeader className="pb-2">
                 <div className="h-4 bg-muted rounded w-24"></div>
@@ -42,7 +80,7 @@ export function UptimePanel({ stationId }: { stationId: string }) {
             </Card>
           ))}
         </div>
-        <Card className="h-96 animate-pulse bg-muted"></Card>
+        <Card className="h-48 animate-pulse bg-muted"></Card>
       </div>
     );
   }
@@ -55,35 +93,36 @@ export function UptimePanel({ stationId }: { stationId: string }) {
     );
   }
 
-  const uptimeChartData = data.daily_uptime.map(day => ({
-    date: new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-    uptime: day.uptime_percent,
-    fill: day.uptime_percent >= 95 ? '#6ecc39' : day.uptime_percent >= 90 ? '#f0c20c' : '#ef7855'
-  }));
-
-  const averageUptime = data.daily_uptime.length > 0 
-    ? data.daily_uptime.reduce((acc, day) => acc + day.uptime_percent, 0) / data.daily_uptime.length 
-    : 0;
-
-  const goodDays = data.daily_uptime.filter(day => day.uptime_percent >= 95).length;
-  const totalDays = data.daily_uptime.length;
+  const { coverage, offline_periods, flatline_periods, window, bucket } = data;
+  const coverageColor =
+    coverage.coverage_pct >= 90
+      ? "text-green-600"
+      : coverage.coverage_pct >= 50
+        ? "text-yellow-600"
+        : "text-red-600";
 
   return (
     <div className="space-y-6">
-      {/* Uptime Metrics */}
-      <div className="grid gap-4 md:grid-cols-3">
+      {/* Window info */}
+      <p className="text-sm text-muted-foreground">
+        Bucket: <span className="font-medium">{bucket}</span> | Window:{" "}
+        {formatDateTime(window.from)} &ndash; {formatDateTime(window.to)}
+      </p>
+
+      {/* Coverage Metrics */}
+      <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              30-Day Uptime
+              Coverage
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="text-3xl font-bold">
-              {(data.uptime_30d * 100).toFixed(1)}%
+            <div className={`text-3xl font-bold ${coverageColor}`}>
+              {coverage.coverage_pct.toFixed(1)}%
             </div>
             <p className="text-sm text-muted-foreground">
-              Overall availability
+              Data availability
             </p>
           </CardContent>
         </Card>
@@ -91,15 +130,15 @@ export function UptimePanel({ stationId }: { stationId: string }) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Good Days (≥95%)
+              Buckets with Data
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">
-              {goodDays}/{totalDays}
+              {coverage.buckets_with_data.toLocaleString()}
             </div>
             <p className="text-sm text-muted-foreground">
-              {((goodDays / totalDays) * 100).toFixed(1)}% of days
+              of {coverage.expected_buckets.toLocaleString()} expected
             </p>
           </CardContent>
         </Card>
@@ -107,127 +146,102 @@ export function UptimePanel({ stationId }: { stationId: string }) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Average Daily
+              Missing Buckets
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="text-3xl font-bold text-red-600">
+              {coverage.missing_buckets.toLocaleString()}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Hours without data
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
+              Offline Periods
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-3xl font-bold">
-              {averageUptime.toFixed(1)}%
+              {offline_periods.length}
             </div>
             <p className="text-sm text-muted-foreground">
-              Daily average
+              {flatline_periods.length} flatline period{flatline_periods.length !== 1 ? "s" : ""}
             </p>
           </CardContent>
         </Card>
       </div>
 
-      {/* Uptime Chart */}
+      {/* Offline Periods */}
       <Card>
         <CardHeader>
-          <CardTitle>Daily Uptime (Last 30 Days)</CardTitle>
-          <p className="text-sm text-muted-foreground">
-            Green: ≥95% | Yellow: 90-95% | Red: &lt;90%
-          </p>
+          <CardTitle>Offline Periods</CardTitle>
         </CardHeader>
         <CardContent>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={uptimeChartData} margin={{ top: 20, right: 30, left: 20, bottom: 5 }}>
-                <XAxis 
-                  dataKey="date" 
-                  tick={{ fontSize: 12 }}
-                  interval="preserveStartEnd"
-                />
-                <YAxis 
-                  domain={[0, 100]}
-                  tick={{ fontSize: 12 }}
-                  label={{ value: 'Uptime (%)', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip 
-                  formatter={(value: any) => [`${value.toFixed(1)}%`, 'Uptime']}
-                  labelStyle={{ color: '#000' }}
-                />
-                <ReferenceLine y={95} stroke="#6ecc39" strokeDasharray="5 5" />
-                <ReferenceLine y={90} stroke="#f0c20c" strokeDasharray="5 5" />
-                <Bar 
-                  dataKey="uptime" 
-                  radius={[2, 2, 0, 0]}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
+          {offline_periods.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No offline periods recorded.</p>
+          ) : (
+            <div className="space-y-3">
+              {offline_periods.map((period, i) => (
+                <div
+                  key={i}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-red-50 gap-2"
+                >
+                  <div className="text-sm">
+                    <span className="font-medium">{formatDateTime(period.start)}</span>
+                    {" "}&ndash;{" "}
+                    <span className="font-medium">{formatDateTime(period.end)}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-red-600 font-semibold">
+                      {formatDuration(period.duration_hours)}
+                    </span>
+                    <span className="text-muted-foreground capitalize">{period.reason}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </CardContent>
       </Card>
 
-      {/* Insights */}
-      <div className="grid gap-6 md:grid-cols-2">
+      {/* Flatline Periods */}
+      {flatline_periods.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Availability Standards</CardTitle>
+            <CardTitle>Flatline Periods</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Periods where sensor readings remained unchanged
+            </p>
           </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="flex items-center justify-between p-3 rounded-lg bg-green-50">
-              <span className="font-medium">Excellent (≥95%)</span>
-              <span className="text-green-600 font-bold">
-                {goodDays} days
-              </span>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg bg-yellow-50">
-              <span className="font-medium">Good (90-95%)</span>
-              <span className="text-yellow-600 font-bold">
-                {data.daily_uptime.filter(day => day.uptime_percent >= 90 && day.uptime_percent < 95).length} days
-              </span>
-            </div>
-            <div className="flex items-center justify-between p-3 rounded-lg bg-red-50">
-              <span className="font-medium">Poor (&lt;90%)</span>
-              <span className="text-red-600 font-bold">
-                {data.daily_uptime.filter(day => day.uptime_percent < 90).length} days
-              </span>
-            </div>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Insights</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div>
-              <p className="text-sm font-medium">Reliability Score</p>
-              <div className="flex items-center mt-1">
-                <div className="flex-1 bg-muted rounded-full h-2 mr-3">
-                  <div 
-                    className="h-2 rounded-full bg-gradient-to-r from-red-500 via-yellow-500 to-green-500" 
-                    style={{ width: `${data.uptime_30d * 100}%` }}
-                  ></div>
+          <CardContent>
+            <div className="space-y-3">
+              {flatline_periods.map((period, i) => (
+                <div
+                  key={i}
+                  className="flex flex-col sm:flex-row sm:items-center justify-between p-3 rounded-lg bg-yellow-50 gap-2"
+                >
+                  <div className="text-sm">
+                    <span className="font-medium">{formatDateTime(period.start)}</span>
+                    {" "}&ndash;{" "}
+                    <span className="font-medium">{formatDateTime(period.end)}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-yellow-600 font-semibold">
+                      {formatDuration(period.duration_hours)}
+                    </span>
+                    <span className="text-muted-foreground capitalize">{period.reason}</span>
+                  </div>
                 </div>
-                <span className="text-sm font-medium">
-                  {data.uptime_30d >= 0.95 ? 'Excellent' : 
-                   data.uptime_30d >= 0.90 ? 'Good' : 'Needs Attention'}
-                </span>
-              </div>
+              ))}
             </div>
-            
-            {data.uptime_30d < 0.95 && (
-              <div className="p-3 bg-orange-50 rounded-lg">
-                <p className="text-sm text-orange-700">
-                  <strong>Recommendation:</strong> Station uptime below 95% target. 
-                  Consider checking sensor connectivity and power supply.
-                </p>
-              </div>
-            )}
-
-            {data.uptime_30d >= 0.95 && (
-              <div className="p-3 bg-green-50 rounded-lg">
-                <p className="text-sm text-green-700">
-                  <strong>Excellent Performance:</strong> Station exceeds 95% uptime target. 
-                  Consistent and reliable data collection.
-                </p>
-              </div>
-            )}
           </CardContent>
         </Card>
-      </div>
+      )}
     </div>
   );
 }

@@ -96,6 +96,132 @@ async def get_cities(
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
+@router.get("/cities/summary-all")
+async def get_all_cities_summary(
+    db: AsyncSession = Depends(get_database)
+):
+    """
+    Bulk endpoint: returns AQI summary + top 3 stations for ALL cities in one request.
+    Replaces ~130 individual API calls from the map component.
+    """
+    try:
+        # Single query: get all cities with their latest AQI and top stations
+        query = """
+        WITH city_latest AS (
+            SELECT
+                c.id AS city_id,
+                c.name AS city_name,
+                s2.name AS state_name,
+                COUNT(s.station_id) AS station_count,
+                AVG(latest.aqi_us) AS avg_aqi,
+                AVG(latest.pm25) AS avg_pm25
+            FROM cities c
+            LEFT JOIN states s2 ON c.state_id = s2.id
+            LEFT JOIN stations s ON c.id = s.city_id AND s.active = true
+            LEFT JOIN LATERAL (
+                SELECT aqi_us, pm25
+                FROM readings r
+                WHERE r.scope_key = s.station_id
+                    AND r.scope_type = 'station'
+                    AND r.ts_utc > NOW() - INTERVAL '24 HOUR'
+                ORDER BY r.ts_utc DESC
+                LIMIT 1
+            ) latest ON true
+            WHERE c.id IN (
+                SELECT DISTINCT city_id
+                FROM stations
+                WHERE active = true AND city_id IS NOT NULL
+            )
+            GROUP BY c.id, c.name, s2.name
+            HAVING COUNT(s.station_id) > 0
+        ),
+        ranked_stations AS (
+            SELECT
+                s.city_id,
+                s.station_id,
+                s.name AS station_name,
+                lr.pm25,
+                lr.aqi_us,
+                ROW_NUMBER() OVER (PARTITION BY s.city_id ORDER BY lr.pm25 DESC NULLS LAST) AS rn
+            FROM stations s
+            JOIN LATERAL (
+                SELECT pm25, aqi_us
+                FROM readings r
+                WHERE r.scope_key = s.station_id
+                    AND r.scope_type = 'station'
+                    AND r.ts_utc >= NOW() - INTERVAL '24 hours'
+                ORDER BY r.ts_utc DESC
+                LIMIT 1
+            ) lr ON true
+            WHERE s.active = true
+                AND s.city_id IS NOT NULL
+                AND lr.pm25 IS NOT NULL
+        )
+        SELECT
+            cl.city_id,
+            cl.city_name,
+            cl.state_name,
+            cl.station_count,
+            cl.avg_aqi,
+            cl.avg_pm25,
+            rs.station_name,
+            rs.pm25 AS top_pm25,
+            rs.aqi_us AS top_aqi
+        FROM city_latest cl
+        LEFT JOIN ranked_stations rs ON rs.city_id = cl.city_id AND rs.rn <= 3
+        ORDER BY cl.city_name, rs.rn;
+        """
+
+        result = await db.execute(text(query))
+        rows = result.fetchall()
+
+        # Group rows by city
+        cities_map: dict = {}
+        for row in rows:
+            city_id = row.city_id
+            if city_id not in cities_map:
+                avg_aqi = round(float(row.avg_aqi)) if row.avg_aqi else None
+                aqi_category = 'good'
+                if avg_aqi:
+                    if avg_aqi <= 50:
+                        aqi_category = 'good'
+                    elif avg_aqi <= 100:
+                        aqi_category = 'moderate'
+                    elif avg_aqi <= 150:
+                        aqi_category = 'unhealthy_sensitive'
+                    elif avg_aqi <= 200:
+                        aqi_category = 'unhealthy'
+                    elif avg_aqi <= 300:
+                        aqi_category = 'very_unhealthy'
+                    else:
+                        aqi_category = 'hazardous'
+
+                cities_map[city_id] = {
+                    "city_name": row.city_name,
+                    "slug": row.city_name.lower().replace(' ', '-').replace(',', '').replace("'", ''),
+                    "state": row.state_name,
+                    "station_count": row.station_count,
+                    "avg_aqi": avg_aqi,
+                    "avg_pm25": round(float(row.avg_pm25), 1) if row.avg_pm25 else None,
+                    "aqi_category": aqi_category,
+                    "top_stations": [],
+                }
+
+            # Add top station if present
+            if row.station_name and row.top_pm25 is not None:
+                cities_map[city_id]["top_stations"].append({
+                    "station_name": row.station_name,
+                    "pm25_concentration": round(float(row.top_pm25), 1),
+                    "aqi": int(row.top_aqi) if row.top_aqi else None,
+                })
+
+        return {"cities": list(cities_map.values()), "count": len(cities_map)}
+
+    except Exception as e:
+        logger.error(f"Error getting all cities summary: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
 @router.get("/cities/{city_slug}")
 async def get_city(
     city_slug: str = Path(
@@ -473,6 +599,7 @@ async def get_city_historical_from_stations(
         ],
     ),
     hours: int = 24,  # how far back you want (e.g. 24, 168, 24*365)
+    resolution: Optional[str] = None,  # "daily" to skip hourly data and reduce payload ~24x
     db: AsyncSession = Depends(get_database),
 ):
     """
@@ -481,6 +608,8 @@ async def get_city_historical_from_stations(
     1. Aggregate all station readings in the city to **hourly city values**
        (mean PM2.5/AQI across stations in that hour).
     2. Aggregate those hourly city values into **daily values** (24-hour averages).
+
+    Use `resolution=daily` to only return daily data (much smaller payload for long time ranges).
     """
     try:
         # --- 1) Resolve city ---
@@ -609,17 +738,21 @@ async def get_city_historical_from_stations(
                 }
             )
 
-        return {
+        response = {
             "city_slug": city_slug,
             "city_name": city.city_name,
             "state": city.state_name,
             "country": city.country_name,
             "hours": hours,
-            "hourly_count": len(hourly_readings),
             "daily_count": len(daily_readings),
-            "hourly": hourly_readings,  # city series derived from stations
-            "daily": daily_readings,    # 24h aggregates of that city series
+            "daily": daily_readings,
         }
+
+        if resolution != "daily":
+            response["hourly_count"] = len(hourly_readings)
+            response["hourly"] = hourly_readings
+
+        return response
 
     except HTTPException:
         raise

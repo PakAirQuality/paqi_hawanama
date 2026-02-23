@@ -10,6 +10,13 @@
           "hawanama-dashboard"
         ]
       }
+    },
+    "hawanama-ee3ec": {
+      "hosting": {
+        "hawanama-dashboard": [
+          "hawanama-dashboard"
+        ]
+      }
     }
   },
   "etags": {}

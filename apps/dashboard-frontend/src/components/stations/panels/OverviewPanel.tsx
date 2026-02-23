@@ -2,42 +2,72 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
-import { getAqiLabel } from "@/lib/api";
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
 
-type Overview = {
-  station_id: string;
-  name: string;
-  city: string;
-  provider: string;
-  coordinates: {
-    latitude: number;
-    longitude: number;
+type StationOverview = {
+  station: {
+    station_id: string;
+    name: string;
+    provider: string;
+    provider_id: number | null;
+    source_station_id: string | null;
+    country: string | null;
+    state: string | null;
+    city: string | null;
+    lat: number | null;
+    lon: number | null;
+    site_type: string | null;
+    indoor_outdoor: string | null;
+    height_m: number | null;
+    distance_to_road_m: number | null;
+    timezone: string | null;
+    metadata: Record<string, unknown>;
   };
-  status: 'online' | 'offline';
-  current_reading: {
-    pm25: number;
-    aqi: number;
-    timestamp: string;
+  data_availability: {
+    first_obs: string | null;
+    last_obs: string | null;
+    total_days_with_any_data: number | null;
+    coverage_last_365d_pct: number | null;
+    hours_total: number | null;
+    hours_with_data: number | null;
+    hours_qc_ok: number | null;
   };
-  summary_stats: {
-    pm25_24h_avg: number;
-    pm25_7d_avg: number;
-    pm25_95th_percentile: number;
-  };
-  health_flags: string[];
-  sparkline_data: Array<{
-    timestamp: string;
-    pm25: number;
-  }>;
+  sensors: unknown[];
+  pollutant_summary: {
+    pollutant: string | null;
+    last_value: number | null;
+    last_value_ts: string | null;
+    rolling_means: {
+      "24h": number | null;
+      "7d": number | null;
+      "30d": number | null;
+    } | null;
+    days_above_thresholds_last_30d: {
+      WHO_24h: number | null;
+      local_24h: number | null;
+    } | null;
+    days_above_thresholds_last_365d: {
+      WHO_24h: number | null;
+      local_24h: number | null;
+    } | null;
+  } | null;
 };
 
-async function fetchOverview(stationId: string): Promise<Overview> {
+async function fetchOverview(stationId: string): Promise<StationOverview> {
   const res = await fetch(`${API_BASE}/api/v1/internal/stations/${stationId}/overview`);
   if (!res.ok) throw new Error("Failed to load overview");
   return res.json();
+}
+
+function fmt(val: number | null | undefined, decimals = 1): string {
+  if (val == null) return "N/A";
+  return val.toFixed(decimals);
+}
+
+function fmtDate(val: string | null | undefined): string {
+  if (!val) return "N/A";
+  return new Date(val).toLocaleString();
 }
 
 export function OverviewPanel({ stationId }: { stationId: string }) {
@@ -71,10 +101,9 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
     );
   }
 
-  const sparklineData = data.sparkline_data?.map(point => ({
-    timestamp: new Date(point.timestamp).getHours(),
-    pm25: point.pm25,
-  })) || [];
+  const station = data.station;
+  const avail = data.data_availability;
+  const poll = data.pollutant_summary;
 
   return (
     <div className="space-y-6">
@@ -83,15 +112,15 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Current PM₂.₅
+              Current PM2.5
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {data.current_reading?.pm25.toFixed(1)} μg/m³
+              {fmt(poll?.last_value)} {poll?.last_value != null ? "ug/m3" : ""}
             </div>
             <p className="text-sm text-muted-foreground">
-              AQI {data.current_reading?.aqi} ({getAqiLabel(data.current_reading?.aqi || 0)})
+              {fmtDate(poll?.last_value_ts)}
             </p>
           </CardContent>
         </Card>
@@ -99,149 +128,161 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              24h Average
+              24h Mean
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {data.summary_stats?.pm25_24h_avg.toFixed(1)} μg/m³
+              {fmt(poll?.rolling_means?.["24h"])} {poll?.rolling_means?.["24h"] != null ? "ug/m3" : ""}
             </div>
-            <p className="text-sm text-muted-foreground">
-              Last 24 hours
-            </p>
+            <p className="text-sm text-muted-foreground">Rolling average</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              7d Average
+              7d Mean
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {data.summary_stats?.pm25_7d_avg.toFixed(1)} μg/m³
+              {fmt(poll?.rolling_means?.["7d"])} {poll?.rolling_means?.["7d"] != null ? "ug/m3" : ""}
             </div>
-            <p className="text-sm text-muted-foreground">
-              Last 7 days
-            </p>
+            <p className="text-sm text-muted-foreground">Rolling average</p>
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              95th Percentile
+              30d Mean
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {data.summary_stats?.pm25_95th_percentile.toFixed(1)} μg/m³
+              {fmt(poll?.rolling_means?.["30d"])} {poll?.rolling_means?.["30d"] != null ? "ug/m3" : ""}
             </div>
-            <p className="text-sm text-muted-foreground">
-              Peak levels
-            </p>
+            <p className="text-sm text-muted-foreground">Rolling average</p>
           </CardContent>
         </Card>
       </div>
 
       <div className="grid gap-6 md:grid-cols-2">
-        {/* Sparkline Chart */}
+        {/* Station Info */}
         <Card>
           <CardHeader>
-            <CardTitle>Recent Trend (24h)</CardTitle>
+            <CardTitle>Station Details</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="h-64">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={sparklineData}>
-                  <XAxis 
-                    dataKey="timestamp" 
-                    type="number" 
-                    scale="linear"
-                    domain={[0, 23]}
-                    tickFormatter={(value) => `${value}:00`}
-                  />
-                  <YAxis />
-                  <Tooltip 
-                    labelFormatter={(value) => `${value}:00`}
-                    formatter={(value: any) => [`${value.toFixed(1)} μg/m³`, 'PM₂.₅']}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="pm25" 
-                    stroke="hsl(var(--primary))" 
-                    strokeWidth={2}
-                    dot={false}
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+          <CardContent className="space-y-3">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Name</span>
+              <span className="font-medium">{station?.name ?? "N/A"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">City</span>
+              <span className="font-medium">{station?.city ?? "N/A"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">State</span>
+              <span className="font-medium">{station?.state ?? "N/A"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Provider</span>
+              <span className="font-medium">{station?.provider ?? "N/A"}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Coordinates</span>
+              <span className="font-medium">
+                {station?.lat != null && station?.lon != null
+                  ? `${station.lat.toFixed(4)}, ${station.lon.toFixed(4)}`
+                  : "N/A"}
+              </span>
             </div>
           </CardContent>
         </Card>
 
-        {/* Station Info & Health */}
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Station Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Location</span>
-                <span className="font-medium">
-                  {data.coordinates.latitude.toFixed(4)}°, {data.coordinates.longitude.toFixed(4)}°
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Provider</span>
-                <span className="font-medium">{data.provider}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Status</span>
-                <span className={`font-medium ${data.status === 'online' ? 'text-green-600' : 'text-red-600'}`}>
-                  {data.status === 'online' ? 'Online' : 'Offline'}
-                </span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Last Update</span>
-                <span className="font-medium">
-                  {new Date(data.current_reading?.timestamp || '').toLocaleString()}
-                </span>
-              </div>
-            </CardContent>
-          </Card>
+        {/* Data Availability */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Data Availability</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Coverage (365d)</span>
+              <span className="font-medium">
+                {avail?.coverage_last_365d_pct != null
+                  ? `${avail.coverage_last_365d_pct.toFixed(1)}%`
+                  : "N/A"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">First Observation</span>
+              <span className="font-medium">{fmtDate(avail?.first_obs)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Last Observation</span>
+              <span className="font-medium">{fmtDate(avail?.last_obs)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Days with Data</span>
+              <span className="font-medium">
+                {avail?.total_days_with_any_data ?? "N/A"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Hours with Data</span>
+              <span className="font-medium">
+                {avail?.hours_with_data != null && avail?.hours_total != null
+                  ? `${avail.hours_with_data} / ${avail.hours_total}`
+                  : "N/A"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
 
-          {data.health_flags.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Health Flags</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {data.health_flags.map((flag, index) => (
-                    <div key={index} className="text-sm text-orange-600 bg-orange-50 px-3 py-2 rounded">
-                      {flag}
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          )}
+      {/* Threshold Exceedances */}
+      <div className="grid gap-6 md:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle>Days Above Thresholds (Last 30d)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">WHO 24h Guideline</span>
+              <span className="font-medium">
+                {poll?.days_above_thresholds_last_30d?.WHO_24h ?? "N/A"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Local 24h Standard</span>
+              <span className="font-medium">
+                {poll?.days_above_thresholds_last_30d?.local_24h ?? "N/A"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
 
-          {data.health_flags.length === 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle>Health Status</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="text-sm text-green-600 bg-green-50 px-3 py-2 rounded">
-                  ✅ No health issues detected
-                </div>
-              </CardContent>
-            </Card>
-          )}
-        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle>Days Above Thresholds (Last 365d)</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">WHO 24h Guideline</span>
+              <span className="font-medium">
+                {poll?.days_above_thresholds_last_365d?.WHO_24h ?? "N/A"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-muted-foreground">Local 24h Standard</span>
+              <span className="font-medium">
+                {poll?.days_above_thresholds_last_365d?.local_24h ?? "N/A"}
+              </span>
+            </div>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

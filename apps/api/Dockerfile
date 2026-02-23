@@ -4,13 +4,18 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies for PostgreSQL and other requirements
+# Install system dependencies for PostgreSQL, GDAL (for rio-tiler), and other requirements
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     libpq-dev \
     curl \
+    gdal-bin \
+    libgdal-dev \
     && rm -rf /var/lib/apt/lists/*
+
+# Set GDAL environment variables for rasterio/rio-tiler
+ENV GDAL_CONFIG=/usr/bin/gdal-config
 
 # Copy requirements first to leverage layer caching
 COPY apps/api/requirements.txt .

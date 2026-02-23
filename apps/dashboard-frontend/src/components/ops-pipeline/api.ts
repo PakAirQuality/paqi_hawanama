@@ -11,6 +11,8 @@ import type {
   ModelDetails,
   ModelHistoryResponse,
   ModelHistoryEntry,
+  FeaturesListResponse,
+  FeatureDatesResponse,
 } from './types'
 
 export const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
@@ -129,4 +131,30 @@ export async function fetchModelHistoryEntry(referenceDate: string): Promise<Mod
   })
   if (!res.ok) throw new Error(`Failed to load model history for ${referenceDate}`)
   return res.json()
+}
+
+export async function fetchFeaturesList(): Promise<FeaturesListResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/features`, {
+    headers,
+    cache: 'no-store'
+  })
+  if (!res.ok) throw new Error("Failed to load features list")
+  return res.json()
+}
+
+export async function fetchFeatureDates(feature: string, limit: number = 365): Promise<FeatureDatesResponse> {
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/features/dates?feature=${feature}&limit=${limit}`, {
+    headers,
+    cache: 'no-store'
+  })
+  if (!res.ok) throw new Error(`Failed to load dates for feature ${feature}`)
+  return res.json()
+}
+
+export function getFeatureTileUrl(feature: string, date: string, z: number, x: number, y: number): string {
+  return `${API_BASE}/api/v1/ops/pipeline/tiles/features/${feature}/${date}/${z}/${x}/${y}.png`
+}
+
+export function getFeaturePointQueryUrl(feature: string, date: string, lat: number, lon: number): string {
+  return `${API_BASE}/api/v1/ops/pipeline/tiles/features/${feature}/${date}/point?lat=${lat}&lon=${lon}`
 }

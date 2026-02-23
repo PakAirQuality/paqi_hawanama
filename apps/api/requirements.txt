@@ -28,3 +28,6 @@ numpy==1.24.3
 pyarrow>=10.0.0
 pandas==2.1.3
 google-cloud-storage==2.14.0
+# COG tile serving
+rio-tiler>=6.0.0
+matplotlib>=3.7.0

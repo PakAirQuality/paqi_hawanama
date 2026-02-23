@@ -1,192 +1,114 @@
 'use client'
 
-import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import {
-  BarChart3,
-  Settings,
-  Search,
-  TrendingUp,
-  Menu,
-  X,
-  FileText,
-  Cpu
-} from 'lucide-react'
 import { UserMenu } from '@/components/auth/UserMenu'
 
 const modules = [
-  {
-    id: 'aqi-dashboard',
-    name: 'AQI Dashboard',
-    href: '/',
-    icon: BarChart3,
-    description: 'Real-time air quality monitoring'
-  },
-  {
-    id: 'station-management', 
-    name: 'Station Management',
-    href: '/stations',
-    icon: Settings,
-    description: 'Comprehensive station lifecycle management'
-  },
-  {
-    id: 'data-quality',
-    name: 'Data Quality',
-    href: '/data-quality',
-    icon: Search,
-    description: 'QA/QC, validation, and ML readiness'
-  },
-  {
-    id: 'network-analytics',
-    name: 'Network Analytics', 
-    href: '/analytics',
-    icon: TrendingUp,
-    description: 'System-wide insights and reporting'
-  },
-  {
-    id: 'reports',
-    name: 'Reports',
-    href: '/reports',
-    icon: FileText,
-    description: 'Average report criteria and data analysis'
-  },
-  {
-    id: 'ml-ops',
-    name: 'ML Ops',
-    href: '/ops/pipeline',
-    icon: Cpu,
-    description: 'ML pipeline operations and monitoring'
-  }
+  { id: 'aqi-dashboard', name: 'Dashboard', href: '/' },
+  { id: 'station-management', name: 'Stations', href: '/stations' },
+  { id: 'data-quality', name: 'Data Quality', href: '/data-quality' },
+  { id: 'reports', name: 'Reports', href: '/reports' },
+  { id: 'ml-ops', name: 'ML Ops', href: '/ops/pipeline' },
 ]
+
+function cn(...classes: (string | false | undefined)[]) {
+  return classes.filter(Boolean).join(' ')
+}
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
-  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   const getCurrentModuleFromPath = () => {
-    const module = modules.find(m => 
+    const module = modules.find(m =>
       m.href === pathname || (m.href !== '/' && pathname.startsWith(m.href))
     )
     return module?.id || 'aqi-dashboard'
   }
 
   const currentModule = getCurrentModuleFromPath()
-
-  const activeModule = modules.find(m => m.id === currentModule)
+  const isDashboard = pathname === '/'
 
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      {/* Sidebar */}
-      <div className={`${sidebarOpen ? 'translate-x-0' : '-translate-x-full'} lg:translate-x-0 fixed lg:static inset-y-0 left-0 z-50 w-64 bg-white shadow-xl lg:shadow-none transform transition-transform duration-300 ease-in-out`}>
-        <div className="flex items-center justify-between h-20 px-6 border-b border-gray-200">
-          {/* Logo and Title */}
-          <div className="flex items-center space-x-3">
-            <img 
-              src="/logo-cropped.png" 
-              alt="Hawanama Logo" 
-              className="h-8 w-8 rounded-lg"
-            />
-            <div>
-              <h1 className="text-lg font-bold text-gray-900">Hawanama</h1>
-              <p className="text-xs text-gray-500">Air Quality</p>
-            </div>
-          </div>
-          
-          {/* Mobile close button */}
-          <button
-            className="lg:hidden"
-            onClick={() => setSidebarOpen(false)}
-          >
-            <X className="h-6 w-6 text-gray-500" />
-          </button>
-        </div>
+    <div className="min-h-screen bg-slate-50 flex flex-col">
+      {/* Sticky header container */}
+      <div className="sticky top-0 z-50">
+        {/* Row 1: Top bar */}
+        <header className="bg-white border-b border-slate-200">
+          <div className="px-4 lg:px-8">
+            <div className="flex items-center justify-between h-16">
+              {/* Logo + tagline */}
+              <Link href="/" className="flex items-center gap-3">
+                <img
+                  src="/logo-cropped.png"
+                  alt="Hawanama"
+                  className="h-10 w-10 rounded-xl"
+                />
+                <div className="flex flex-col">
+                  <span className="text-lg font-semibold text-slate-900 leading-tight">
+                    Hawanama
+                  </span>
+                  <span className="text-xs text-slate-500 hidden sm:block">
+                    Air Quality Intelligence Platform
+                  </span>
+                </div>
+              </Link>
 
-        {/* Navigation */}
-        <nav className="mt-8 px-4">
-          <div className="space-y-2">
-            {modules.map((module) => {
-              const isActive = currentModule === module.id
-              const Icon = module.icon
-              return (
-                <Link
-                  key={module.id}
-                  href={module.href}
-                  className={`flex items-center space-x-3 px-4 py-3 rounded-lg text-sm font-medium transition-colors ${
-                    isActive
-                      ? 'bg-blue-50 text-blue-700 border-r-4 border-blue-600'
-                      : 'text-gray-600 hover:text-gray-900 hover:bg-gray-50'
-                  }`}
-                  onClick={() => setSidebarOpen(false)}
-                >
-                  <Icon className="h-5 w-5" />
-                  <span>{module.name}</span>
-                </Link>
-              )
-            })}
-          </div>
-        </nav>
+              {/* Center info - hidden on mobile */}
+              <div className="hidden md:flex items-center gap-6 text-sm">
+                <div className="flex items-center gap-2 text-slate-600">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Live Monitoring</span>
+                </div>
+                <div className="text-slate-400">|</div>
+                <div className="text-slate-600">
+                  Pakistan Air Quality Network
+                </div>
+              </div>
 
-      </div>
-
-      {/* Main Content Area */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Mobile Header */}
-        <header className="bg-white border-b border-gray-200 shadow-sm lg:hidden">
-          <div className="flex items-center justify-between h-16 px-4">
-            {/* Mobile menu button */}
-            <button
-              onClick={() => setSidebarOpen(true)}
-              className="text-gray-500 hover:text-gray-900"
-            >
-              <Menu className="h-6 w-6" />
-            </button>
-            
-            {/* Mobile title */}
-            <div className="flex items-center space-x-3">
-              <img 
-                src="/logo-cropped.png" 
-                alt="Hawanama Logo" 
-                className="h-8 w-8 rounded-lg"
-              />
-              <span className="text-lg font-bold text-gray-900">Hawanama</span>
-            </div>
-
-            <UserMenu />
-          </div>
-        </header>
-
-        {/* Desktop Header - Page Title */}
-        <header className="hidden lg:block bg-white border-b border-gray-200 shadow-sm">
-          <div className="px-6 py-4 h-20 flex items-center justify-between">
-            <div>
-              <h2 className="text-2xl font-bold text-gray-900">
-                {activeModule?.name || 'AQI Dashboard'}
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                {activeModule?.description || 'Air Quality Monitoring System'}
-              </p>
-            </div>
-            
-            {/* User menu */}
-            <div className="flex items-center space-x-4">
+              {/* User menu */}
               <UserMenu />
             </div>
           </div>
         </header>
 
-        {/* Main Content */}
-        <main className="flex-1 overflow-auto p-6 lg:p-8">
-          {children}
-        </main>
+        {/* Row 2: Navigation strip */}
+        <nav className="bg-gradient-to-r from-slate-800 to-slate-900">
+          <div className="px-4 lg:px-8">
+            <div className="flex items-center h-11 -mb-px overflow-x-auto scrollbar-hide">
+              {modules.map((module) => {
+                const isActive = currentModule === module.id
+                return (
+                  <Link
+                    key={module.id}
+                    href={module.href}
+                    className={cn(
+                      'relative px-5 h-11 flex items-center text-sm font-medium whitespace-nowrap transition-colors',
+                      isActive
+                        ? 'text-white'
+                        : 'text-slate-400 hover:text-slate-200'
+                    )}
+                  >
+                    {module.name}
+                    {/* Active indicator - bottom border */}
+                    {isActive && (
+                      <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-amber-400 rounded-t-full" />
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        </nav>
       </div>
 
-      {/* Mobile sidebar overlay */}
-      {sidebarOpen && (
-        <div
-          className="fixed inset-0 z-40 bg-black bg-opacity-50 lg:hidden"
-          onClick={() => setSidebarOpen(false)}
-        ></div>
-      )}
+      {/* Main Content - no padding for dashboard (full-bleed map) */}
+      <main className={cn(
+        'flex-1',
+        isDashboard ? '' : 'p-4 lg:p-6'
+      )}>
+        {children}
+      </main>
     </div>
   )
 }

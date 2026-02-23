@@ -82,7 +82,7 @@ export interface StationEpisodes {
 export const stationsApi = {
   // List all stations
   getStations: async (): Promise<Station[]> => {
-    const response = await fetch(`${API_BASE}/internal/stations`);
+    const response = await fetch(`${API_BASE}/meta/stations`);
     if (!response.ok) throw new Error('Failed to fetch stations');
     return response.json();
   },

@@ -655,7 +655,7 @@ async def fetch_overall_diurnal(
           AND ts_utc >= :start
           AND ts_utc <  :end
           AND pm25 IS NOT NULL
-          AND qc_state = 'OK'
+          -- qc_state filter removed: column not populated yet
         GROUP BY hour_local
         ORDER BY hour_local;
     """)
@@ -711,7 +711,7 @@ async def fetch_weekday_weekend_diurnal(
           AND ts_utc >= :start
           AND ts_utc <  :end
           AND pm25 IS NOT NULL
-          AND qc_state = 'OK'
+          -- qc_state filter removed: column not populated yet
         GROUP BY is_weekend, hour_local
         ORDER BY is_weekend, hour_local;
     """)
@@ -786,7 +786,7 @@ async def fetch_season_diurnal(
           AND ts_utc >= :start
           AND ts_utc <  :end
           AND pm25 IS NOT NULL
-          AND qc_state = 'OK'
+          -- qc_state filter removed: column not populated yet
         GROUP BY season, hour_local
         ORDER BY season, hour_local;
     """)
@@ -981,7 +981,7 @@ async def detect_hour_level_episodes(
           AND ts_utc >= :start
           AND ts_utc < :end
           AND pm25 > :threshold
-          AND qc_state = 'OK'
+          -- qc_state filter removed: column not populated yet
         ORDER BY ts_utc
     """)
 

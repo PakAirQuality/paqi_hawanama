@@ -18,40 +18,40 @@ export function ExecutionsTab({
   retrainExecs,
 }: ExecutionsTabProps) {
   return (
-    <div className="grid gap-6 lg:grid-cols-2">
+    <div className="grid gap-4 lg:grid-cols-2">
       {/* Daily Executions */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-            <Play className="w-5 h-5" />
-            <span>Daily Pipeline Executions</span>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center space-x-2">
+            <Play className="w-4 h-4" />
+            <span>Daily Pipeline</span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-0">
           {dailyExecsLoading ? (
-            <div className="space-y-3">
+            <div className="space-y-2">
               {[...Array(5)].map((_, i) => (
-                <div key={i} className="h-16 bg-gray-200 rounded animate-pulse"></div>
+                <div key={i} className="h-12 bg-gray-100 rounded animate-pulse"></div>
               ))}
             </div>
           ) : dailyExecs?.executions?.length ? (
-            <div className="space-y-3">
+            <div className="space-y-1.5">
               {dailyExecs.executions.map((exec) => {
                 const status = getExecutionStatus(exec)
                 return (
-                  <div key={exec.uid} className="p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-1">
+                  <div key={exec.uid} className="p-2 bg-gray-50 rounded">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2">
                           <ExecutionStatusBadge status={status} />
-                          <span className="text-xs text-gray-500 font-mono">
+                          <span className="text-[10px] text-gray-500 font-mono truncate">
                             {exec.name.split('/').pop()}
                           </span>
                         </div>
-                        <div className="text-xs text-gray-600">
-                          Started: {formatDate(exec.createTime)}
+                        <div className="text-[10px] text-gray-500 mt-0.5">
+                          {formatDate(exec.createTime)}
                           {exec.completionTime && (
-                            <> | Completed: {formatDate(exec.completionTime)}</>
+                            <span className="text-gray-400"> → {formatDate(exec.completionTime)}</span>
                           )}
                         </div>
                       </div>
@@ -60,9 +60,9 @@ export function ExecutionsTab({
                           href={exec.logUri}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800"
+                          className="text-blue-600 hover:text-blue-800 shrink-0"
                         >
-                          <ExternalLink className="w-4 h-4" />
+                          <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       )}
                     </div>
@@ -71,7 +71,7 @@ export function ExecutionsTab({
               })}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-6 text-gray-500 text-sm">
               No executions found
             </div>
           )}
@@ -80,31 +80,31 @@ export function ExecutionsTab({
 
       {/* Retrain Executions */}
       <Card>
-        <CardHeader>
-          <CardTitle className="text-lg font-semibold flex items-center space-x-2">
-            <RefreshCw className="w-5 h-5" />
-            <span>Model Retrain Executions</span>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base font-semibold flex items-center space-x-2">
+            <RefreshCw className="w-4 h-4" />
+            <span>Model Retrain</span>
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="pt-0">
           {retrainExecs?.executions?.length ? (
-            <div className="space-y-3">
+            <div className="space-y-1.5">
               {retrainExecs.executions.map((exec) => {
                 const status = getExecutionStatus(exec)
                 return (
-                  <div key={exec.uid} className="p-3 bg-gray-50 rounded-lg">
-                    <div className="flex items-start justify-between">
-                      <div className="space-y-1">
+                  <div key={exec.uid} className="p-2 bg-gray-50 rounded">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
                         <div className="flex items-center space-x-2">
                           <ExecutionStatusBadge status={status} />
-                          <span className="text-xs text-gray-500 font-mono">
+                          <span className="text-[10px] text-gray-500 font-mono truncate">
                             {exec.name.split('/').pop()}
                           </span>
                         </div>
-                        <div className="text-xs text-gray-600">
-                          Started: {formatDate(exec.createTime)}
+                        <div className="text-[10px] text-gray-500 mt-0.5">
+                          {formatDate(exec.createTime)}
                           {exec.completionTime && (
-                            <> | Completed: {formatDate(exec.completionTime)}</>
+                            <span className="text-gray-400"> → {formatDate(exec.completionTime)}</span>
                           )}
                         </div>
                       </div>
@@ -113,9 +113,9 @@ export function ExecutionsTab({
                           href={exec.logUri}
                           target="_blank"
                           rel="noopener noreferrer"
-                          className="text-blue-600 hover:text-blue-800"
+                          className="text-blue-600 hover:text-blue-800 shrink-0"
                         >
-                          <ExternalLink className="w-4 h-4" />
+                          <ExternalLink className="w-3.5 h-3.5" />
                         </a>
                       )}
                     </div>
@@ -124,7 +124,7 @@ export function ExecutionsTab({
               })}
             </div>
           ) : (
-            <div className="text-center py-8 text-gray-500">
+            <div className="text-center py-6 text-gray-500 text-sm">
               No retrain executions found
             </div>
           )}
