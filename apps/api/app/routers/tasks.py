@@ -4,8 +4,8 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, Depends, Request
-from typing import Dict, Any
+from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from typing import Dict, Any, Optional
 from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
 
 logger = logging.getLogger(__name__)
@@ -88,17 +88,19 @@ async def run_station_ingestion(
 @router.post("/tasks/ingest-cities")
 async def run_city_ingestion(
     request: Request,
+    country: Optional[str] = Query(None, description="Single country to ingest (default: all IQAIR_COUNTRIES)"),
     _: bool = Depends(verify_tasks_token)
 ):
     """
     Trigger city data ingestion task.
     Fetches current readings from cities using the city manifest.
+    Pass ?country=Pakistan to limit to a single country, or omit for all South Asian countries.
     """
     try:
-        logger.info("Starting city ingestion via API endpoint")
+        logger.info("Starting city ingestion via API endpoint (country=%s)", country or "all")
         from app.tasks.city_ingest import CityIngestionTask  # lazy import
         city_ingestion_task = CityIngestionTask()
-        summary = await city_ingestion_task.fetch_city_readings_hourly(country="Pakistan")
+        summary = await city_ingestion_task.fetch_city_readings_hourly(country=country)
         logger.info("City ingestion completed successfully: %s", summary)
         return {
             "status": "success",
@@ -148,9 +150,9 @@ async def run_full_pipeline(
         logger.info("Pipeline step 2/3: Station ingestion")
         station_summary = await station_ingestion_task.fetch_station_readings()
         
-        # Step 3: City ingestion  
+        # Step 3: City ingestion (all configured countries)
         logger.info("Pipeline step 3/3: City ingestion")
-        city_summary = await city_ingestion_task.fetch_city_readings_hourly(country="Pakistan")
+        city_summary = await city_ingestion_task.fetch_city_readings_hourly(country=None)
         
         logger.info("Full pipeline completed successfully")
         return {

@@ -53,22 +53,19 @@ def _approx_one_hour(a: datetime, b: datetime) -> bool:
 # ---------------------------------------
 
 # Aliases to fix label mismatches between /stations and /station endpoints.
-STATE_ALIAS_MAP: Dict[str, List[str]] = {
-    "Islamabad": ["Islamabad Capital Territory", "Islamabad Federal Capital Territory"],
-    "Azad Kashmir": ["Azad Jammu and Kashmir"],
-    "Khyber Pakhtunkhwa": ["North-West Frontier Province", "NWFP"],
-}
-def _state_aliases(state: Optional[str]) -> List[str]:
+# Uses shared South Asia config for per-country aliases.
+try:
+    from app.core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
+except ImportError:
+    from core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
+
+def _state_aliases(state: Optional[str], country: Optional[str] = None) -> List[str]:
     if not state:
         return []
-    base = [state]
-    extras = STATE_ALIAS_MAP.get(state, [])
-    seen, out = set(), []
-    for v in base + extras:
-        if v not in seen:
-            seen.add(v)
-            out.append(v)
-    return out
+    if country:
+        return _get_state_aliases(country, state)
+    # Fallback: no country context, just return [state]
+    return [state]
 
 
 class _AsyncRateLimiter:
@@ -111,8 +108,8 @@ class DataIngestionTask:
         self._allow_state_alias     = os.getenv("ALLOW_STATE_ALIAS", "true").lower() in {"1", "true", "yes"}
         self._db_station_fallback   = os.getenv("ALLOW_DB_STATION_FALLBACK", "false").lower() in {"1", "true", "yes"}
 
-        # Filters
-        self._country        = os.getenv("INGEST_COUNTRY", "Pakistan")
+        # Filters — supports multi-country ingestion via IQAIR_COUNTRIES env var
+        self._countries      = get_iqair_countries()
         self._provider_code  = os.getenv("STATION_PROVIDER_CODE", "airvisual")
 
         # Backfill window (hours)
@@ -167,7 +164,7 @@ class DataIngestionTask:
 
     async def _list_stations_from_db(self) -> List[Dict[str, Any]]:
         """
-        Optional DB fallback: list active provider stations for the target country.
+        Optional DB fallback: list active provider stations for the target countries.
         Expected output keys align with the station manifest written by discovery.
         """
         from sqlalchemy import text
@@ -189,11 +186,10 @@ class DataIngestionTask:
                 JOIN states s     ON s.id = c.state_id
                 JOIN countries co ON co.id = s.country_id
                 WHERE p.code = :provider_code
-                  AND LOWER(co.name) = LOWER(:country)
                   AND st.active = true
                 ORDER BY co.name, s.name, c.name, st.name
             """)
-            rs = await session.execute(q, {"provider_code": self._provider_code, "country": self._country})
+            rs = await session.execute(q, {"provider_code": self._provider_code})
             out: List[Dict[str, Any]] = []
             for row in rs.fetchall():
                 m = dict(row._mapping)
@@ -217,8 +213,8 @@ class DataIngestionTask:
 
         # Optional: DB fallback
         if (not rows) and self._db_station_fallback:
-            logger.info("Station manifest empty → using DB fallback for provider=%s, country=%s",
-                        self._provider_code, self._country)
+            logger.info("Station manifest empty → using DB fallback for provider=%s, countries=%s",
+                        self._provider_code, self._countries)
             return []
 
         # Normalize a few common field variants for safety
@@ -314,7 +310,7 @@ class DataIngestionTask:
                 from services.database import DatabaseService
             db_service = DatabaseService()
             
-            country = (s.get("country") or self._country or "").strip()
+            country = (s.get("country") or "").strip()
             state = (s.get("state") or "").strip()
             city = (s.get("city") or "").strip()
             name = (s.get("iqair_station_name") or s.get("name") or "").strip()
@@ -324,7 +320,7 @@ class DataIngestionTask:
             return db_service.generate_station_id(country, state, city, name, lat, lon)
         else:  # city - keep existing pipe-separated format for compatibility
             parts = [
-                (s.get("country") or self._country or "").strip().lower(),
+                (s.get("country") or "").strip().lower(),
                 (s.get("state") or "").strip().lower(),
                 (s.get("city") or "").strip().lower(),
             ]
@@ -592,13 +588,14 @@ class DataIngestionTask:
                 "report_dir": str(self._out_dir),
             }
 
-        # Filter to active <country,provider> and dedupe (station_name, city, state, country)
+        # Filter to active <countries,provider> and dedupe (station_name, city, state, country)
+        country_set = {c.lower() for c in self._countries}
         seen = set()
         stations: List[Dict[str, Any]] = []
         for r in rows:
             if r.get("provider_code") != self._provider_code:
                 continue
-            if r.get("country") != self._country:
+            if (r.get("country") or "").lower() not in country_set:
                 continue
             if r.get("active") is False:
                 continue
@@ -625,7 +622,7 @@ class DataIngestionTask:
                 "station": stations[i].get("iqair_station_name") or stations[i].get("name"),
                 "city": stations[i].get("city"),
                 "state": stations[i].get("state"),
-                "country": stations[i].get("country", self._country),
+                "country": stations[i].get("country", ""),
             }
             if isinstance(res, Exception):
                 failed += 1
@@ -677,12 +674,12 @@ class DataIngestionTask:
             station_name = s.get("iqair_station_name") or s.get("name")
             city = s.get("city")
             state = s.get("state")
-            country = s.get("country", self._country)
+            country = s.get("country") or ""
 
             # Try: exact state first, then aliases (if allowed)
             states_to_try = [state] if state else []
             if self._allow_state_alias:
-                for a in _state_aliases(state)[1:]:
+                for a in _state_aliases(state, country)[1:]:
                     states_to_try.append(a)
 
             last_exc: Optional[Exception] = None
@@ -771,7 +768,7 @@ class DataIngestionTask:
                 "allow_city_fallback": self._allow_city_fallback,
                 "allow_state_alias": self._allow_state_alias,
                 "db_station_fallback": self._db_station_fallback,
-                "country": self._country,
+                "countries": self._countries,
                 "provider_code": self._provider_code,
                 "backfill_hours": self._backfill_hours,
             }

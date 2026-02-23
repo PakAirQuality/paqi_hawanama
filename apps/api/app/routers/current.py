@@ -26,19 +26,8 @@ router = APIRouter()
 async def city_current(
     city: str = Path(
         ...,
-        description="Select city from dropdown list",
+        description="City name (validated against database)",
         example="Lahore",
-        enum=[
-            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
-            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
-            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
-            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
-            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
-            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
-            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
-            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
-            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
-        ]
     )
 ):
     """
@@ -143,19 +132,8 @@ async def city_current(
 async def city_top10_stations(
     city: str = Path(
         ...,
-        description="Select city from dropdown list",
+        description="City name (validated against database)",
         example="Lahore",
-        enum=[
-            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
-            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
-            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
-            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
-            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
-            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
-            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
-            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
-            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
-        ]
     )
 ):
     """
@@ -288,19 +266,8 @@ async def city_top10_stations(
 async def city_top3_stations(
     city: str = Path(
         ...,
-        description="Select city from dropdown list",
+        description="City name (validated against database)",
         example="Lahore",
-        enum=[
-            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
-            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
-            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
-            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
-            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
-            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
-            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
-            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
-            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
-        ]
     )
 ):
     """
@@ -562,19 +529,8 @@ async def station_current(
 async def city_average(
     city: str = Path(
         ...,
-        description="Select city from dropdown list",
+        description="City name (validated against database)",
         example="Lahore",
-        enum=[
-            "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
-            "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
-            "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
-            "Karachi", "Kasur", "Khairpur Mir's", "Kharan", "Khurrianwala", 
-            "Kot Malik Barkhurdar", "Kotli Loharan", "Kotri", "Ladhewala Waraich", 
-            "Lahore", "Lodhran", "Malam Jabba", "Malir Cantonment", "Mandi Bahauddin", 
-            "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
-            "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
-            "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
-        ]
     )
 ):
     """

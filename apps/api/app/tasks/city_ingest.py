@@ -54,23 +54,18 @@ except Exception:
     _HAVE_PANDAS = False
 
 # ---- aliasing to deal with label mismatches between /cities and /city endpoints ----
-STATE_ALIAS_MAP: Dict[str, List[str]] = {
-    "Islamabad": ["Islamabad Capital Territory", "Islamabad Federal Capital Territory"],
-    "Azad Kashmir": ["Azad Jammu and Kashmir"],
-    "Khyber Pakhtunkhwa": ["North-West Frontier Province", "NWFP"],
-}
-def _state_aliases(state: Optional[str]) -> List[str]:
+# Uses shared South Asia config for per-country aliases.
+try:
+    from app.core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
+except ImportError:
+    from core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
+
+def _state_aliases(state: Optional[str], country: Optional[str] = None) -> List[str]:
     if not state:
         return []
-    base = [state]
-    extras = STATE_ALIAS_MAP.get(state, [])
-    # unique while preserving order
-    seen, out = set(), []
-    for v in base + extras:
-        if v not in seen:
-            seen.add(v)
-            out.append(v)
-    return out
+    if country:
+        return _get_state_aliases_sa(country, state)
+    return [state]
 
 def _scope_key(country: str, state: str, city: str) -> str:
     return f"{country.lower()}|{state.lower()}|{city.lower()}"
@@ -274,25 +269,33 @@ class CityIngestionTask:
 
     # ----------------------------- public API --------------------------------
 
-    async def fetch_city_readings_hourly(self, country: str = "Pakistan") -> Dict[str, Any]:
+    async def fetch_city_readings_hourly(self, country: Optional[str] = None) -> Dict[str, Any]:
         """
         Hourly city ingestion job – reads cities from manifest (or derives from station manifest / DB),
         fetches /v2/city for each, normalizes, and bulk upserts readings.
+
+        If country is None, ingests all countries from IQAIR_COUNTRIES config.
+        If country is provided, ingests only that single country (backwards-compatible).
         """
+        target_countries = [country] if country else get_iqair_countries()
+        country_set = {c.lower() for c in target_countries}
+
         logger.info(
-            "Starting city ingestion (manifest mode). concurrency=%d, rate<=%d/min, "
+            "Starting city ingestion (manifest mode). countries=%s, concurrency=%d, rate<=%d/min, "
             "alias=%s, nearest_fallback=%s, db_city_fallback=%s",
-            self._concurrency, self._rate, self._allow_state_alias, self._allow_nearest_fallback, self._db_city_fallback
+            target_countries, self._concurrency, self._rate, self._allow_state_alias, self._allow_nearest_fallback, self._db_city_fallback
         )
 
         rows = self._load_city_manifest()
         if not rows and self._db_city_fallback:
-            logger.info("City manifest empty → using DB fallback for country=%s", country)
-            rows = await self._list_cities_from_db(country)
+            logger.info("City manifest empty → using DB fallback for countries=%s", target_countries)
+            for tc in target_countries:
+                rows.extend(await self._list_cities_from_db(tc))
 
         if not rows:
             return {
                 "status": "success",
+                "countries": target_countries,
                 "cities_processed": 0,
                 "readings_ingested": 0,
                 "errors": 0,
@@ -300,11 +303,11 @@ class CityIngestionTask:
                 "report_dir": str(self._out_dir),
             }
 
-        # Filter to target country + active, dedupe (city,state,country)
+        # Filter to target countries + active, dedupe (city,state,country)
         seen = set()
         cities: List[Dict[str, Any]] = []
         for r in rows:
-            if r.get("country") != country:
+            if (r.get("country") or "").lower() not in country_set:
                 continue
             if r.get("active") is False:
                 continue
@@ -374,12 +377,12 @@ class CityIngestionTask:
         async with self._sema:
             city = row.get("city")
             state = row.get("state")
-            country = row.get("country", "Pakistan")
+            country = row.get("country") or ""
             scope_key = row["scope_key"]
 
             states_to_try = [state] if state else []
             if self._allow_state_alias:
-                for a in _state_aliases(state)[1:]:
+                for a in _state_aliases(state, country)[1:]:
                     states_to_try.append(a)
 
             last_exc: Optional[Exception] = None
