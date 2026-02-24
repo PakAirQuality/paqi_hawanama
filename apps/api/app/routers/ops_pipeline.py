@@ -754,7 +754,8 @@ async def get_prediction_tile(
     z: int,
     x: int,
     y: int,
-    _: bool = Depends(verify_tasks_token)
+    smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
+    _: bool = Depends(verify_tasks_token),
 ):
     """
     Serve XYZ tiles from Cloud Optimized GeoTIFF.
@@ -764,6 +765,7 @@ async def get_prediction_tile(
         z: Zoom level
         x: Tile X coordinate
         y: Tile Y coordinate
+        smoothed: If True, serve from the Gaussian-smoothed COG
     """
     from fastapi.responses import Response
     import os
@@ -772,7 +774,8 @@ async def get_prediction_tile(
     outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file (GCS client uses Application Default Credentials)
-    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}.tif"
+    suffix = "_gaussian_smoothed" if smoothed else ""
+    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
     tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:
@@ -1002,7 +1005,8 @@ async def get_point_value(
     pred_date: str,
     lat: float = Query(..., ge=20.0, le=40.0, description="Latitude"),
     lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
-    _: bool = Depends(verify_tasks_token)
+    smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
+    _: bool = Depends(verify_tasks_token),
 ) -> Dict[str, Any]:
     """
     Query PM2.5 prediction value at a specific coordinate.
@@ -1011,6 +1015,7 @@ async def get_point_value(
         pred_date: Date in YYYY-MM-DD format
         lat: Latitude (WGS84)
         lon: Longitude (WGS84)
+        smoothed: If True, query from the Gaussian-smoothed COG
     """
     import os
     import math
@@ -1019,7 +1024,8 @@ async def get_point_value(
     outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file
-    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}.tif"
+    suffix = "_gaussian_smoothed" if smoothed else ""
+    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
     tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:

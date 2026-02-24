@@ -5,8 +5,8 @@
 
 export const MAP_CONFIG = {
   style: 'mapbox://styles/mapbox/standard',
-  center: [69.35, 30.38] as [number, number], // Pakistan center
-  zoom: 3,
+  center: [78, 22] as [number, number], // South Asia center
+  zoom: 3.6,
   projection: 'globe' as const, // Beautiful globe projection with 2D overlay
   accessToken: process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***',
   config: {
@@ -27,45 +27,6 @@ export const MAP_CONFIG = {
 export const STYLES = {
   cluster: { radius: 16, strokeWidth: 0, strokeColor: 'transparent', textSize: 11 },
   point: { radius: 14, strokeWidth: 0, strokeColor: 'transparent', textSize: 10, opacity: 1.0 },
-  pakistan: { lineColor: 'transparent', lineWidth: 0, lineOpacity: 0 },
-  countryFocus: {
-    // Inside Pakistan - Climate TRACE style prominent green overlay
-    insideFill: 'rgba(16, 185, 129, 0.25)',  // emerald-500 with 25% opacity - much more prominent
-    insideStroke: 'transparent',              // Hide country boundary outline
-    insideStrokeWidth: 0,
-    insideStrokeOpacity: 0,
-    // Outside Pakistan - stronger dimming for dramatic contrast  
-    outsideFill: 'rgba(75, 85, 99, 0.6)',    // gray-600 with 60% opacity - much darker
-    outsideOpacity: 0.6,
-    // Vibrant green glow effect
-    glowColor: 'rgba(16, 185, 129, 0.4)',    // emerald-500 with higher opacity
-    glowWidth: 4,
-    // Additional Climate TRACE-style elements
-    innerGlow: 'rgba(52, 211, 153, 0.15)',   // emerald-400 for bright inner highlight
-    shadowColor: 'rgba(6, 78, 59, 0.2)',     // emerald-900 for depth
-    // Accent highlight for modern tech feel
-    accentColor: 'rgba(167, 243, 208, 0.12)', // emerald-200 for subtle tech accent
-  },
-  provinces: {
-    // Provincial boundary lines - hidden
-    strokeColor: 'transparent',      // Hide provincial boundaries
-    strokeWidth: 0,                  // No stroke width
-    strokeOpacity: 0,                // No opacity
-    strokeDashArray: [0, 0],         // No dash pattern
-    // Enhanced hover effects - disabled
-    hoverStrokeColor: 'transparent', // Hide hover stroke
-    hoverStrokeWidth: 0,             // No hover width
-    hoverStrokeOpacity: 0,           // No hover opacity
-    hoverStrokeDashArray: [0, 0],    // No hover dash pattern
-    // Fill for interactive areas
-    fillColor: 'transparent',
-    hoverFillColor: 'transparent',   // Hide hover fill
-    // Additional glow effect for interactivity - disabled
-    glowColor: 'transparent',        // Hide glow
-    glowWidth: 0,
-    hoverGlowColor: 'transparent',   // Hide hover glow
-    hoverGlowWidth: 0
-  },
   heatmap: {
     // Zoom levels for heatmap visibility - now covers low zoom levels
     minZoom: 2,

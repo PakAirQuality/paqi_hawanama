@@ -2,11 +2,14 @@
 export { default as Map } from './Map'
 export { default as MapRefactored } from './MapRefactored'
 export { CityToggle } from './CityToggle'
+export { WindToggle } from './WindToggle'
 
 // Hooks
 export { useStationsData } from './hooks/useStationsData'
 export { useSupercluster } from './hooks/useSupercluster'
 export { useMapInstance } from './hooks/useMapInstance'
+export { useWindData } from './hooks/useWindData'
+export { useWindLayer } from './hooks/useWindLayer'
 
 // Services
 export { MapSourceService } from './services/MapSourceService'

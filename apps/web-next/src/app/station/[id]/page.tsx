@@ -1,20 +1,13 @@
 import { Suspense } from 'react'
 import StationClient from './StationClient'
+import stationIds from '@/static/stationIds.json'
+
+export function generateStaticParams() {
+  return stationIds.map((id: string) => ({ id }))
+}
 
 interface StationPageProps {
   params: { id: string }
-}
-
-// Generate static paths for all station IDs
-export async function generateStaticParams() {
-  // For static export, we'll generate these at build time
-  try {
-    const stationIds = await import('@/static/stationIds.json')
-    return stationIds.default.map((id: string) => ({ id }))
-  } catch (error) {
-    // Fallback if the static file doesn't exist yet
-    return []
-  }
 }
 
 export default function StationPage({ params }: StationPageProps) {

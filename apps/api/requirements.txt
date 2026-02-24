@@ -31,3 +31,5 @@ google-cloud-storage==2.14.0
 # COG tile serving
 rio-tiler>=6.0.0
 matplotlib>=3.7.0
+# Wind data from Open-Meteo AWS Open Data
+omfiles[fsspec]>=1.1.0

@@ -2,7 +2,7 @@ from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import get_database
-from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, internal_stations, public, ops_pipeline
+from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, wind
 
 app = FastAPI(
     title="Hawanama API",
@@ -35,9 +35,11 @@ app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}", tags=["tasks"]
 app.include_router(bot.router, prefix=f"{settings.API_V1_STR}", tags=["bot"])
 app.include_router(punjab_epa.router, prefix=f"{settings.API_V1_STR}/punjab", tags=["punjab-epa"])
 app.include_router(openaq_network.router, prefix=f"{settings.API_V1_STR}")
+app.include_router(nasa_database.router, prefix=f"{settings.API_V1_STR}")
 app.include_router(internal_stations.router, prefix=f"{settings.API_V1_STR}/internal/stations", tags=["internal-stations"])
 app.include_router(public.router, prefix=f"{settings.API_V1_STR}", tags=["public"])
 app.include_router(ops_pipeline.router, prefix=f"{settings.API_V1_STR}/ops/pipeline", tags=["ops-pipeline"])
+app.include_router(wind.router, prefix=f"{settings.API_V1_STR}/wind", tags=["wind"])
 
 # Add direct stations endpoint for frontend compatibility
 @app.get(f"{settings.API_V1_STR}/stations")

@@ -1,20 +1,13 @@
 import { Suspense } from 'react'
 import CityClient from './CityClient'
+import citySlugs from '@/static/citySlugs.json'
+
+export function generateStaticParams() {
+  return citySlugs.map((slug: string) => ({ slug }))
+}
 
 interface CityPageProps {
   params: { slug: string }
-}
-
-// Generate static paths for all city slugs
-export async function generateStaticParams() {
-  // For static export, we'll generate these at build time
-  try {
-    const citySlugs = await import('@/static/citySlugs.json')
-    return citySlugs.default.map((slug: string) => ({ slug }))
-  } catch (error) {
-    // Fallback if the static file doesn't exist yet
-    return []
-  }
 }
 
 export default function CityPage({ params }: CityPageProps) {

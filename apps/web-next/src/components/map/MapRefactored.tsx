@@ -7,6 +7,8 @@ import { useStationSidebar } from '@/stores/stationSidebar';
 
 // Modular imports
 import { useStationsData } from './hooks/useStationsData';
+import { useWindData } from './hooks/useWindData';
+import { useWindLayer } from './hooks/useWindLayer';
 import AqiMarker from './components/AqiMarker';
 
 interface MapProps {
@@ -14,25 +16,31 @@ interface MapProps {
   zoom?: number;
   className?: string;
   heatmapVisible?: boolean;
+  windVisible?: boolean;
 }
 
-export default function MapRefactored({ 
-  center, 
-  zoom, 
-  className = '', 
-  heatmapVisible = true
+export default function MapRefactored({
+  center,
+  zoom,
+  className = '',
+  heatmapVisible = true,
+  windVisible = true,
 }: MapProps) {
   const { openStation } = useStationSidebar();
   const { stations, loading, error } = useStationsData();
 
   const [viewport, setViewport] = useState({
-    longitude: center?.[0] || 69.3451,
-    latitude: center?.[1] || 30.3753,
-    zoom: zoom || 5,
+    longitude: center?.[0] || 78,
+    latitude: center?.[1] || 22,
+    zoom: zoom ?? 3.6,
   });
 
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>();
   const [map, setMap] = useState<any>(null);
+
+  // Wind layer (lazy — only fetches data when toggled on)
+  const { windImage, windMetadata } = useWindData(windVisible);
+  useWindLayer(map, windImage, windMetadata, windVisible);
 
   const features = useMemo(() => {
     // Return all individual stations
@@ -59,59 +67,15 @@ export default function MapRefactored({
     openStation(String(properties.id));
   };
 
-  const handleProvinceClick = (e: any) => {
-    if (e.features?.[0]) {
-      const province = e.features[0];
-      console.log('Province clicked:', province.properties);
-      
-      // Calculate bounds for the province geometry
-      if (province.geometry.type === 'Polygon' || province.geometry.type === 'MultiPolygon') {
-        const coordinates = province.geometry.type === 'Polygon' 
-          ? province.geometry.coordinates[0]
-          : province.geometry.coordinates.flat(2);
-        
-        // Calculate bounding box
-        let minLng = Infinity, minLat = Infinity, maxLng = -Infinity, maxLat = -Infinity;
-        
-        coordinates.forEach((coord: [number, number]) => {
-          const [lng, lat] = coord;
-          minLng = Math.min(minLng, lng);
-          minLat = Math.min(minLat, lat);
-          maxLng = Math.max(maxLng, lng);
-          maxLat = Math.max(maxLat, lat);
-        });
-        
-        // Add padding to the bounds
-        const padding = 0.1;
-        const boundsArray: [[number, number], [number, number]] = [
-          [minLng - padding, minLat - padding],
-          [maxLng + padding, maxLat + padding]
-        ];
-        
-        // Fit map to province bounds
-        if (map) {
-          map.fitBounds(boundsArray, {
-            padding: 50,
-            duration: 1000
-          });
-        }
-      }
-    }
-  };
-
   const handleMapChange = (evt: ViewStateChangeEvent) => {
     setViewport(evt.viewState);
     setBounds(evt.target.getBounds().toArray().flat() as [number, number, number, number]);
-    
-    // Console log zoom level for development
-    if (process.env.NODE_ENV === 'development' && evt.viewState?.zoom !== undefined) {
-      console.log('🔍 Map Zoom Level:', evt.viewState.zoom.toFixed(2));
-    }
-    
-    // Capture map instance on first load
-    if (!map) {
-      setMap(evt.target);
-    }
+  };
+
+  const handleMapLoad = (evt: any) => {
+    const mapInstance = evt.target;
+    setMap(mapInstance);
+    handleMapChange(evt);
   };
 
   // Loading state
@@ -142,11 +106,11 @@ export default function MapRefactored({
     <div className={`w-full h-full relative ${className}`}>
       <Map
         {...viewport}
-        zoom={viewport?.zoom || 5}
-        mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}
+        zoom={viewport?.zoom ?? 3.6}
+        mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'}
         mapStyle="mapbox://styles/mapbox/outdoors-v12"
         onMove={handleMapChange}
-        onLoad={handleMapChange}
+        onLoad={handleMapLoad}
         style={{ 
           width: '100%', 
           height: '100%'
@@ -174,75 +138,6 @@ export default function MapRefactored({
         transitionDuration={300}
         pitchWithRotate={false}
       >
-        {/* Pakistan boundary with green outline and shading */}
-        <Source
-          id="pakistan-boundary"
-          type="geojson"
-          data="/pakistan.geojson"
-        >
-          {/* Pakistan fill layer removed */}
-          
-          {/* Pakistan outline - hidden */}
-          <Layer
-            id="pakistan-outline"
-            type="line"
-            paint={{
-              'line-color': 'transparent',
-              'line-width': 0,
-              'line-opacity': 0
-            }}
-          />
-        </Source>
-
-        {/* Provincial boundaries */}
-        <Source
-          id="pakistan-provinces"
-          type="geojson"
-          data="/pakistan_provinces.geojson"
-        >
-          {/* Province fill for hover effect - hidden */}
-          <Layer
-            id="provinces-fill"
-            type="fill"
-            paint={{
-              'fill-color': 'transparent',
-              'fill-opacity': 0
-            }}
-            onMouseEnter={(e) => {
-              if (e.features?.[0] && map) {
-                map.setFeatureState(
-                  { source: 'pakistan-provinces', id: e.features[0].id },
-                  { hover: true }
-                );
-                // Change cursor to pointer
-                map.getCanvas().style.cursor = 'pointer';
-              }
-            }}
-            onMouseLeave={(e) => {
-              if (e.features?.[0] && map) {
-                map.setFeatureState(
-                  { source: 'pakistan-provinces', id: e.features[0].id },
-                  { hover: false }
-                );
-                // Reset cursor
-                map.getCanvas().style.cursor = '';
-              }
-            }}
-            onClick={handleProvinceClick}
-          />
-          
-          {/* Province outline - hidden */}
-          <Layer
-            id="provinces-outline"
-            type="line"
-            paint={{
-              'line-color': 'transparent',
-              'line-width': 0,
-              'line-opacity': 0
-            }}
-          />
-        </Source>
-
         {features.map(feature => {
           const key = `marker-${feature.properties.id}`;
 
@@ -257,7 +152,7 @@ export default function MapRefactored({
                   aqi={feature.properties.aqi}
                   pm25={feature.properties.pm25}
                   isCluster={false}
-                  zoom={viewport?.zoom || 5}
+                  zoom={viewport?.zoom ?? 3.6}
                 />
               </div>
             </Marker>

@@ -14,8 +14,8 @@ import { QueryProvider } from "@/components/providers/QueryProvider";
 // });
 
 export const metadata: Metadata = {
-  title: "Hawanama - Pakistan Air Quality Monitoring",
-  description: "Real-time air quality monitoring across Pakistan. Track PM2.5, PM10, and other pollutants in major cities.",
+  title: "Hawanama - South Asia Air Quality Monitoring",
+  description: "Real-time air quality monitoring across South Asia. Track PM2.5, PM10, and other pollutants in major cities.",
   viewport: "width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no",
   icons: {
     icon: "/icon.png",

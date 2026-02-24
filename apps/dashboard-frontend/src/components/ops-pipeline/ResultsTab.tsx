@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card'
 import {
   ChevronLeft,
@@ -30,6 +30,7 @@ export function ResultsTab({
   predictionDataLoading,
   predictionError,
 }: ResultsTabProps) {
+  const [smoothed, setSmoothed] = useState(false)
   const dates = tileDates?.dates || []
   const currentIndex = selectedPredDate ? dates.indexOf(selectedPredDate) : -1
 
@@ -93,6 +94,16 @@ export function ResultsTab({
                     [&::-webkit-slider-thumb]:border-blue-600 [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-grab"
                 />
               </div>
+              <button
+                onClick={() => setSmoothed(s => !s)}
+                className={`px-2 py-0.5 rounded-full text-[10px] font-medium transition-colors ${
+                  smoothed
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-gray-100 text-gray-500'
+                }`}
+              >
+                {smoothed ? 'Smoothed' : 'Raw'}
+              </button>
               <div className="text-[10px] text-gray-500 min-w-[60px] text-right">
                 {currentIndex + 1}/{dates.length}
               </div>
@@ -104,7 +115,7 @@ export function ResultsTab({
       {/* Map - Full screen like main dashboard */}
       {selectedPredDate && (
         <div className="relative bg-slate-50 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 280px)', minHeight: '400px' }}>
-          <PredictionMap selectedDate={selectedPredDate} />
+          <PredictionMap selectedDate={selectedPredDate} smoothed={smoothed} />
         </div>
       )}
 

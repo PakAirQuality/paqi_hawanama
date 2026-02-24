@@ -7,4 +7,6 @@
 !apps/api/**
 !apps/worker/
 !apps/worker/**
+!apps/web-next/
+!apps/web-next/**
 !cloudbuild.yaml

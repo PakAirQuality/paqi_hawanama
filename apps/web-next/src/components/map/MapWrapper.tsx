@@ -1,6 +1,7 @@
 'use client'
 
 import dynamic from 'next/dynamic'
+import { MAP_CONFIG } from './config/mapConfig'
 
 // Dynamic import to avoid SSR issues with Mapbox GL JS
 const MapRefactored = dynamic(() => import('./MapRefactored'), { 
@@ -18,19 +19,23 @@ const MapRefactored = dynamic(() => import('./MapRefactored'), {
 interface MapWrapperProps {
   className?: string
   heatmapVisible?: boolean
+  windVisible?: boolean
 }
 
-export default function MapWrapper({ className, heatmapVisible = true }: MapWrapperProps) {
+export default function MapWrapper({ className, heatmapVisible = true, windVisible = false }: MapWrapperProps) {
   return (
-    <div className={`${className}`} style={{ 
-      width: '100%', 
+    <div className={`${className}`} style={{
+      width: '100%',
       height: '100%',
       transform: 'translate3d(0, 0, 0)', // Force GPU acceleration
       willChange: 'transform' // Optimize for animations
     }}>
-      <MapRefactored 
-        className="w-full h-full" 
+      <MapRefactored
+        className="w-full h-full"
+        center={MAP_CONFIG.center}
+        zoom={MAP_CONFIG.zoom}
         heatmapVisible={heatmapVisible}
+        windVisible={windVisible}
       />
     </div>
   )

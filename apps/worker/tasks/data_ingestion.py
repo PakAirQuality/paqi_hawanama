@@ -127,25 +127,29 @@ class DataIngestionTask:
     # --------------------------- manifest loading ---------------------------
 
     def _resolve_latest_manifest_path(self) -> Optional[Path]:
+        # Always sync from GCS first to avoid stale local manifests across container instances
+        try:
+            from app.manifest_utils import download_manifest_from_gcs
+        except ImportError:
+            from manifest_utils import download_manifest_from_gcs
+
+        gcs_prefix = "manifests/station_manifests"
         p_parq = self._manifest_dir / "latest.parquet"
         p_json = self._manifest_dir / "latest.jsonl"
+
+        self._manifest_dir.mkdir(parents=True, exist_ok=True)
+        if download_manifest_from_gcs(p_parq, gcs_prefix):
+            logger.info("Synced station manifest from GCS → %s", p_parq)
+            return p_parq
+        if download_manifest_from_gcs(p_json, gcs_prefix):
+            logger.info("Synced station manifest from GCS → %s", p_json)
+            return p_json
+
+        # Fall back to local file if GCS unavailable
         if p_parq.exists():
             return p_parq
         if p_json.exists():
             return p_json
-
-        # GCS fallback: try downloading if local files missing
-        try:
-            from app.manifest_utils import ensure_latest_from_gcs
-        except ImportError:
-            from manifest_utils import ensure_latest_from_gcs
-        gcs_result = ensure_latest_from_gcs(
-            self._manifest_dir, "parquet", "manifests/station_manifests"
-        )
-        if gcs_result:
-            logger.info("Recovered station manifest from GCS: %s", gcs_result)
-            return gcs_result
-
         return None
 
     def _read_parquet(self, path: Path) -> List[Dict[str, Any]]:

@@ -10,6 +10,7 @@ const INITIAL_ZOOM = 3.5
 
 interface PredictionMapProps {
   selectedDate: string
+  smoothed?: boolean
 }
 
 interface SelectedDistrict {
@@ -17,7 +18,7 @@ interface SelectedDistrict {
   pm25: number | null
 }
 
-export function PredictionMap({ selectedDate }: PredictionMapProps) {
+export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -99,7 +100,8 @@ export function PredictionMap({ selectedDate }: PredictionMapProps) {
         })
 
         // Add COG tile source
-        const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png`
+        const smoothParam = smoothed ? '?smoothed=true' : ''
+        const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
         map.addSource('pm25-tiles', {
           type: 'raster',
           tiles: [tileUrl],
@@ -281,8 +283,9 @@ export function PredictionMap({ selectedDate }: PredictionMapProps) {
 
           // Fetch PM2.5 value
           try {
+            const smoothParam = smoothed ? '&smoothed=true' : ''
             const res = await fetch(
-              `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}`,
+              `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${smoothParam}`,
               { headers: { Authorization: `Bearer ${API_TOKEN}` } }
             )
             if (res.ok) {
@@ -331,20 +334,21 @@ export function PredictionMap({ selectedDate }: PredictionMapProps) {
     }
   }, [])
 
-  // Update tile source when date changes
+  // Update tile source when date or smoothed changes
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return
 
     const map = mapRef.current
     const src = map.getSource('pm25-tiles')
     if (src) {
-      const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png`
+      const smoothParam = smoothed ? '?smoothed=true' : ''
+      const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
       src.setTiles([tileUrl])
     }
 
     // Clear selection when date changes
     setSelectedDistrict(null)
-  }, [selectedDate, mapLoaded])
+  }, [selectedDate, smoothed, mapLoaded])
 
   return (
     <div className="relative w-full h-full">

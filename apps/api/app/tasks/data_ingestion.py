@@ -127,8 +127,26 @@ class DataIngestionTask:
     # --------------------------- manifest loading ---------------------------
 
     def _resolve_latest_manifest_path(self) -> Optional[Path]:
+        # Always try to sync latest manifest from GCS first (handles cross-container staleness)
+        try:
+            from app.manifest_utils import download_manifest_from_gcs
+        except ImportError:
+            from manifest_utils import download_manifest_from_gcs
+
+        gcs_prefix = "manifests/station_manifests"
         p_parq = self._manifest_dir / "latest.parquet"
         p_json = self._manifest_dir / "latest.jsonl"
+
+        # Download fresh manifest from GCS (overwrites stale local copy)
+        self._manifest_dir.mkdir(parents=True, exist_ok=True)
+        if download_manifest_from_gcs(p_parq, gcs_prefix):
+            logger.info("Synced station manifest from GCS → %s", p_parq)
+            return p_parq
+        if download_manifest_from_gcs(p_json, gcs_prefix):
+            logger.info("Synced station manifest from GCS → %s", p_json)
+            return p_json
+
+        # Fall back to local file if GCS unavailable
         if p_parq.exists():
             return p_parq
         if p_json.exists():
@@ -171,32 +189,48 @@ class DataIngestionTask:
         async with AsyncSessionLocal() as session:
             q = text("""
                 SELECT
-                    st.id                     AS station_id,
+                    st.station_id             AS station_id,
                     st.source_station_id      AS source_station_id,
                     st.name                   AS iqair_station_name,
-                    st.latitude               AS lat,
-                    st.longitude              AS lon,
+                    st.lat                    AS lat,
+                    st.lon                    AS lon,
                     st.active                 AS active,
-                    co.name                   AS country,
-                    s.name                    AS state,
-                    c.name                    AS city
+                    COALESCE(co_direct.name, co_via_state.name) AS country,
+                    COALESCE(s_direct.name, s_via_city.name)    AS state,
+                    c.name                    AS city,
+                    COALESCE(p.code, '')      AS provider_code
                 FROM stations st
-                JOIN providers p  ON p.id = st.provider_id
-                JOIN cities c     ON c.id = st.city_id
-                JOIN states s     ON s.id = c.state_id
-                JOIN countries co ON co.id = s.country_id
-                WHERE p.code = :provider_code
-                  AND st.active = true
-                ORDER BY co.name, s.name, c.name, st.name
+                LEFT JOIN providers p        ON p.id = st.provider_id
+                LEFT JOIN cities c           ON c.id = st.city_id
+                LEFT JOIN states s_direct    ON s_direct.id = st.state_id
+                LEFT JOIN states s_via_city  ON s_via_city.id = c.state_id
+                LEFT JOIN countries co_direct    ON co_direct.id = st.country_id
+                LEFT JOIN countries co_via_state ON co_via_state.id = COALESCE(s_direct.country_id, s_via_city.country_id)
+                WHERE st.active = true
+                  AND COALESCE(p.code, '') != 'punjab'
+                ORDER BY COALESCE(co_direct.name, co_via_state.name), st.name
             """)
-            rs = await session.execute(q, {"provider_code": self._provider_code})
+            rs = await session.execute(q)
             out: List[Dict[str, Any]] = []
             for row in rs.fetchall():
                 m = dict(row._mapping)
-                m["provider_code"] = self._provider_code
+                # Use actual provider_code from DB, fallback to configured default
+                if not m.get("provider_code"):
+                    m["provider_code"] = self._provider_code
                 m["latitude"] = m.get("lat")
                 m["longitude"] = m.get("lon")
                 out.append(m)
+            # Log country distribution for debugging
+            country_counts: Dict[str, int] = {}
+            null_country = 0
+            for m in out:
+                c = m.get("country")
+                if c:
+                    country_counts[c] = country_counts.get(c, 0) + 1
+                else:
+                    null_country += 1
+            logger.info("DB fallback returned %d active stations. By country: %s, NULL country: %d",
+                        len(out), country_counts, null_country)
             return out
 
     def _load_manifest(self) -> List[Dict[str, Any]]:
@@ -588,13 +622,11 @@ class DataIngestionTask:
                 "report_dir": str(self._out_dir),
             }
 
-        # Filter to active <countries,provider> and dedupe (station_name, city, state, country)
+        # Filter to active <countries> and dedupe (station_name, city, state, country)
         country_set = {c.lower() for c in self._countries}
         seen = set()
         stations: List[Dict[str, Any]] = []
         for r in rows:
-            if r.get("provider_code") != self._provider_code:
-                continue
             if (r.get("country") or "").lower() not in country_set:
                 continue
             if r.get("active") is False:
