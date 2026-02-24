@@ -134,21 +134,33 @@ class CityIngestionTask:
 
     # --------------------------- manifest loading ---------------------------
 
-    def _prefer_existing(self, base: Path) -> Optional[Path]:
-        """Return latest.parquet if exists else latest.jsonl if exists, else None."""
+    def _prefer_existing(self, base: Path, gcs_prefix: str = "") -> Optional[Path]:
+        """Return latest.parquet if exists else latest.jsonl if exists, else try GCS, else None."""
         p_parq = base / "latest.parquet"
         p_json = base / "latest.jsonl"
         if p_parq.exists():
             return p_parq
         if p_json.exists():
             return p_json
+
+        # GCS fallback: try downloading if local files missing
+        if gcs_prefix:
+            try:
+                from app.manifest_utils import ensure_latest_from_gcs
+            except ImportError:
+                from manifest_utils import ensure_latest_from_gcs
+            gcs_result = ensure_latest_from_gcs(base, "parquet", gcs_prefix)
+            if gcs_result:
+                logger.info("Recovered manifest from GCS: %s", gcs_result)
+                return gcs_result
+
         return None
 
     def _resolve_latest_city_manifest_path(self) -> Optional[Path]:
-        return self._prefer_existing(self._city_manifest_dir)
+        return self._prefer_existing(self._city_manifest_dir, gcs_prefix="manifests/city_manifests")
 
     def _resolve_latest_station_manifest_path(self) -> Optional[Path]:
-        return self._prefer_existing(self._station_manifest_dir)
+        return self._prefer_existing(self._station_manifest_dir, gcs_prefix="manifests/station_manifests")
 
     def _read_parquet(self, path: Path) -> List[Dict[str, Any]]:
         if not _HAVE_PANDAS:

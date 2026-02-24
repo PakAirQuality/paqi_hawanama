@@ -616,7 +616,7 @@ async def get_station_uptime(
 
 
 async def get_station_timezone(db: AsyncSession, station_id: str) -> str:
-    """Get station timezone, default to Asia/Karachi for Pakistan"""
+    """Get station timezone, default to Asia/Karachi for South Asia"""
     q = text("""
         SELECT timezone FROM stations 
         WHERE station_id = :station_id
@@ -628,7 +628,7 @@ async def get_station_timezone(db: AsyncSession, station_id: str) -> str:
     if row and row["timezone"]:
         return row["timezone"]
     else:
-        # Default timezone for Pakistan stations
+        # Default timezone for South Asia stations
         return "Asia/Karachi"
 
 

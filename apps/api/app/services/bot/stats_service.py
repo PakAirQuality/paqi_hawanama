@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 logger = logging.getLogger(__name__)
 
-# Pakistan Time
+# Default timezone (PKT / Asia/Karachi)
 TZ = ZoneInfo("Asia/Karachi")
 
 

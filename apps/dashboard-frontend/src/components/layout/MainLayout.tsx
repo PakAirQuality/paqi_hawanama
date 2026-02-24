@@ -62,7 +62,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                 </div>
                 <div className="text-slate-400">|</div>
                 <div className="text-slate-600">
-                  Pakistan Air Quality Network
+                  South Asia Air Quality Network
                 </div>
               </div>
 

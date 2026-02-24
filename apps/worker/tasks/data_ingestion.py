@@ -133,6 +133,19 @@ class DataIngestionTask:
             return p_parq
         if p_json.exists():
             return p_json
+
+        # GCS fallback: try downloading if local files missing
+        try:
+            from app.manifest_utils import ensure_latest_from_gcs
+        except ImportError:
+            from manifest_utils import ensure_latest_from_gcs
+        gcs_result = ensure_latest_from_gcs(
+            self._manifest_dir, "parquet", "manifests/station_manifests"
+        )
+        if gcs_result:
+            logger.info("Recovered station manifest from GCS: %s", gcs_result)
+            return gcs_result
+
         return None
 
     def _read_parquet(self, path: Path) -> List[Dict[str, Any]]:

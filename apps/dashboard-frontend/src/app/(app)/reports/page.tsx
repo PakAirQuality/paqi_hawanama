@@ -106,8 +106,8 @@ export default function ReportsPage() {
 
       setError(null);
       try {
-        // Extract just the province name without ", Pakistan"
-        const provinceClean = province.replace(", Pakistan", "");
+        // Extract just the province/state name without country suffix
+        const provinceClean = province.replace(/, [^,]+$/, "");
         const c = await getCities(provinceClean);
         
         // Filter cities that belong to the selected province and extract city names
@@ -136,8 +136,8 @@ export default function ReportsPage() {
 
       setError(null);
       try {
-        // Extract just the province name without ", Pakistan"
-        const provinceClean = province.replace(", Pakistan", "");
+        // Extract just the province/state name without country suffix
+        const provinceClean = province.replace(/, [^,]+$/, "");
         const s = await getStations(provinceClean, city);
 
         // Backend returns [{station_id, station_name, display_name}, ...]

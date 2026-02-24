@@ -26,7 +26,7 @@ from app.core.database import get_database
 
 # How this network should appear to OpenAQ
 NETWORK_NAME = "PAQI"
-ORGANIZATION = "Pakistan Air Quality Initiative (PAQI)"
+ORGANIZATION = "South Asia Air Quality Initiative (PAQI)"
 PROVIDER_LABEL = "PAQI"
 HARDWARE_TYPE = "IQAIR Airvisual Outdoor"
 

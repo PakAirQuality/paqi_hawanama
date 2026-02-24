@@ -54,7 +54,7 @@ const INITIAL_CENTER: [number, number] = [69.3459, 30.3]
 const INITIAL_ZOOM = 3.5
 
 
-export const InteractivePakistanMap: React.FC<Props> = () => {
+export const InteractiveRegionalMap: React.FC<Props> = () => {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const [hoveredCity, setHoveredCity] = useState<CityAQI | null>(null)

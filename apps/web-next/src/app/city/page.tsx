@@ -20,7 +20,7 @@ export default function CitiesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -40,7 +40,7 @@ export default function CitiesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -86,7 +86,7 @@ export default function CitiesPage() {
           <div className="flex items-center justify-between">
             <div>
               <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-              <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+              <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
             </div>
             <nav className="flex items-center space-x-4">
               <Link href="/" className="text-sm hover:underline">Dashboard</Link>
@@ -101,7 +101,7 @@ export default function CitiesPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Air Quality by City</h1>
           <p className="text-muted-foreground">
-            Monitor air quality across major cities in Pakistan. Click on any city to view detailed information and station data.
+            Monitor air quality across major cities in South Asia. Click on any city to view detailed information and station data.
           </p>
         </div>
 

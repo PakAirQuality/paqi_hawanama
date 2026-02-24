@@ -77,7 +77,7 @@ class AirQualityScheduler:
     async def job_ingest_city(self):
         await self._ensure_manifests(need_station=False, need_city=True)
         logger.info("🚦 City ingestion: start")
-        summary = await self.city_ingest.fetch_city_readings_hourly(country="Pakistan")
+        summary = await self.city_ingest.fetch_city_readings_hourly()
         logger.info("✅ City ingestion: done | %s", summary)
         return summary
 

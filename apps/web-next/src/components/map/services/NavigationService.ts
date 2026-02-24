@@ -116,7 +116,7 @@ export class NavigationService {
     stationName?: string
   ): Array<{ label: string; href?: string }> {
     const breadcrumbs = [
-      { label: 'Pakistan', href: '/' }
+      { label: 'South Asia', href: '/' }
     ]
 
     if (currentPage === 'city' || currentPage === 'station') {

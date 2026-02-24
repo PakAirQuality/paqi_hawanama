@@ -132,7 +132,7 @@ export default function StationClient({ stationId }: StationClientProps) {
               />
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
               </div>
             </div>
             <div className="flex items-center space-x-4">
@@ -334,7 +334,7 @@ export default function StationClient({ stationId }: StationClientProps) {
                       }
                     }) || []
                     
-                    // Merge data by Pakistan timestamp
+                    // Merge data by local timestamp
                     const chartDataMap = new Map()
                     
                     // Add AQI data

@@ -6,7 +6,7 @@ from app.routers import health, meta, nearest, current, history, dashboard, citi
 
 app = FastAPI(
     title="Hawanama API",
-    description="Air Quality Monitoring API for Pakistan",
+    description="Air Quality Monitoring API for South Asia",
     version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )

@@ -90,7 +90,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -110,7 +110,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -155,7 +155,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
     }
   }
 
-  // Prepare chart data for bar chart using Pakistan time and handling null values
+  // Prepare chart data for bar chart using local time and handling null values
   const chartData = historicalData?.readings?.map((reading: { 
     timestamp_utc: string; 
     timestamp_pk: string; 
@@ -164,7 +164,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
     avg_pm25?: number; 
     reporting_stations?: number 
   }, index: number) => {
-    // Use Pakistan time for display
+    // Use local time for display
     const pkDate = new Date(reading.timestamp_pk || reading.timestamp)
     const hour = pkDate.getHours()
     const aqiValue = reading.avg_aqi
@@ -204,7 +204,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
               />
               <div className="min-w-0">
                 <Link href="/" className="text-lg sm:text-2xl font-bold text-foreground truncate block">Hawanama</Link>
-                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Pakistan Air Quality Monitoring</p>
+                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">South Asia Air Quality Monitoring</p>
               </div>
             </div>
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
@@ -232,7 +232,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
             <div className="flex items-center gap-3 min-w-0">
               <div className="min-w-0 flex-1">
                 <h1 className="text-xl sm:text-2xl font-bold text-foreground truncate">{cityData.city_name}</h1>
-                <p className="text-sm text-muted-foreground">{cityData.state}, Pakistan</p>
+                <p className="text-sm text-muted-foreground">{cityData.state}{cityData.country ? `, ${cityData.country}` : ''}</p>
               </div>
               {/* Mobile: AQI box next to city name */}
               <div className="sm:hidden">

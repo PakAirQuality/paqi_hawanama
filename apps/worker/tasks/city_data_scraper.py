@@ -75,7 +75,7 @@ class CityDataScraper:
         self._limiter = _AsyncRateLimiter(self._rate)
         
         # Filters
-        self._country = os.getenv("INGEST_COUNTRY", "Pakistan")
+        self._country = os.getenv("INGEST_COUNTRY", "")
         self._provider_code = os.getenv("STATION_PROVIDER_CODE", "airvisual")
         
         # Manifest directory (use city manifests instead of station manifests)

@@ -21,7 +21,7 @@ export function HistoryMiniChart({ data, categories }: HistoryMiniChartProps) {
     return () => window.removeEventListener('resize', checkIsMobile)
   }, [])
 
-  // Prepare chart data with colors using Pakistan time
+  // Prepare chart data with colors using local time
   const chartData = data.map(item => {
     const category = getAQICategory(item.aqi_us, categories)
     const pkDate = new Date(item.timestamp_pk || item.timestamp)

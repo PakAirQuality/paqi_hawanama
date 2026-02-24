@@ -1,6 +1,6 @@
 "use client";
 
-import { InteractivePakistanMap } from '@/components/dashboard/InteractivePakistanMap'
+import { InteractiveRegionalMap } from '@/components/dashboard/InteractivePakistanMap'
 import { YearOverYearChart } from '@/components/charts/YearOverYearChart'
 import { HeatmapChart } from '@/components/charts/HeatmapChart'
 
@@ -8,7 +8,7 @@ export default function AQIDashboard() {
   return (
     <div className="flex flex-col">
       {/* Full-bleed Map Hero */}
-      <InteractivePakistanMap />
+      <InteractiveRegionalMap />
 
       {/* Section: Year-over-Year PM2.5 Trends */}
       <section className="border-t border-slate-200">

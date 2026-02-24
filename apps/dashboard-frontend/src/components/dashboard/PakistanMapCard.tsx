@@ -34,7 +34,7 @@ interface PakistanMapCardProps {
   aboveGuidelinePct: number
 }
 
-export const PakistanMapCard: React.FC<PakistanMapCardProps> = ({
+export const RegionalMapCard: React.FC<PakistanMapCardProps> = ({
   networkPm25,
   bandLabel,
   worstCity,
@@ -80,7 +80,7 @@ export const PakistanMapCard: React.FC<PakistanMapCardProps> = ({
       <div className="flex-1 flex flex-col justify-between">
         <div>
           <h3 className="text-sm font-semibold text-slate-900">
-            Air Quality Across Pakistan
+            Air Quality Across South Asia
           </h3>
 
           <div className="mt-3 inline-flex items-center rounded-full bg-red-100 px-3 py-1 text-[11px] font-semibold text-red-700 uppercase tracking-wide">

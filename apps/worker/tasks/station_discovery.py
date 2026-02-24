@@ -21,11 +21,11 @@ from sqlalchemy import text
 try:
     from app.services.ingestion.iqair_service import IQAirClient
     from app.services.database import DatabaseService, AsyncSessionLocal
-    from app.manifest_utils import finalize_union_manifest
+    from app.manifest_utils import finalize_union_manifest, upload_manifest_to_gcs
 except ImportError:  # running in pure worker repo layout
     from services.iqair_client import IQAirClient
     from services.database import DatabaseService, AsyncSessionLocal
-    from manifest_utils import finalize_union_manifest
+    from manifest_utils import finalize_union_manifest, upload_manifest_to_gcs
 
 logger = logging.getLogger(__name__)
 
@@ -342,15 +342,17 @@ class StationDiscoveryTask:
             logger.warning("No rows to write to manifest for run_id=%s", run_id)
 
         # ---- Station manifest (union logic) ----
+        station_gcs_prefix = "manifests/station_manifests"
         try:
             final_union_rows = finalize_union_manifest(
                 path_root=self.manifest_root,
-                run_dir=run_dir, 
+                run_dir=run_dir,
                 fmt=self.manifest_format,
                 discovered_rows=rows,
-                cities_successfully_fetched=cities_successfully_fetched
+                cities_successfully_fetched=cities_successfully_fetched,
+                gcs_prefix=station_gcs_prefix
             )
-            logger.info("📦 Wrote union station manifest: %d total stations (%d discovered this run)", 
+            logger.info("📦 Wrote union station manifest: %d total stations (%d discovered this run)",
                        len(final_union_rows), len(rows))
         except Exception as e:
             logger.error("Failed to write union manifest: %s", e)
@@ -366,10 +368,13 @@ class StationDiscoveryTask:
                     for r in rows:
                         f.write(json.dumps(r, ensure_ascii=False) + "\n")
             final_union_rows = rows
+            # Still try to upload fallback manifest to GCS
+            upload_manifest_to_gcs(latest_path, station_gcs_prefix)
 
         # ---- Derived city manifest (run-scoped + latest) ----
+        city_gcs_prefix = "manifests/city_manifests"
         try:
-            self._write_city_manifest_from_station_rows(run_id, final_union_rows)
+            self._write_city_manifest_from_station_rows(run_id, final_union_rows, city_gcs_prefix)
         except Exception as e:
             logger.warning("Failed writing derived city manifest: %s", e)
 
@@ -381,7 +386,7 @@ class StationDiscoveryTask:
         os.replace(tmp_summary, summary_path)
         logger.info("🧾 Wrote discovery summary: %s", summary_path)
 
-    def _write_city_manifest_from_station_rows(self, run_id: str, station_rows: List[Dict[str, Any]]) -> None:
+    def _write_city_manifest_from_station_rows(self, run_id: str, station_rows: List[Dict[str, Any]], gcs_prefix: str = "") -> None:
         """
         Derive a city manifest from station rows of the same discovery run.
         Writes:
@@ -461,6 +466,10 @@ class StationDiscoveryTask:
             os.replace(tmp_latest, latest)
             logger.info("📦 Wrote city manifest (jsonl): %s", run_path)
             logger.info("📌 Updated latest city manifest pointer: %s", latest)
+
+        # Upload city manifest to GCS
+        if gcs_prefix:
+            upload_manifest_to_gcs(latest, gcs_prefix)
 
     async def _deactivate_missing_city_stations(
         self,

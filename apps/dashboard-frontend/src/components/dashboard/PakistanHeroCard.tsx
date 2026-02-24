@@ -47,7 +47,7 @@ interface Props {
   stations: Station[]
 }
 
-export const PakistanHeroCard: React.FC<Props> = ({
+export const RegionalHeroCard: React.FC<Props> = ({
   networkPm25,
   bandLabel,
   worstCity,
@@ -73,7 +73,7 @@ export const PakistanHeroCard: React.FC<Props> = ({
     <div className="flex-1 flex flex-col justify-between">
       <div>
         <h3 className="text-lg font-semibold text-slate-900">
-          Air Quality Across Pakistan
+          Air Quality Across South Asia
         </h3>
 
         <span className="inline-flex mt-4 items-center rounded-full bg-red-50 px-4 py-1 text-xs font-semibold tracking-wide text-red-600 uppercase">

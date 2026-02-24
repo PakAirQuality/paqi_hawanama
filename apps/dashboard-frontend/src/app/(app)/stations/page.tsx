@@ -109,7 +109,7 @@ export default function StationsPage() {
       <div>
         <h2 className="text-3xl font-bold tracking-tight">Stations</h2>
         <p className="text-muted-foreground">
-          {stations.length} monitoring stations across Pakistan
+          {stations.length} monitoring stations across South Asia
         </p>
       </div>
 

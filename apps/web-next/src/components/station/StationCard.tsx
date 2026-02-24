@@ -90,7 +90,7 @@ export function StationCard() {
   const { data: pm25History, isLoading: pm25HistoryLoading } = useStationPM25History(stationId)
   const { data: categories } = useAQICategories()
 
-  // Prepare combined chart data using Pakistan time and handling null values
+  // Prepare combined chart data using local time and handling null values
   const chartData = React.useMemo(() => {
     const aqiData = history?.map((item) => {
       const pkDate = new Date(item.timestamp_pk)
@@ -116,7 +116,7 @@ export function StationCard() {
       }
     }) || []
     
-    // Merge data by Pakistan timestamp
+    // Merge data by local timestamp
     const chartDataMap = new Map()
     
     // Add AQI data
@@ -152,7 +152,7 @@ export function StationCard() {
     const sortedData = Array.from(chartDataMap.values())
       .sort((a, b) => new Date(a.timestamp_pk).getTime() - new Date(b.timestamp_pk).getTime())
     
-    // Get current Pakistan time hour to determine rightmost position
+    // Get current local time hour to determine rightmost position
     const currentPKTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' })
     const currentHour = new Date(currentPKTime).getHours()
     

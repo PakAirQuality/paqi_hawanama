@@ -46,7 +46,7 @@ async def get_station_history_data(
         target_station = stations_list[station_id - 1]  # Convert to 0-based index
         hash_station_id = target_station.station_id
         
-        # Generate complete hourly time series with Pakistan timezone
+        # Generate complete hourly time series with local timezone
         history_result = await db.execute(text("""
             WITH RECURSIVE hour_series AS (
                 SELECT 
@@ -129,7 +129,7 @@ async def get_station_history_pm25_data(
         target_station = stations_list[station_id - 1]  # Convert to 0-based index
         hash_station_id = target_station.station_id
         
-        # Generate complete hourly time series with Pakistan timezone
+        # Generate complete hourly time series with local timezone
         history_result = await db.execute(text("""
             WITH RECURSIVE hour_series AS (
                 SELECT 

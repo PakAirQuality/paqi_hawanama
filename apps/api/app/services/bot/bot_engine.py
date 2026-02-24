@@ -24,7 +24,7 @@ from app.services.bot.twitter_client import TwitterAutomationService
 
 logger = logging.getLogger(__name__)
 
-# Pakistan Time
+# Default timezone (PKT / Asia/Karachi)
 TZ = ZoneInfo("Asia/Karachi")
 
 # Bot configuration - Smart Budget Model
