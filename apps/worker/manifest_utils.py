@@ -188,6 +188,7 @@ def finalize_union_manifest(
     """
     cities_successfully_fetched = cities_successfully_fetched or set()
 
+    ensure_latest_from_gcs(path_root, fmt, gcs_prefix)
     prev = load_latest_manifest(path_root, fmt)
     prev_by_key: Dict[Tuple[str,str], ManifestRow] = {_key(r): r for r in prev}
 

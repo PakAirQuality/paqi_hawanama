@@ -233,27 +233,26 @@ class StationDiscoveryTask:
                                     if len(station_infos) >= batch_size or i == len(stations) - 1:
                                         async with AsyncSessionLocal() as station_session:
                                             for info in station_infos:
+                                                # Always record in manifest (tracks IQAir discovery, not DB state)
+                                                manifest_rows.append({
+                                                    "run_id": progress_id,
+                                                    "provider_code": "airvisual",
+                                                    "station_id": None,
+                                                    "source_station_id": info["source_station_id"],
+                                                    "country": info["country"],
+                                                    "state": info["state"],
+                                                    "city": info["city"],
+                                                    "iqair_station_name": info["name"],
+                                                    "lat": info["lat"],
+                                                    "lon": info["lon"],
+                                                    "active": True,
+                                                    "last_seen_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                                })
                                                 try:
                                                     result = await self.db_service.upsert_station(station_session, info)
-                                                    # Some implementations return station_id; capture if present
                                                     returned_station_id = (result.get("station_id") if isinstance(result, dict) else None)
-
-                                                    # --- Manifest row capture (active, discovered this run) ---
-                                                    manifest_rows.append({
-                                                        "run_id": progress_id,
-                                                        "provider_code": "airvisual",
-                                                        "station_id": returned_station_id,  # may be None if service doesn't return it
-                                                        "source_station_id": info["source_station_id"],
-                                                        "country": info["country"],
-                                                        "state": info["state"],
-                                                        "city": info["city"],
-                                                        "iqair_station_name": info["name"],
-                                                        "lat": info["lat"],
-                                                        "lon": info["lon"],
-                                                        "active": True,
-                                                        "last_seen_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                                                    })
-                                                    # ---------------------------------------------------------
+                                                    if returned_station_id:
+                                                        manifest_rows[-1]["station_id"] = returned_station_id
 
                                                     if result.get('created'):
                                                         total_stations_created += 1

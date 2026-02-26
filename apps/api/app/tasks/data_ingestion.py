@@ -245,11 +245,10 @@ class DataIngestionTask:
             logger.error("No station manifest found in %s", self._manifest_dir)
             rows = []
 
-        # Optional: DB fallback
+        # Optional: DB fallback (caller handles async DB query)
         if (not rows) and self._db_station_fallback:
-            logger.info("Station manifest empty → using DB fallback for provider=%s, countries=%s",
+            logger.info("Station manifest empty; caller will attempt DB fallback for provider=%s, countries=%s",
                         self._provider_code, self._countries)
-            return []
 
         # Normalize a few common field variants for safety
         for r in rows:
