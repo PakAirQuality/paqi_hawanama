@@ -2,9 +2,13 @@
 
 import { useRef, useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
 import { API_BASE, API_TOKEN } from './api'
 
-const MAPBOX_TOKEN = '***REMOVED***'
+mapboxgl.accessToken = '***REMOVED***'
+
+const STYLE_URL = 'mapbox://styles/rehan0900/cmmh9p69z009m01qu0nnn3iwu'
 const INITIAL_CENTER: [number, number] = [69.3459, 30.3]
 const INITIAL_ZOOM = 3.5
 
@@ -20,310 +24,303 @@ interface SelectedDistrict {
 
 export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
-  const mapRef = useRef<any>(null)
+  const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [hoveredDistrict, setHoveredDistrict] = useState<string | null>(null)
   const [selectedDistrict, setSelectedDistrict] = useState<SelectedDistrict | null>(null)
 
   // Initialize map once
   useEffect(() => {
-    if (!mapContainer.current) return
+    if (!mapContainer.current || mapRef.current) return
 
-    import('maplibre-gl').then((maplibregl) => {
-      import('maplibre-gl/dist/maplibre-gl.css')
-
-      if (mapRef.current) return
-
-      // Mapbox light style (same as main dashboard)
-      const mapStyle = {
-        version: 8 as const,
-        sources: {
-          'mapbox-streets': {
-            type: 'raster' as const,
-            tiles: [
-              `https://api.mapbox.com/styles/v1/mapbox/light-v11/tiles/{z}/{x}/{y}?access_token=${MAPBOX_TOKEN}`
-            ],
-            tileSize: 512,
-            attribution: '© Mapbox © OpenStreetMap'
+    const map = new mapboxgl.Map({
+      container: mapContainer.current,
+      style: STYLE_URL,
+      center: INITIAL_CENTER,
+      zoom: INITIAL_ZOOM,
+      minZoom: 2,
+      maxZoom: 10,
+      attributionControl: false,
+      transformRequest: (url: string) => {
+        if (url.includes('/ops/pipeline/tiles/')) {
+          return {
+            url,
+            headers: { Authorization: `Bearer ${API_TOKEN}` }
           }
-        },
-        layers: [
-          {
-            id: 'mapbox-tiles',
-            type: 'raster' as const,
-            source: 'mapbox-streets',
-            minzoom: 0,
-            maxzoom: 22
-          }
-        ]
+        }
+        return { url }
       }
+    })
 
-      const map = new maplibregl.default.Map({
-        container: mapContainer.current!,
-        style: mapStyle,
-        center: INITIAL_CENTER,
-        zoom: INITIAL_ZOOM,
-        minZoom: 2,
-        maxZoom: 10,
-        transformRequest: (url: string) => {
-          if (url.includes('/ops/pipeline/tiles/')) {
-            return {
-              url,
-              headers: { Authorization: `Bearer ${API_TOKEN}` }
-            }
-          }
-          return { url }
+    mapRef.current = map
+
+    map.on('load', async () => {
+      // Load district boundaries (ADM2)
+      const districtsResponse = await fetch('/pakistan_districts.geojson')
+      const districtsGeoJSON = await districtsResponse.json()
+
+      // Load province boundaries (ADM1)
+      const adm1Response = await fetch('/pakistan_adm1.geojson')
+      const adm1GeoJSON = await adm1Response.json()
+
+      // Load dissolved ADM2 boundary (same geometry used for raster clipping)
+      const dissolvedResponse = await fetch('/pakistan_adm2_dissolved.geojson')
+      const dissolvedGeoJSON = await dissolvedResponse.json()
+
+      // Add sources
+      map.addSource('pakistan-districts', {
+        type: 'geojson',
+        data: districtsGeoJSON,
+        promoteId: 'shapeName'
+      })
+
+      map.addSource('pakistan-adm1', {
+        type: 'geojson',
+        data: adm1GeoJSON
+      })
+
+      map.addSource('pakistan-boundary', {
+        type: 'geojson',
+        data: dissolvedGeoJSON
+      })
+
+      // Add COG tile source
+      const smoothParam = smoothed ? '?smoothed=true' : ''
+      const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
+      map.addSource('pm25-tiles', {
+        type: 'raster',
+        tiles: [tileUrl],
+        tileSize: 256,
+        bounds: [60.45, 23.25, 77.95, 37.35],
+        minzoom: 0,
+        maxzoom: 12,
+      })
+
+      // 1. PM2.5 raster layer — 'middle' slot places it below basemap labels
+      map.addLayer({
+        id: 'pm25-raster',
+        type: 'raster',
+        source: 'pm25-tiles',
+        slot: 'middle',
+        paint: {
+          'raster-opacity': 0.85,
+          'raster-resampling': 'linear',
+        },
+      })
+
+      // 2. District fill layer (transparent, for interaction)
+      map.addLayer({
+        id: 'districts-fill',
+        type: 'fill',
+        source: 'pakistan-districts',
+        paint: {
+          'fill-color': 'transparent',
+          'fill-opacity': 0
         }
       })
 
-      mapRef.current = map
+      // 3. District hover highlight
+      map.addLayer({
+        id: 'districts-hover',
+        type: 'fill',
+        source: 'pakistan-districts',
+        paint: {
+          'fill-color': '#ffffff',
+          'fill-opacity': [
+            'case',
+            ['boolean', ['feature-state', 'hover'], false],
+            0.3,
+            0
+          ]
+        }
+      })
 
-      map.on('load', async () => {
-        // Load district boundaries (ADM2)
-        const districtsResponse = await fetch('/pakistan_districts.geojson')
-        const districtsGeoJSON = await districtsResponse.json()
+      // 4. District selection highlight
+      map.addLayer({
+        id: 'districts-selected',
+        type: 'fill',
+        source: 'pakistan-districts',
+        paint: {
+          'fill-color': '#3b82f6',
+          'fill-opacity': [
+            'case',
+            ['boolean', ['feature-state', 'selected'], false],
+            0.4,
+            0
+          ]
+        }
+      })
 
-        // Load province boundaries (ADM1)
-        const adm1Response = await fetch('/pakistan_adm1.geojson')
-        const adm1GeoJSON = await adm1Response.json()
+      // 5. District borders - subtle
+      map.addLayer({
+        id: 'districts-borders',
+        type: 'line',
+        source: 'pakistan-districts',
+        paint: {
+          'line-color': [
+            'case',
+            ['boolean', ['feature-state', 'selected'], false],
+            '#475569',
+            ['boolean', ['feature-state', 'hover'], false],
+            '#64748b',
+            '#94a3b8'
+          ],
+          'line-width': [
+            'case',
+            ['boolean', ['feature-state', 'selected'], false],
+            1.5,
+            ['boolean', ['feature-state', 'hover'], false],
+            1,
+            0.3
+          ],
+          'line-opacity': 0.5
+        }
+      })
 
-        // Add sources
-        map.addSource('pakistan-districts', {
-          type: 'geojson',
-          data: districtsGeoJSON,
-          promoteId: 'shapeName'
-        })
+      // 6. Province borders - subtle
+      map.addLayer({
+        id: 'province-borders',
+        type: 'line',
+        source: 'pakistan-adm1',
+        paint: {
+          'line-color': '#94a3b8',
+          'line-width': 1,
+          'line-opacity': 0.7
+        }
+      })
 
-        map.addSource('pakistan-adm1', {
-          type: 'geojson',
-          data: adm1GeoJSON
-        })
+      // 7. Country outline — matches the exact geometry used for raster clipping
+      map.addLayer({
+        id: 'country-outline',
+        type: 'line',
+        source: 'pakistan-boundary',
+        paint: {
+          'line-color': '#64748b',
+          'line-width': 1.5,
+          'line-opacity': 0.9
+        }
+      })
 
-        // Add COG tile source
-        const smoothParam = smoothed ? '?smoothed=true' : ''
-        const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
-        map.addSource('pm25-tiles', {
-          type: 'raster',
-          tiles: [tileUrl],
-          tileSize: 256,
-          bounds: [60.45, 23.25, 77.95, 37.35],
-          minzoom: 0,
-          maxzoom: 12,
-        })
+      // Track hovered feature
+      let hoveredId: string | null = null
 
-        // 1. PM2.5 raster layer (server-side clipped to Pakistan boundary)
-        map.addLayer({
-          id: 'pm25-raster',
-          type: 'raster',
-          source: 'pm25-tiles',
-          paint: {
-            'raster-opacity': 0.85,
-            'raster-resampling': 'linear',
-          },
-        })
-
-        // 2. District fill layer (transparent, for interaction)
-        map.addLayer({
-          id: 'districts-fill',
-          type: 'fill',
-          source: 'pakistan-districts',
-          paint: {
-            'fill-color': 'transparent',
-            'fill-opacity': 0
-          }
-        })
-
-        // 4. District hover highlight
-        map.addLayer({
-          id: 'districts-hover',
-          type: 'fill',
-          source: 'pakistan-districts',
-          paint: {
-            'fill-color': '#ffffff',
-            'fill-opacity': [
-              'case',
-              ['boolean', ['feature-state', 'hover'], false],
-              0.3,
-              0
-            ]
-          }
-        })
-
-        // 5. District selection highlight
-        map.addLayer({
-          id: 'districts-selected',
-          type: 'fill',
-          source: 'pakistan-districts',
-          paint: {
-            'fill-color': '#3b82f6',
-            'fill-opacity': [
-              'case',
-              ['boolean', ['feature-state', 'selected'], false],
-              0.4,
-              0
-            ]
-          }
-        })
-
-        // 6. District borders - subtle
-        map.addLayer({
-          id: 'districts-borders',
-          type: 'line',
-          source: 'pakistan-districts',
-          paint: {
-            'line-color': [
-              'case',
-              ['boolean', ['feature-state', 'selected'], false],
-              '#475569',
-              ['boolean', ['feature-state', 'hover'], false],
-              '#64748b',
-              '#94a3b8'
-            ],
-            'line-width': [
-              'case',
-              ['boolean', ['feature-state', 'selected'], false],
-              1.5,
-              ['boolean', ['feature-state', 'hover'], false],
-              1,
-              0.3
-            ],
-            'line-opacity': 0.5
-          }
-        })
-
-        // 7. Province borders - subtle
-        map.addLayer({
-          id: 'province-borders',
-          type: 'line',
-          source: 'pakistan-adm1',
-          paint: {
-            'line-color': '#94a3b8',
-            'line-width': 1,
-            'line-opacity': 0.7
-          }
-        })
-
-        // Track hovered feature
-        let hoveredId: string | null = null
-
-        // Hover handlers
-        map.on('mousemove', 'districts-fill', (e: any) => {
-          if (e.features && e.features.length > 0) {
-            const feature = e.features[0]
-            const newId = feature.properties.shapeName
-
-            if (hoveredId !== newId) {
-              if (hoveredId) {
-                map.setFeatureState(
-                  { source: 'pakistan-districts', id: hoveredId },
-                  { hover: false }
-                )
-              }
-              hoveredId = newId
-              map.setFeatureState(
-                { source: 'pakistan-districts', id: newId },
-                { hover: true }
-              )
-              setHoveredDistrict(newId)
-            }
-            map.getCanvas().style.cursor = 'pointer'
-          }
-        })
-
-        map.on('mouseleave', 'districts-fill', () => {
-          if (hoveredId) {
-            map.setFeatureState(
-              { source: 'pakistan-districts', id: hoveredId },
-              { hover: false }
-            )
-            hoveredId = null
-          }
-          setHoveredDistrict(null)
-          map.getCanvas().style.cursor = ''
-        })
-
-        // Click handler - select district and fetch PM2.5
-        let selectedId: string | null = null
-
-        map.on('click', 'districts-fill', async (e: any) => {
-          if (!e.features || e.features.length === 0) return
-
+      // Hover handlers
+      map.on('mousemove', 'districts-fill', (e) => {
+        if (e.features && e.features.length > 0) {
           const feature = e.features[0]
-          const districtName = feature.properties.shapeName
-          const newId = districtName
+          const newId = feature.properties?.shapeName
 
-          // Reset previous selection
-          if (selectedId) {
-            map.setFeatureState(
-              { source: 'pakistan-districts', id: selectedId },
-              { selected: false }
-            )
-          }
-
-          // Set new selection
-          selectedId = newId
-          map.setFeatureState(
-            { source: 'pakistan-districts', id: newId },
-            { selected: true }
-          )
-
-          // Get centroid for point query
-          let centroid: [number, number]
-
-          if (feature.geometry.type === 'Polygon') {
-            centroid = getCentroid(feature.geometry.coordinates[0])
-          } else if (feature.geometry.type === 'MultiPolygon') {
-            const largest = feature.geometry.coordinates.reduce((a: any, b: any) =>
-              a[0].length > b[0].length ? a : b
-            )
-            centroid = getCentroid(largest[0])
-          } else {
-            centroid = [e.lngLat.lng, e.lngLat.lat]
-          }
-
-          // Fetch PM2.5 value
-          try {
-            const smoothParam = smoothed ? '&smoothed=true' : ''
-            const res = await fetch(
-              `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${smoothParam}`,
-              { headers: { Authorization: `Bearer ${API_TOKEN}` } }
-            )
-            if (res.ok) {
-              const data = await res.json()
-              setSelectedDistrict({
-                name: districtName,
-                pm25: data.pm25
-              })
-            } else {
-              setSelectedDistrict({
-                name: districtName,
-                pm25: null
-              })
+          if (hoveredId !== newId) {
+            if (hoveredId) {
+              map.setFeatureState(
+                { source: 'pakistan-districts', id: hoveredId },
+                { hover: false }
+              )
             }
-          } catch (err) {
-            console.error('Point query failed:', err)
+            hoveredId = newId
+            map.setFeatureState(
+              { source: 'pakistan-districts', id: newId },
+              { hover: true }
+            )
+            setHoveredDistrict(newId)
+          }
+          map.getCanvas().style.cursor = 'pointer'
+        }
+      })
+
+      map.on('mouseleave', 'districts-fill', () => {
+        if (hoveredId) {
+          map.setFeatureState(
+            { source: 'pakistan-districts', id: hoveredId },
+            { hover: false }
+          )
+          hoveredId = null
+        }
+        setHoveredDistrict(null)
+        map.getCanvas().style.cursor = ''
+      })
+
+      // Click handler - select district and fetch PM2.5
+      let selectedId: string | null = null
+
+      map.on('click', 'districts-fill', async (e) => {
+        if (!e.features || e.features.length === 0) return
+
+        const feature = e.features[0]
+        const districtName = feature.properties?.shapeName
+        const newId = districtName
+
+        // Reset previous selection
+        if (selectedId) {
+          map.setFeatureState(
+            { source: 'pakistan-districts', id: selectedId },
+            { selected: false }
+          )
+        }
+
+        // Set new selection
+        selectedId = newId
+        map.setFeatureState(
+          { source: 'pakistan-districts', id: newId },
+          { selected: true }
+        )
+
+        // Get centroid for point query
+        let centroid: [number, number]
+
+        if (feature.geometry.type === 'Polygon') {
+          centroid = getCentroid((feature.geometry as any).coordinates[0])
+        } else if (feature.geometry.type === 'MultiPolygon') {
+          const largest = (feature.geometry as any).coordinates.reduce((a: any, b: any) =>
+            a[0].length > b[0].length ? a : b
+          )
+          centroid = getCentroid(largest[0])
+        } else {
+          centroid = [e.lngLat.lng, e.lngLat.lat]
+        }
+
+        // Fetch PM2.5 value
+        try {
+          const smoothParam = smoothed ? '&smoothed=true' : ''
+          const res = await fetch(
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${smoothParam}`,
+            { headers: { Authorization: `Bearer ${API_TOKEN}` } }
+          )
+          if (res.ok) {
+            const data = await res.json()
+            setSelectedDistrict({
+              name: districtName,
+              pm25: data.pm25
+            })
+          } else {
             setSelectedDistrict({
               name: districtName,
               pm25: null
             })
           }
-        })
-
-        // Click outside to deselect
-        map.on('click', (e: any) => {
-          const features = map.queryRenderedFeatures(e.point, { layers: ['districts-fill'] })
-          if (features.length === 0 && selectedId) {
-            map.setFeatureState(
-              { source: 'pakistan-districts', id: selectedId },
-              { selected: false }
-            )
-            selectedId = null
-            setSelectedDistrict(null)
-          }
-        })
-
-        setMapLoaded(true)
+        } catch (err) {
+          console.error('Point query failed:', err)
+          setSelectedDistrict({
+            name: districtName,
+            pm25: null
+          })
+        }
       })
+
+      // Click outside to deselect
+      map.on('click', (e) => {
+        const features = map.queryRenderedFeatures(e.point, { layers: ['districts-fill'] })
+        if (features.length === 0 && selectedId) {
+          map.setFeatureState(
+            { source: 'pakistan-districts', id: selectedId },
+            { selected: false }
+          )
+          selectedId = null
+          setSelectedDistrict(null)
+        }
+      })
+
+      setMapLoaded(true)
     })
 
     return () => {
@@ -339,12 +336,33 @@ export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapP
     if (!mapRef.current || !mapLoaded) return
 
     const map = mapRef.current
-    const src = map.getSource('pm25-tiles')
-    if (src) {
-      const smoothParam = smoothed ? '?smoothed=true' : ''
-      const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
-      src.setTiles([tileUrl])
-    }
+    const smoothParam = smoothed ? '?smoothed=true' : ''
+    const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
+
+    // Remove old and re-add with new URL
+    if (map.getLayer('pm25-raster')) map.removeLayer('pm25-raster')
+    if (map.getSource('pm25-tiles')) map.removeSource('pm25-tiles')
+
+    map.addSource('pm25-tiles', {
+      type: 'raster',
+      tiles: [tileUrl],
+      tileSize: 256,
+      bounds: [60.45, 23.25, 77.95, 37.35],
+      minzoom: 0,
+      maxzoom: 12,
+    })
+
+    // Re-add raster layer in 'middle' slot (below basemap labels)
+    map.addLayer({
+      id: 'pm25-raster',
+      type: 'raster',
+      source: 'pm25-tiles',
+      slot: 'middle',
+      paint: {
+        'raster-opacity': 0.85,
+        'raster-resampling': 'linear',
+      },
+    })
 
     // Clear selection when date changes
     setSelectedDistrict(null)
@@ -398,4 +416,3 @@ function getCentroid(ring: number[][]): [number, number] {
   }
   return [x / ring.length, y / ring.length]
 }
-

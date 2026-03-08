@@ -40,6 +40,11 @@ RUN touch /app/app/tasks/__init__.py \
 # Copy alembic configuration (migrations handled via SQLAlchemy)
 COPY apps/api/alembic.ini /app/alembic.ini
 
+# Copy Pakistan boundary data (geoBoundaries) for tile clipping and district interactions
+COPY apps/api/data/pakistan_country.geojson /app/data/pakistan_country.geojson
+COPY apps/api/data/pakistan_districts.geojson /app/data/pakistan_districts.geojson
+COPY apps/api/data/pakistan_adm2_dissolved.geojson /app/data/pakistan_adm2_dissolved.geojson
+
 # Create artifacts directory structure
 RUN mkdir -p /app/artifacts/station_manifests /app/artifacts/city_manifests /app/artifacts/ingest_runs
 

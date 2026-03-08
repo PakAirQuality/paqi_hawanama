@@ -713,6 +713,112 @@ def _get_feature_cmap(name: str) -> Dict[int, tuple]:
     return _FEATURE_CMAPS[name]
 
 
+# =============================================================================
+# PAKISTAN BOUNDARY CLIPPING FOR TILES
+# =============================================================================
+
+_PAKISTAN_GEOMS_3857 = None  # cached transformed geometries
+
+
+def _load_pakistan_boundary_3857():
+    """Load dissolved ADM2 boundary and transform to EPSG:3857.
+
+    Uses the union of all ADM2 district polygons so the raster clip edge
+    aligns exactly with the district outlines rendered on the frontend.
+    Cached on first call.
+    """
+    global _PAKISTAN_GEOMS_3857
+    if _PAKISTAN_GEOMS_3857 is not None:
+        return _PAKISTAN_GEOMS_3857
+
+    import os
+    from rasterio.warp import transform_geom
+
+    # Dissolved ADM2 union — same geometry the frontend draws
+    data_dir = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "..", "data"))
+    boundary_path = os.path.join(data_dir, "pakistan_adm2_dissolved.geojson")
+
+    if not os.path.exists(boundary_path):
+        logger.warning(f"Pakistan boundary not found in {data_dir}, tile clipping disabled")
+        _PAKISTAN_GEOMS_3857 = []
+        return _PAKISTAN_GEOMS_3857
+
+    with open(boundary_path) as f:
+        geojson = json.load(f)
+
+    geoms_3857 = []
+    for feature in geojson.get("features", []):
+        geom = feature.get("geometry")
+        if geom:
+            transformed = transform_geom("EPSG:4326", "EPSG:3857", geom)
+            geoms_3857.append(transformed)
+
+    _PAKISTAN_GEOMS_3857 = geoms_3857
+    logger.info(f"Loaded Pakistan boundary for tile clipping: {len(geoms_3857)} geometries from {os.path.basename(boundary_path)}")
+    return _PAKISTAN_GEOMS_3857
+
+
+def _tile_mercator_bounds(x: int, y: int, z: int):
+    """Compute Web Mercator bounds for an XYZ tile."""
+    import math
+    EXTENT = 20037508.342789244
+    n = 2 ** z
+    res = 2 * EXTENT / n
+    x_min = -EXTENT + x * res
+    x_max = x_min + res
+    y_max = EXTENT - y * res
+    y_min = y_max - res
+    return (x_min, y_min, x_max, y_max)
+
+
+def _clip_tile_alpha(rgba, x: int, y: int, z: int):
+    """Clip tile RGBA alpha channel to dissolved ADM2 boundary.
+
+    Supersamples the boundary at 4× resolution, then applies majority-rule
+    thresholding: a pixel is fully opaque if ≥50 % of its area is inside the
+    boundary, otherwise fully transparent.  This avoids both:
+      - underhugging (gaps from all_touched=False)
+      - overhugging (bleed from all_touched=True or fractional alpha)
+    The 1.5 px vector outline on the frontend covers any sub-pixel edge mismatch.
+    """
+    import numpy as np
+    from rasterio.features import rasterize
+    from rasterio.transform import from_bounds
+
+    geoms = _load_pakistan_boundary_3857()
+    if not geoms:
+        return rgba  # no boundary loaded, skip clipping
+
+    bounds = _tile_mercator_bounds(x, y, z)
+    h, w = rgba.shape[:2]
+
+    # Supersample at 4× for sub-pixel coverage
+    SS = 4
+    hi_h, hi_w = h * SS, w * SS
+    hi_transform = from_bounds(*bounds, hi_w, hi_h)
+
+    hi_mask = rasterize(
+        [(g, 1) for g in geoms],
+        out_shape=(hi_h, hi_w),
+        transform=hi_transform,
+        fill=0,
+        dtype='uint8',
+        all_touched=False,
+    )
+
+    # Majority rule: pixel is opaque if ≥50% of sub-pixels are inside
+    coverage = hi_mask.reshape(h, SS, w, SS).mean(axis=(1, 3))
+    boundary_mask = (coverage >= 0.5).astype(np.uint8) * 255
+
+    # Zero out RGB where fully outside to prevent compositing halos
+    outside = boundary_mask == 0
+    rgba[outside, :3] = 0
+
+    # AND with existing alpha
+    rgba[:, :, 3] = np.minimum(rgba[:, :, 3], boundary_mask)
+    return rgba
+
+
 def _download_cog_to_temp(bucket_name: str, blob_path: str) -> str:
     """Download COG from GCS to a temp file and return the path."""
     import tempfile
@@ -804,7 +910,7 @@ async def get_prediction_tile(
         with Reader(tmp_path) as src:
             # Try to read tile - may be outside bounds
             try:
-                tile = src.tile(x, y, z, indexes=1, resampling_method="bilinear")
+                tile = src.tile(x, y, z, indexes=1, resampling_method="cubic")
             except TileOutsideBounds:
                 # Tile outside raster coverage - return transparent tile
                 return tile_response(empty_tile_png())
@@ -838,6 +944,9 @@ async def get_prediction_tile(
             # Use robust alpha: any mask > 0 becomes fully opaque
             alpha = (mask > 0).astype(np.uint8) * 255
             rgba[:, :, 3] = alpha
+
+            # Clip to Pakistan boundary at tile resolution
+            rgba = _clip_tile_alpha(rgba, x, y, z)
 
             # Convert to PNG
             img = Image.fromarray(rgba, mode='RGBA')
@@ -1208,7 +1317,7 @@ async def get_feature_tile(
         with Reader(tmp_path) as src:
             # Try to read tile - may be outside bounds
             try:
-                tile = src.tile(x, y, z, indexes=1, resampling_method="bilinear")
+                tile = src.tile(x, y, z, indexes=1, resampling_method="cubic")
             except TileOutsideBounds:
                 return tile_response(empty_tile_png())
 
@@ -1242,6 +1351,9 @@ async def get_feature_tile(
             # Set alpha from mask - robust: any mask > 0 becomes fully opaque
             alpha = (mask > 0).astype(np.uint8) * 255
             rgba[:, :, 3] = alpha
+
+            # Clip to Pakistan boundary at tile resolution
+            rgba = _clip_tile_alpha(rgba, x, y, z)
 
             # Convert to PNG
             img = Image.fromarray(rgba, mode='RGBA')
