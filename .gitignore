@@ -33,6 +33,8 @@ apps/web-next/.firebase/
 apps/web-next/.next/
 apps/dashboard-frontend/out/
 infra/.terraform/
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
 *.pack
 terraform-provider-*
 hawanama.db
@@ -41,6 +43,12 @@ __pycache__/
 node_modules/
 .env.local
 .env
+
+# Database schema (contains credentials in dump)
+db_schema/
+
+# Editor config
+.vscode/
 
 # Database explorer with credentials
 prod_db_explorer/
