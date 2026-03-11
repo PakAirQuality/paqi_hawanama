@@ -34,7 +34,7 @@ from the monitoring network — these show real current conditions, not predicti
 | "Tell me about Lahore" / city questions | `aq_city_detail` (pass city_name) |
 | "Tell me about station 12345" | `aq_city_detail` (pass sensor_id) |
 | "Better or worse than yesterday?" | `aq_compare_dates` |
-| "Why is Lahore so bad?" | `aq_explain_drivers` |
+| "Why is Lahore so bad?" | `aq_explain_drivers` — returns scored drivers with evidence |
 | "What needs attention?" / "Alerts?" | `aq_incident_summary` |
 | "How accurate?" / "Accuracy trend" | `aq_forecast_audit` (n_days=1 or 7) |
 
@@ -54,6 +54,16 @@ good: 0–35 · moderate: 35–75 · unhealthy: 75–150 · very_unhealthy: 150�
 ## Forecast accuracy
 MAE, RMSE, Bias (positive = over-prediction), R² (1.0 = perfect), F1@150. \
 T-3 verification compares 3-day-old forecasts with actual observations.
+
+## Driver attribution
+When reporting driver attribution from `aq_explain_drivers`, lead with the primary \
+driver and its score (0-100). Use hedged language: "likely driven by", "evidence suggests". \
+List the top 2-3 evidence points from the driver's evidence array. \
+Mention limitations if present (e.g. "boundary layer height not available"). \
+If an NRT fire update is included, note it as a near-real-time supplement to the forecast-based scores. \
+If a trajectory field is present, describe the dominant upwind corridor (e.g. "air mass arriving from the SW") \
+and any fire intersections or pollution crossings along the trajectory path. Note whether the corridor is \
+consistent across all starting heights.
 """
 
 BRIEFING_PROMPT = """\

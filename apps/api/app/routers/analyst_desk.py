@@ -456,3 +456,32 @@ def _load_drift_report(date_str: str) -> Optional[Dict[str, Any]]:
         return _gcs_read_json(key)
     except Exception:
         return None
+
+
+def _load_driver_summary_safe(date_str: Optional[str]) -> Optional[Dict[str, Any]]:
+    """Load driver summary JSON, returning None on failure."""
+    if not date_str:
+        return None
+    try:
+        ds = _date_str(date_str)
+        return _gcs_read_json(f"forecasts/driver_summary_{ds}.json")
+    except Exception:
+        return None
+
+
+def _load_firms_nrt_safe() -> Optional[Dict[str, Any]]:
+    """Load latest FIRMS NRT fire scores, returning None on failure."""
+    try:
+        return _gcs_read_json("forecasts/firms_nrt_latest.json")
+    except Exception:
+        return None
+
+
+def _load_trajectory_safe(city_name: str, date_str: str) -> Optional[Dict[str, Any]]:
+    """Load cached HYSPLIT trajectory summary for a city, returning None on failure."""
+    city_key = city_name.lower().replace(" ", "_").replace("'", "")
+    ds = date_str.replace("-", "")
+    try:
+        return _gcs_read_json(f"forecasts/trajectories/traj_{city_key}_{ds}.json")
+    except Exception:
+        return None

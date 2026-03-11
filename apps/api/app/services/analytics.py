@@ -13,9 +13,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.routers.analyst_desk import (
+    _load_driver_summary_safe,
+    _load_firms_nrt_safe,
     _load_forecast,
     _load_drift_report,
     _load_summary_safe,
+    _load_trajectory_safe,
     _load_watchlist_safe,
     _resolve_latest_date,
 )
@@ -874,42 +877,50 @@ async def get_explain_drivers(
     target: str,
     date: str | None = None,
 ) -> dict:
-    """Explain why air quality is poor — fire activity, stagnation, transport.
+    """Explain why air quality is poor — scored driver attribution.
 
-    Primary source: watchlist anomaly_drivers from GCS.
-    Enrichment: current observations from DB for ground-truth context.
+    Primary source: driver_summary_YYYYMMDD.json (scored, structured drivers).
+    Enrichment: firms_nrt_latest.json for real-time fire updates.
+    Ground-truth: DB observations for current conditions.
+    Fallback: watchlist anomaly_drivers when no driver_summary exists.
     """
     dt = _resolve_date(date)
     target_lower = target.lower()
 
-    # Load watchlist for anomaly drivers (GCS — primary source)
-    watchlist_data = _load_watchlist_safe(dt)
-    drivers: list[dict] = []
-    related_alerts: list[dict] = []
+    # ── 1. Load scored driver summary (primary source) ──
+    driver_data = _load_driver_summary_safe(dt)
+    city_drivers: dict | None = None
+    if driver_data:
+        for ds in driver_data.get("driver_summaries", []):
+            name = (ds.get("city_name") or "").lower()
+            if target_lower == name or target_lower in name:
+                city_drivers = ds
+                break
+        # Fuzzy fallback: partial match
+        if not city_drivers:
+            import difflib
+            all_cities = [
+                ds.get("city_name", "")
+                for ds in driver_data.get("driver_summaries", [])
+            ]
+            matches = difflib.get_close_matches(target, all_cities, n=1, cutoff=0.6)
+            if matches:
+                for ds in driver_data.get("driver_summaries", []):
+                    if ds.get("city_name") == matches[0]:
+                        city_drivers = ds
+                        break
 
-    if watchlist_data:
-        watchlists = watchlist_data.get("watchlists", {})
+    # ── 2. Load NRT fire enrichment ──
+    nrt_fire: dict | None = None
+    firms_nrt = _load_firms_nrt_safe()
+    if firms_nrt:
+        for city_entry in firms_nrt.get("cities", []):
+            name = (city_entry.get("city_name") or "").lower()
+            if target_lower == name or target_lower in name:
+                nrt_fire = city_entry
+                break
 
-        for entry in watchlists.get("anomaly_drivers", []):
-            name = (entry.get("city_name") or entry.get("station_name") or entry.get("city") or "").lower()
-            station = (entry.get("station_name") or "").lower()
-            if target_lower in name or target_lower in station:
-                drivers.append(entry)
-
-        for wl_name, wl_entries in watchlists.items():
-            if wl_name == "anomaly_drivers":
-                continue
-            for entry in wl_entries:
-                name = (entry.get("city_name") or entry.get("station_name") or entry.get("city") or "").lower()
-                station = (entry.get("station_name") or "").lower()
-                if target_lower in name or target_lower in station:
-                    related_alerts.append({
-                        "watchlist": wl_name,
-                        "severity": _WATCHLIST_SEVERITY.get(wl_name, "info"),
-                        **{k: v for k, v in entry.items() if k not in ("city_name", "station_name")},
-                    })
-
-    # Current observations from DB for ground-truth context
+    # ── 3. Current observations from DB ──
     try:
         target_date = date_cls.fromisoformat(dt)
     except ValueError:
@@ -952,7 +963,72 @@ async def get_explain_drivers(
         for r in obs_rows
     ]
 
-    has_data = bool(drivers or related_alerts or current_conditions)
+    # ── 4. Build response ──
+    if city_drivers:
+        matched_city = city_drivers.get("city_name", target)
+
+        # Load trajectory if available (cached in GCS)
+        trajectory = _load_trajectory_safe(matched_city, dt)
+
+        # Enrich driver scores with trajectory evidence
+        driver_list = city_drivers.get("drivers", [])
+        if trajectory and trajectory.get("status") == "ok":
+            from app.services.trajectory import enrich_drivers_with_trajectory
+            driver_list = enrich_drivers_with_trajectory(driver_list, trajectory)
+
+        # Scored driver attribution available
+        result_data = {
+            "target": matched_city,
+            "driver_attribution": driver_list,
+            "primary_driver": city_drivers.get("primary_driver"),
+            "narrative": city_drivers.get("narrative"),
+            "pm25_d1_median": city_drivers.get("pm25_d1_median"),
+            "risk_band": city_drivers.get("risk_band"),
+            "nrt_fire_update": nrt_fire,
+            "trajectory": trajectory if trajectory and trajectory.get("status") == "ok" else None,
+            "current_conditions": current_conditions,
+            "data_available": True,
+        }
+        provenance = "driver_summary_json + observations_db"
+        if trajectory and trajectory.get("status") == "ok":
+            provenance += " + hysplit_trajectory"
+    else:
+        # Fallback: watchlist anomaly_drivers (legacy approach)
+        watchlist_data = _load_watchlist_safe(dt)
+        drivers: list[dict] = []
+        related_alerts: list[dict] = []
+
+        if watchlist_data:
+            watchlists = watchlist_data.get("watchlists", {})
+            for entry in watchlists.get("anomaly_drivers", []):
+                name = (entry.get("city_name") or entry.get("station_name") or entry.get("city") or "").lower()
+                station = (entry.get("station_name") or "").lower()
+                if target_lower in name or target_lower in station:
+                    drivers.append(entry)
+            for wl_name, wl_entries in watchlists.items():
+                if wl_name == "anomaly_drivers":
+                    continue
+                for entry in wl_entries:
+                    name = (entry.get("city_name") or entry.get("station_name") or entry.get("city") or "").lower()
+                    station = (entry.get("station_name") or "").lower()
+                    if target_lower in name or target_lower in station:
+                        related_alerts.append({
+                            "watchlist": wl_name,
+                            "severity": _WATCHLIST_SEVERITY.get(wl_name, "info"),
+                            **{k: v for k, v in entry.items() if k not in ("city_name", "station_name")},
+                        })
+
+        has_data = bool(drivers or related_alerts or current_conditions)
+        result_data = {
+            "target": target,
+            "driver_attribution": drivers[:10],
+            "related_alerts": related_alerts[:10],
+            "nrt_fire_update": nrt_fire,
+            "current_conditions": current_conditions,
+            "data_available": has_data,
+            "note": None if has_data else f"No driver attribution data available for '{target}'. Showing current conditions only.",
+        }
+        provenance = "watchlist_json + observations_db"
 
     ui_actions = [{"type": "zoom_to_city", "city": target}]
     followups = [
@@ -962,17 +1038,10 @@ async def get_explain_drivers(
 
     return _make_envelope(
         dt,
-        {
-            "target": target,
-            "driver_attribution": drivers[:10],
-            "related_alerts": related_alerts[:10],
-            "current_conditions": current_conditions,
-            "data_available": has_data,
-            "note": None if has_data else f"No driver attribution data available for '{target}'. Showing current conditions only.",
-        },
+        result_data,
         ui_actions=ui_actions,
         followups=followups,
-        provenance="watchlist_json + observations_db",
+        provenance=provenance,
     )
 
 
