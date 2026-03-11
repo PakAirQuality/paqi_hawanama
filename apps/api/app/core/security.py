@@ -38,41 +38,48 @@ async def verify_tasks_token(
     
     token = credentials.credentials
     
-    # Check against configured secret if available
-    if settings.TASKS_API_SECRET:
-        if not secrets.compare_digest(token, settings.TASKS_API_SECRET):
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid authorization token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
-    else:
-        # If no secret configured, we still require a token to be present
-        # This provides basic protection against casual access
-        if len(token) < 10:
-            raise HTTPException(
-                status_code=401,
-                detail="Invalid authorization token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+    # Require TASKS_API_SECRET to be configured
+    if not settings.TASKS_API_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Task authentication not configured",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not secrets.compare_digest(token, settings.TASKS_API_SECRET):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     return True
 
 
 async def verify_cloud_scheduler_request(request: Request):
     """
-    Additional verification for Cloud Scheduler requests.
-    Checks for Google Cloud Scheduler specific headers.
+    Verify Cloud Scheduler requests.
+
+    Cloud Run validates the OIDC token before the request reaches
+    application code, so if the scheduler headers are present AND
+    an Authorization bearer token is included, we can trust the
+    request. Without a bearer token the headers alone are spoofable.
     """
-    # Check for Cloud Scheduler specific headers
     user_agent = request.headers.get("user-agent", "")
     x_cloudscheduler = request.headers.get("x-cloudscheduler", "")
-    
-    # Google Cloud Scheduler sends specific headers
-    if "Google-Cloud-Scheduler" in user_agent or x_cloudscheduler:
+
+    has_scheduler_headers = (
+        "Google-Cloud-Scheduler" in user_agent or bool(x_cloudscheduler)
+    )
+
+    # Only trust scheduler headers when an OIDC bearer token is also
+    # present (Cloud Run validates it before our code runs).
+    auth_header = request.headers.get("authorization", "")
+    has_bearer = auth_header.lower().startswith("bearer ")
+
+    if has_scheduler_headers and has_bearer:
         return True
-    
-    # For non-scheduler requests, require proper authorization
+
     return False
 
 

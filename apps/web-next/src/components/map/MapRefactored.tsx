@@ -108,7 +108,7 @@ export default function MapRefactored({
         {...viewport}
         zoom={viewport?.zoom ?? 3.6}
         mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'}
-        mapStyle="mapbox://styles/mapbox/outdoors-v12"
+        mapStyle="mapbox://styles/mapbox/streets-v12"
         onMove={handleMapChange}
         onLoad={handleMapLoad}
         style={{ 

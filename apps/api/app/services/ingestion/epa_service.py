@@ -1,6 +1,7 @@
 """Punjab EPA data ingestion service"""
 
 import json
+import os
 import time
 import logging
 from datetime import datetime
@@ -19,9 +20,12 @@ def station_id_for_punjab(source_station_id: str) -> str:
     return f"pb_{hash_obj.hexdigest()[:12]}"
 
 def get_settings():
+    epa_key = os.environ.get("PUNJAB_EPA_API_KEY", "")
+    if not epa_key:
+        logger.warning("PUNJAB_EPA_API_KEY not set — Punjab EPA ingestion will fail")
     return dict(
         api_base="https://aqipunjab.com/api",
-        api_key="***REMOVED***",  # Working API key
+        api_key=epa_key,
         tz="Asia/Karachi",
         country_id_pk=1,  # Pakistan country ID (adjust if needed)
         log_level="INFO",
@@ -41,8 +45,7 @@ def fetch_stations(api_base: str, api_key: str) -> List[Dict[str, Any]]:
         "Origin": "https://aqipunjab.com",
         "Referer": "https://aqipunjab.com/"
     }
-    logger.info("Using API key: %s...", api_key[:10])
-    logger.info("Request headers: %s", headers)
+    logger.info("Fetching Punjab EPA stations")
     
     data = http_get(f"{api_base}/stations", headers=headers)
     

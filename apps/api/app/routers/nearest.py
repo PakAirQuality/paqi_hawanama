@@ -108,7 +108,7 @@ async def nearest_city(
         logger.error(f"Upstream error in nearest_city: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Upstream API error: {str(e)}",
+            detail="Upstream API error.",
             headers={"upstream_error": "true"}
         )
     
@@ -227,7 +227,7 @@ async def nearest_station(
         logger.error(f"Upstream error in nearest_station: {e}")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Upstream API error: {str(e)}",
+            detail="Upstream API error.",
             headers={"upstream_error": "true"}
         )
     

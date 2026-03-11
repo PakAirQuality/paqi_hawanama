@@ -4,10 +4,11 @@ Hawanama Bot API Router - endpoints for bot data compilation, testing, and autom
 
 import logging
 import json
-from fastapi import APIRouter, HTTPException, Query, Path, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Path, status
 from fastapi.responses import JSONResponse
 from typing import Dict, Any
 
+from app.core.security import verify_tasks_token
 from app.services.bot.data_compiler import LLMDataCompiler, MASTER_PERSONA_PROMPT, AIRPOCALYPSE_PROMPT
 from app.services.bot.bot_engine import HawanamaBot
 from app.services.bot.ai_client import GeminiAIService
@@ -254,7 +255,8 @@ async def execute_hawanama_bot(
     force_post: bool = Query(
         False,
         description="If true, bypass schedule checks and force a post"
-    )
+    ),
+    _auth=Depends(verify_tasks_token),
 ):
     """
     Main execution endpoint for Hawanama Bot.
@@ -343,7 +345,8 @@ async def run_bot_cycle(
     dry_run: bool = Query(
         False,
         description="If true, don't actually post tweets - just simulate"
-    )
+    ),
+    _auth=Depends(verify_tasks_token),
 ):
     """
     Run the complete Hawanama Bot cycle.
@@ -434,7 +437,8 @@ async def generate_llm_tweet(
         "master",
         description="Prompt type to use",
         enum=["master", "airpocalypse"]
-    )
+    ),
+    _auth=Depends(verify_tasks_token),
 ):
     """
     Generate a tweet using LLM with current air quality data.
@@ -536,7 +540,8 @@ async def emergency_airpocalypse_post(
     dry_run: bool = Query(
         False,
         description="If true, don't actually post - just generate"
-    )
+    ),
+    _auth=Depends(verify_tasks_token),
 ):
     """
     Force an emergency airpocalypse post regardless of schedule.

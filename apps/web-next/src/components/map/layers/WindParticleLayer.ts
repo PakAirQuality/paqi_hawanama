@@ -8,9 +8,9 @@ import type { WindMetadata } from '../hooks/useWindData'
 
 // Particle counts scale with zoom: base at overview, max at city level
 const BASE_PARTICLES_DESKTOP = 2000
-const MAX_PARTICLES_DESKTOP = 2000
+const MAX_PARTICLES_DESKTOP = 800
 const BASE_PARTICLES_MOBILE = 800
-const MAX_PARTICLES_MOBILE = 2000
+const MAX_PARTICLES_MOBILE = 400
 const TRAIL_FADE = 0.985
 const SPEED_FACTOR = 0.006
 const PARTICLE_RESET_RATE = 0.001
@@ -41,6 +41,7 @@ export class WindParticleRenderer {
   private animFrame = 0
   private running = false
   private mapMoving = false
+  private speedScale = 1
 
   constructor(map: any, windImage: HTMLImageElement, meta: WindMetadata) {
     this.map = map
@@ -84,11 +85,13 @@ export class WindParticleRenderer {
     map.on('moveend', this._onMoveEnd)
   }
 
-  /** Scale active particle count based on current zoom */
+  /** Scale active particle count and speed based on current zoom */
   private _updateActiveParticles() {
     const zoom = this.map.getZoom()
     const t = Math.min(Math.max((zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN), 0), 1)
     this.activeParticles = Math.round(this.baseParticles + t * (this.maxParticles - this.baseParticles))
+    // Scale speed down as zoom increases so particles don't fly at close zoom
+    this.speedScale = Math.pow(2, (ZOOM_MIN - zoom) * 0.7)
   }
 
   /** Cache visible viewport bounds as normalised grid coords (0–1) */
@@ -247,8 +250,9 @@ export class WindParticleRenderer {
       this.particles[idx + 3] = cy
 
       const [u, v] = this._sampleWind(cx, cy)
-      cx += (u / lonRange) * SPEED_FACTOR
-      cy -= (v / latRange) * SPEED_FACTOR
+      const speed = SPEED_FACTOR * this.speedScale
+      cx += (u / lonRange) * speed
+      cy -= (v / latRange) * speed
 
       if (cx < 0 || cx > 1 || cy < 0 || cy > 1 || Math.random() < PARTICLE_RESET_RATE) {
         const [rx, ry] = this._randomVisiblePos()

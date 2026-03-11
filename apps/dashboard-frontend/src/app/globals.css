@@ -99,3 +99,54 @@
 .aqi-unhealthy { background-color: #ef7855; color: white; }
 .aqi-very-unhealthy { background-color: #a070b5; color: white; }
 .aqi-hazardous { background-color: #991b1b; color: white; }
+
+/* ── Station map markers (matching public app) ── */
+
+.aqi-marker-container {
+  cursor: pointer;
+}
+
+.aqi-marker {
+  color: white;
+  font-size: 12px;
+  font-weight: normal;
+  box-shadow: 0 0 0 3px var(--glow-color, rgba(255, 255, 255, 0.4)), 0 0 12px var(--glow-color, rgba(255, 255, 255, 0.6)), 0 2px 4px rgba(0, 0, 0, 0.3);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+}
+
+.aqi-marker.bg-no-reading {
+  background-color: #FFFFFFE6;
+  color: #666;
+  --glow-color: rgba(255, 255, 255, 0.4);
+}
+.aqi-marker.bg-good {
+  background-color: rgba(110, 204, 57, 1);
+  --glow-color: rgba(110, 204, 57, 0.4);
+}
+.aqi-marker.bg-moderate {
+  background-color: rgba(240, 194, 12, 1);
+  color: #333;
+  --glow-color: rgba(240, 194, 12, 0.4);
+}
+.aqi-marker.bg-unhealthy-sensitive {
+  background-color: rgba(241, 128, 23, 1);
+  --glow-color: rgba(241, 128, 23, 0.4);
+}
+.aqi-marker.bg-unhealthy {
+  background-color: rgba(239, 120, 85, 1);
+  --glow-color: rgba(239, 120, 85, 0.4);
+}
+.aqi-marker.bg-very-unhealthy {
+  background-color: #a070b5;
+  --glow-color: rgba(160, 112, 181, 0.4);
+}
+.aqi-marker.bg-hazardous {
+  background-color: #991b1b;
+  --glow-color: rgba(153, 27, 27, 0.4);
+}

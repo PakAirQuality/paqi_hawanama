@@ -17,7 +17,15 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6380"
     
     # CORS
-    ALLOWED_HOSTS: List[str] = ["*"]
+    ALLOWED_HOSTS: List[str] = [
+        "https://hawanama.org",
+        "https://www.hawanama.org",
+        "https://hawanama-dashboard.web.app",
+        "https://hawanama-2.web.app",
+        "https://hawanama-152782825429.asia-south1.run.app",
+        "http://localhost:3000",
+        "http://localhost:5173",
+    ]
     
     # API Keys
     IQAIR_API_KEY: Optional[str] = None
@@ -47,6 +55,7 @@ class Settings(BaseSettings):
     OPS_OUTPUTS_BUCKET: Optional[str] = None  # GCS bucket for predictions and runs (e.g., paqi-outputs-hawanama-data)
     OPS_FEATURES_BUCKET: Optional[str] = None  # GCS bucket for COGs and training data (e.g., paqi-features-hawanama-data)
     OPS_DERIVED_BUCKET: Optional[str] = None  # GCS bucket for feature stores (e.g., paqi-derived-hawanama-data) - legacy/fallback
+    OPS_FORECASTS_BUCKET: Optional[str] = None  # GCS bucket for PM2.5 forecasts (e.g., paqi-forecasts-hawanama-data)
     OPS_GCP_PROJECT: Optional[str] = None  # GCP project for Cloud Run jobs
     OPS_RUN_REGION: str = "asia-south1"  # Cloud Run region
     OPS_DAILY_JOB_NAME: str = "estimation-daily-pipeline"  # Daily estimation job name

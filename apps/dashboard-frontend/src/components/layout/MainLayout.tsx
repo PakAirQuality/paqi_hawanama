@@ -9,6 +9,7 @@ const modules = [
   { id: 'station-management', name: 'Stations', href: '/stations' },
   { id: 'data-quality', name: 'Data Quality', href: '/data-quality' },
   { id: 'reports', name: 'Reports', href: '/reports' },
+  { id: 'analyst-desk', name: 'Analyst Desk', href: '/analyst-desk' },
   { id: 'ml-ops', name: 'ML Ops', href: '/ops/pipeline' },
 ]
 
@@ -28,6 +29,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
   const currentModule = getCurrentModuleFromPath()
   const isDashboard = pathname === '/'
+  const isFullBleed = isDashboard || pathname === '/analyst-desk'
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
@@ -105,7 +107,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content - no padding for dashboard (full-bleed map) */}
       <main className={cn(
         'flex-1',
-        isDashboard ? '' : 'p-4 lg:p-6'
+        isFullBleed ? '-mt-px' : 'p-4 lg:p-6'
       )}>
         {children}
       </main>

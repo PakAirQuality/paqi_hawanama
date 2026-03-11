@@ -14,6 +14,7 @@ Assumptions:
     for station-level time-series.
 """
 
+import secrets
 from datetime import datetime
 from typing import List, Optional, Literal
 
@@ -34,7 +35,7 @@ async def verify_api_key(x_api_key: str = Header(..., description="API key for N
     """Validate the X-API-Key header against the configured NASA_API_KEY."""
     if not settings.NASA_API_KEY:
         raise HTTPException(status_code=503, detail="NASA API key not configured on server")
-    if x_api_key != settings.NASA_API_KEY:
+    if not secrets.compare_digest(x_api_key, settings.NASA_API_KEY):
         raise HTTPException(status_code=401, detail="Invalid API key")
 
 

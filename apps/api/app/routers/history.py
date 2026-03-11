@@ -46,29 +46,32 @@ async def get_station_history_data(
         target_station = stations_list[station_id - 1]  # Convert to 0-based index
         hash_station_id = target_station.station_id
         
+        # Clamp hours to valid range
+        hours = max(1, min(hours, 168))
+
         # Generate complete hourly time series with local timezone
         history_result = await db.execute(text("""
             WITH RECURSIVE hour_series AS (
-                SELECT 
-                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                SELECT
+                    date_trunc('hour', NOW() - make_interval(hours => :hours)) + INTERVAL '1 hour' AS hour_utc
                 UNION ALL
-                SELECT 
+                SELECT
                     hour_utc + INTERVAL '1 hour'
                 FROM hour_series
                 WHERE hour_utc < date_trunc('hour', NOW())
             )
-            SELECT 
+            SELECT
                 hs.hour_utc,
                 hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
                 r.aqi_us
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :hash_station_id 
+                AND r.scope_key = :hash_station_id
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"hash_station_id": hash_station_id})
+        """), {"hash_station_id": hash_station_id, "hours": hours})
         
         history_rows = history_result.fetchall()
         history_data = [
@@ -129,29 +132,32 @@ async def get_station_history_pm25_data(
         target_station = stations_list[station_id - 1]  # Convert to 0-based index
         hash_station_id = target_station.station_id
         
+        # Clamp hours to valid range
+        hours = max(1, min(hours, 168))
+
         # Generate complete hourly time series with local timezone
         history_result = await db.execute(text("""
             WITH RECURSIVE hour_series AS (
-                SELECT 
-                    date_trunc('hour', NOW() - INTERVAL '%s hours') + INTERVAL '1 hour' AS hour_utc
+                SELECT
+                    date_trunc('hour', NOW() - make_interval(hours => :hours)) + INTERVAL '1 hour' AS hour_utc
                 UNION ALL
-                SELECT 
+                SELECT
                     hour_utc + INTERVAL '1 hour'
                 FROM hour_series
                 WHERE hour_utc < date_trunc('hour', NOW())
             )
-            SELECT 
+            SELECT
                 hs.hour_utc,
                 hs.hour_utc + INTERVAL '5 hours' AS hour_pk,
                 r.pm25
             FROM hour_series hs
             LEFT JOIN readings r ON (
                 date_trunc('hour', r.ts_utc) = hs.hour_utc
-                AND r.scope_key = :hash_station_id 
+                AND r.scope_key = :hash_station_id
                 AND r.scope_type = 'station'
             )
             ORDER BY hs.hour_utc ASC
-        """ % hours), {"hash_station_id": hash_station_id})
+        """), {"hash_station_id": hash_station_id, "hours": hours})
         
         history_rows = history_result.fetchall()
         history_data = [

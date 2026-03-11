@@ -11,6 +11,8 @@ Requirements:
   - Only data from January 1, 2025 onwards is accessible
 """
 
+import logging
+import secrets
 from datetime import datetime, timezone
 from typing import List, Optional, Literal
 
@@ -37,10 +39,7 @@ DATA_CUTOFF_DATE = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
 # Get API secret from settings
 PUBLIC_API_SECRET = settings.PUBLIC_API_SECRET
 if not PUBLIC_API_SECRET:
-    # Log warning but don't crash - set a default for development
-    import logging
-    logging.warning("PUBLIC_API_SECRET not set, using default key for development")
-    PUBLIC_API_SECRET = "***REMOVED***"
+    logging.warning("PUBLIC_API_SECRET not set — public API endpoints will reject all requests")
 
 
 # ---------------------------------------------------------------------
@@ -48,19 +47,25 @@ if not PUBLIC_API_SECRET:
 # ---------------------------------------------------------------------
 
 def verify_api_key(x_api_key: Optional[str] = Header(None)):
-    """Verify API key from X-API-Key header."""
+    """Verify API key from X-API-Key header using constant-time comparison."""
     if not x_api_key:
         raise HTTPException(
             status_code=401,
             detail="API key required. Provide X-API-Key header."
         )
-    
-    if x_api_key != PUBLIC_API_SECRET:
+
+    if not PUBLIC_API_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Public API is not configured. Set PUBLIC_API_SECRET."
+        )
+
+    if not secrets.compare_digest(x_api_key, PUBLIC_API_SECRET):
         raise HTTPException(
             status_code=401,
             detail="Invalid API key."
         )
-    
+
     return x_api_key
 
 
