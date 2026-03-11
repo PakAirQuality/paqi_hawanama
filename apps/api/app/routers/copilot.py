@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 ACTION_RE = re.compile(r"\{\{ACTION:(.*?)\}\}")
+# Model sometimes leaks isolated } or {} from tool JSON envelopes — strip them
+STRAY_BRACE_RE = re.compile(r"^\s*\}?\s*$", re.MULTILINE)
 
 
 class ChatRequest(BaseModel):
@@ -55,16 +57,18 @@ async def copilot_chat(req: ChatRequest, _auth=Depends(verify_tasks_token)):
                         except json.JSONDecodeError:
                             pass
 
-                    # Emit text without action tags
+                    # Emit text without action tags or stray braces
                     clean = ACTION_RE.sub("", buffer)
-                    if clean:
+                    clean = STRAY_BRACE_RE.sub("", clean)
+                    if clean.strip():
                         yield _sse_event({"type": "text", "content": clean})
                     buffer = ""
 
                 # Flush any remaining buffer
                 if buffer:
                     clean = ACTION_RE.sub("", buffer)
-                    if clean:
+                    clean = STRAY_BRACE_RE.sub("", clean)
+                    if clean.strip():
                         yield _sse_event({"type": "text", "content": clean})
                     for match in ACTION_RE.finditer(buffer):
                         try:
@@ -100,7 +104,8 @@ async def copilot_briefing(req: ChatRequest, _auth=Depends(verify_tasks_token)):
             ) as result:
                 async for chunk in result.stream_text(delta=True):
                     clean = ACTION_RE.sub("", chunk)
-                    if clean:
+                    clean = STRAY_BRACE_RE.sub("", clean)
+                    if clean.strip():
                         yield _sse_event({"type": "text", "content": clean})
 
                 session.message_history = result.all_messages()

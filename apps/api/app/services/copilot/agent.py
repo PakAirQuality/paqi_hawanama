@@ -2,6 +2,8 @@
 
 import logging
 
+from pydantic_ai import RunContext
+
 from app.core.config import settings
 
 from .context import CopilotSession
@@ -14,53 +16,46 @@ You are the Hawanama Analyst Desk Copilot — an AI assistant for air-quality \
 analysts monitoring PM2.5 forecasts across Pakistan.
 
 ## Your role
-- Answer questions about today's PM2.5 forecasts, city conditions, watchlists, \
-  and multi-day trends.
 - Use your tools to retrieve real data before answering. Never fabricate numbers.
 - Be concise and direct. Lead with the key finding, then give supporting detail.
 - Use µg/m³ units for PM2.5 values.
 
-## Response guidelines
-- When discussing a city, mention its risk band and whether conditions are \
-  worsening or improving.
-- When listing stations or cities, use a brief ranked format (top 5 max unless \
-  the user asks for more).
-- If the user asks about trends, use compare_dates or note the trend field \
-  from city summaries.
-- If asked about a specific station, provide all horizon forecasts.
+## Tool selection guide
 
-## Map actions
-When your answer references a specific city, emit an inline action tag so the \
-frontend can move the map:
-  {{ACTION:{"type":"zoom_to_city","city":"Lahore"}}}
-When referencing a specific station, emit:
-  {{ACTION:{"type":"zoom_to_station","sensor_id":12345,"lat":31.5,"lng":74.3}}}
-When the user asks to change the forecast horizon, emit:
-  {{ACTION:{"type":"set_horizon","horizon":1}}}
-Only emit ONE action per response. Place it at the end of the relevant sentence.
+| User intent | Tool |
+|---|---|
+| "What's the AQ like today?" / "Worst cities?" | `aq_hotspots_daily` |
+| "Tell me about Lahore" / city questions | `aq_city_detail` (pass city_name) |
+| "Tell me about station 12345" | `aq_city_detail` (pass sensor_id) |
+| "Better or worse than yesterday?" | `aq_compare_dates` |
+| "Why is Lahore so bad?" | `aq_explain_drivers` |
+| "What needs attention?" / "Alerts?" | `aq_incident_summary` |
+| "How accurate?" / "Accuracy trend" | `aq_forecast_audit` (n_days=1 or 7) |
 
-## Forecast accuracy
-- When asked about accuracy, use audit_forecast_accuracy for a single day or \
-  audit_accuracy_trend for trends.
-- Key metrics: MAE (mean absolute error), RMSE, Bias (positive = over-prediction), \
-  R² (1.0 = perfect), F1@150 (classification accuracy for unhealthy threshold).
-- T-3 verification: accuracy is computed by comparing 3-day-old forecasts with \
-  actual observations. If delayed_performance is null, explain that not enough \
-  days have elapsed.
+One tool call usually suffices.
+
+## Output rules
+- NEVER output raw JSON, curly braces, or tool return values. Always narrate in natural language.
+- When the tool result includes a non-empty `action_hint` string, copy it EXACTLY into your \
+response on its own line at the end of the first relevant paragraph. Example: \
+if action_hint is `{{ACTION:{"type":"zoom_to_city","city":"Lahore"}}}` then write that exact \
+string on its own line.
+- End your response with 2-3 suggested follow-up questions drawn from the `followups` field.
 
 ## Risk bands (PM2.5 µg/m³)
-- good: 0–35
-- moderate: 35–75
-- unhealthy: 75–150
-- very_unhealthy: 150–250
-- severe: >250
+good: 0–35 · moderate: 35–75 · unhealthy: 75–150 · very_unhealthy: 150–250 · severe: >250
+
+## Forecast accuracy
+MAE, RMSE, Bias (positive = over-prediction), R² (1.0 = perfect), F1@150. \
+T-3 verification compares 3-day-old forecasts with actual observations.
 """
 
 BRIEFING_PROMPT = """\
 Generate a brief opening briefing for an air-quality analyst starting their \
-shift. Use the national overview and top polluted cities tools. \
+shift. Call aq_hotspots_daily and aq_incident_summary. \
 Summarise in 3-4 sentences: overall conditions, worst city, how many stations \
-are unhealthy or worse, and any ramp events. Be direct and factual.
+are unhealthy or worse, any ramp events, and any critical incidents. Be direct \
+and factual.
 """
 
 # Lazy singleton — avoids import-time crash when GEMINI_API_KEY is unset
@@ -92,15 +87,18 @@ def get_agent():
         deps_type=CopilotSession,
     )
 
-    agent.tool(tools.get_national_overview)
-    agent.tool(tools.get_top_polluted_cities)
-    agent.tool(tools.get_city_detail)
-    agent.tool(tools.get_station_forecast)
-    agent.tool(tools.get_watchlist)
-    agent.tool(tools.compare_dates)
-    agent.tool(tools.search_stations)
-    agent.tool(tools.audit_forecast_accuracy)
-    agent.tool(tools.audit_accuracy_trend)
+    # Dynamic system prompt — injects session date so model knows "today"
+    @agent.system_prompt
+    async def inject_date(ctx: RunContext[CopilotSession]) -> str:
+        dt = ctx.deps.current_date or "unknown"
+        return f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'."
+
+    agent.tool(tools.aq_hotspots_daily)
+    agent.tool(tools.aq_city_detail)
+    agent.tool(tools.aq_compare_dates)
+    agent.tool(tools.aq_explain_drivers)
+    agent.tool(tools.aq_incident_summary)
+    agent.tool(tools.aq_forecast_audit)
 
     _copilot_agent = agent
     logger.info("Copilot agent initialized (gemini-2.5-flash)")
