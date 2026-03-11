@@ -28,6 +28,28 @@ async def _get_db():
     return SessionLocal()
 
 
+def _update_session(
+    ctx: RunContext[CopilotSession],
+    *,
+    tool: str,
+    focus_type: str | None = None,
+    focused_city: str | None = None,
+    comparison_date: str | None = None,
+    entities: list[str] | None = None,
+) -> None:
+    """Write tool-call context into the session for follow-up resolution."""
+    sess = ctx.deps
+    sess.last_tool = tool
+    if focus_type is not None:
+        sess.focus_type = focus_type
+    if focused_city is not None:
+        sess.focused_city = focused_city
+    if comparison_date is not None:
+        sess.comparison_date = comparison_date
+    if entities is not None:
+        sess.last_entities = entities
+
+
 # ── Tool 1: aq_hotspots_daily ─────────────────────────────────────────────
 
 
@@ -56,9 +78,14 @@ async def aq_hotspots_daily(
     dt = date or _effective_date(ctx)
     db = await _get_db()
     try:
-        return await get_hotspots_daily(db, dt, geography, metric, top_k, country)
+        result = await get_hotspots_daily(db, dt, geography, metric, top_k, country)
     finally:
         await db.close()
+
+    hotspots = result.get("data", {}).get("hotspots", [])
+    entities = [h["name"] for h in hotspots if h.get("name")][:5]
+    _update_session(ctx, tool="aq_hotspots_daily", focus_type="national", entities=entities)
+    return result
 
 
 # ── Tool 2: aq_city_detail ────────────────────────────────────────────────
@@ -94,11 +121,9 @@ async def aq_city_detail(
     finally:
         await db.close()
 
-    # Update session focused city
     city = result.get("data", {}).get("city")
-    if city:
-        ctx.deps.focused_city = city
-
+    ft = "station" if sensor_id else "city"
+    _update_session(ctx, tool="aq_city_detail", focus_type=ft, focused_city=city, entities=[city] if city else [])
     return result
 
 
@@ -126,9 +151,14 @@ async def aq_compare_dates(
 
     db = await _get_db()
     try:
-        return await get_compare_dates(db, date1, date2, geography, country)
+        result = await get_compare_dates(db, date1, date2, geography, country)
     finally:
         await db.close()
+
+    movers = result.get("data", {}).get("biggest_movers", [])
+    entities = [m["city"] for m in movers if m.get("city")][:5]
+    _update_session(ctx, tool="aq_compare_dates", comparison_date=date1, entities=entities)
+    return result
 
 
 # ── Tool 4: aq_explain_drivers ────────────────────────────────────────────
@@ -153,9 +183,13 @@ async def aq_explain_drivers(
     dt = date or _effective_date(ctx)
     db = await _get_db()
     try:
-        return await get_explain_drivers(db, city_or_station, dt)
+        result = await get_explain_drivers(db, city_or_station, dt)
     finally:
         await db.close()
+
+    resolved = result.get("data", {}).get("target", city_or_station)
+    _update_session(ctx, tool="aq_explain_drivers", focus_type="city", focused_city=resolved, entities=[resolved])
+    return result
 
 
 # ── Tool 5: aq_incident_summary ───────────────────────────────────────────
@@ -182,9 +216,14 @@ async def aq_incident_summary(
     dt = date or _effective_date(ctx)
     db = await _get_db()
     try:
-        return await get_incident_summary(db, dt, severity, country)
+        result = await get_incident_summary(db, dt, severity, country)
     finally:
         await db.close()
+
+    incidents = result.get("data", {}).get("incidents", [])
+    entities = list(dict.fromkeys(i["city"] for i in incidents if i.get("city")))[:5]
+    _update_session(ctx, tool="aq_incident_summary", entities=entities)
+    return result
 
 
 # ── Tool 6: aq_forecast_audit ─────────────────────────────────────────────
@@ -207,4 +246,6 @@ async def aq_forecast_audit(
     from app.services.analytics import get_forecast_audit
 
     dt = date or _effective_date(ctx)
-    return await get_forecast_audit(dt, n_days)
+    result = await get_forecast_audit(dt, n_days)
+    _update_session(ctx, tool="aq_forecast_audit")
+    return result

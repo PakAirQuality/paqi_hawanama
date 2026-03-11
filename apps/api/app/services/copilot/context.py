@@ -16,6 +16,11 @@ class CopilotSession:
     focused_city: Optional[str] = None
     message_history: List[ModelMessage] = field(default_factory=list)
     last_active: float = field(default_factory=time.time)
+    # ── Session context ──
+    focus_type: str = "national"
+    comparison_date: Optional[str] = None
+    last_tool: Optional[str] = None
+    last_entities: List[str] = field(default_factory=list)
 
 
 _sessions: Dict[str, CopilotSession] = {}

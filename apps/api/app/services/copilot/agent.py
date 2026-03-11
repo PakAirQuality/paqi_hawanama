@@ -103,11 +103,24 @@ def get_agent():
         deps_type=CopilotSession,
     )
 
-    # Dynamic system prompt — injects session date so model knows "today"
+    # Dynamic system prompt — injects session date + context for follow-up resolution
     @agent.system_prompt
-    async def inject_date(ctx: RunContext[CopilotSession]) -> str:
-        dt = ctx.deps.current_date or "unknown"
-        return f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'."
+    async def inject_session_context(ctx: RunContext[CopilotSession]) -> str:
+        s = ctx.deps
+        dt = s.current_date or "unknown"
+        lines = [
+            f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'.",
+        ]
+        if s.focused_city or s.last_entities:
+            lines.append("")
+            lines.append("Session context:")
+            lines.append(f"- Focus: {s.focus_type} — {s.focused_city or 'national'}")
+            if s.comparison_date:
+                lines.append(f"- Last comparison date: {s.comparison_date}")
+            if s.last_entities:
+                lines.append(f"- Recent entities: {', '.join(s.last_entities[:5])}")
+            lines.append('When the user says "it", "there", or "that city", resolve to the focused city.')
+        return "\n".join(lines)
 
     agent.tool(tools.aq_hotspots_daily)
     agent.tool(tools.aq_city_detail)

@@ -107,6 +107,8 @@ def _make_envelope(
     ui_actions: list | None = None,
     followups: list | None = None,
     provenance: str = "observations_db",
+    tool: str = "",
+    target: str = "",
 ) -> dict:
     """Standard response wrapper for all analytics functions."""
     import json as _json
@@ -116,6 +118,7 @@ def _make_envelope(
     if actions:
         action_hint = "{{ACTION:" + _json.dumps(actions[0]) + "}}"
     return {
+        "meta": {"tool": tool, "target": target, "provenance": provenance},
         "date": date,
         "data": data,
         "action_hint": action_hint,
@@ -176,10 +179,10 @@ async def get_hotspots_daily(
         d1 = [e for e in forecast["forecasts"] if e.get("lead_days") == 1]
         top_names = {h["name"].lower() for h in hotspots} if hotspots else set()
         for e in d1:
-            city = (e.get("city_name") or e.get("city") or "").lower()
+            city = e.get("city_name", "").lower()
             if city in top_names:
                 forecast_outlook.append({
-                    "city": e.get("city_name") or e.get("city", ""),
+                    "city": e.get("city_name", ""),
                     "pm25_forecast_d1": _safe_round(e.get("pm25_forecast")),
                     "risk_band": e.get("risk_band"),
                     "ramp_detected": e.get("ramp_detected", False),
@@ -220,6 +223,8 @@ async def get_hotspots_daily(
         ui_actions=ui_actions,
         followups=followups,
         provenance="observations_db + forecast_json",
+        tool="aq_hotspots_daily",
+        target=geography,
     )
 
 
@@ -441,7 +446,7 @@ async def get_city_detail(
         return _make_envelope(dt, {
             "message": f"City '{city_name}' not found.",
             "available_cities_sample": available,
-        })
+        }, tool="aq_city_detail", target=city_name)
 
     matched_city = city_row["name"]
     city_id = city_row["id"]
@@ -540,7 +545,7 @@ async def get_city_detail(
         city_lower = matched_city.lower()
         city_fc = [
             e for e in entries
-            if (e.get("city_name") or e.get("city") or "").lower() == city_lower
+            if e.get("city_name", "").lower() == city_lower
         ]
         outlook = {}
         for ld in (1, 2, 3):
@@ -567,7 +572,7 @@ async def get_city_detail(
         "What stations need attention?",
     ]
 
-    return _make_envelope(dt, result, ui_actions=ui_actions, followups=followups)
+    return _make_envelope(dt, result, ui_actions=ui_actions, followups=followups, tool="aq_city_detail", target=matched_city)
 
 
 async def _station_detail(
@@ -607,7 +612,7 @@ async def _station_detail(
     })).mappings().first()
 
     if not row:
-        return _make_envelope(dt, {"message": f"Station {station_id} not found or no recent data."})
+        return _make_envelope(dt, {"message": f"Station {station_id} not found or no recent data."}, tool="aq_city_detail", target=station_id)
 
     city = row["city_name"] or ""
     data = {
@@ -670,7 +675,7 @@ async def _station_detail(
 
     followups = [f"Tell me about {city}" if city else "What needs attention today?"]
 
-    return _make_envelope(dt, data, ui_actions=ui_actions, followups=followups)
+    return _make_envelope(dt, data, ui_actions=ui_actions, followups=followups, tool="aq_city_detail", target=station_id)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -865,6 +870,8 @@ async def get_compare_dates(
         },
         followups=followups,
         provenance="observations_db",
+        tool="aq_compare_dates",
+        target=geography,
     )
 
 
@@ -993,23 +1000,18 @@ async def get_explain_drivers(
         if trajectory and trajectory.get("status") == "ok":
             provenance += " + hysplit_trajectory"
     else:
-        # Fallback: watchlist anomaly_drivers (legacy approach)
-        watchlist_data = _load_watchlist_safe(dt)
-        drivers: list[dict] = []
-        related_alerts: list[dict] = []
+        # Fallback 1: on-the-fly driver estimation from forecast data
+        forecast = _load_forecast_safe(dt)
+        estimated = _estimate_drivers_from_forecast(forecast, target) if forecast.get("forecasts") else None
 
+        # Collect related watchlist alerts for context
+        watchlist_data = _load_watchlist_safe(dt)
+        related_alerts: list[dict] = []
         if watchlist_data:
             watchlists = watchlist_data.get("watchlists", {})
-            for entry in watchlists.get("anomaly_drivers", []):
-                name = (entry.get("city_name") or entry.get("station_name") or entry.get("city") or "").lower()
-                station = (entry.get("station_name") or "").lower()
-                if target_lower in name or target_lower in station:
-                    drivers.append(entry)
             for wl_name, wl_entries in watchlists.items():
-                if wl_name == "anomaly_drivers":
-                    continue
                 for entry in wl_entries:
-                    name = (entry.get("city_name") or entry.get("station_name") or entry.get("city") or "").lower()
+                    name = (entry.get("city_name") or entry.get("station_name", "")).lower()
                     station = (entry.get("station_name") or "").lower()
                     if target_lower in name or target_lower in station:
                         related_alerts.append({
@@ -1018,17 +1020,36 @@ async def get_explain_drivers(
                             **{k: v for k, v in entry.items() if k not in ("city_name", "station_name")},
                         })
 
-        has_data = bool(drivers or related_alerts or current_conditions)
-        result_data = {
-            "target": target,
-            "driver_attribution": drivers[:10],
-            "related_alerts": related_alerts[:10],
-            "nrt_fire_update": nrt_fire,
-            "current_conditions": current_conditions,
-            "data_available": has_data,
-            "note": None if has_data else f"No driver attribution data available for '{target}'. Showing current conditions only.",
-        }
-        provenance = "watchlist_json + observations_db"
+        if estimated:
+            # Estimated drivers available — serve with confidence caveat
+            result_data = {
+                "target": estimated["city_name"],
+                "driver_attribution": estimated["drivers"],
+                "primary_driver": estimated["primary_driver"],
+                "narrative": estimated["narrative"],
+                "pm25_d1_median": estimated["pm25_d1_median"],
+                "risk_band": estimated["risk_band"],
+                "nrt_fire_update": nrt_fire,
+                "related_alerts": related_alerts[:10],
+                "current_conditions": current_conditions,
+                "data_available": True,
+                "estimated": True,
+                "note": estimated["limitation"],
+            }
+            provenance = "forecast_estimation + observations_db"
+        else:
+            # Fallback 2: no forecast data either — conditions only
+            has_data = bool(related_alerts or current_conditions)
+            result_data = {
+                "target": target,
+                "driver_attribution": [],
+                "related_alerts": related_alerts[:10],
+                "nrt_fire_update": nrt_fire,
+                "current_conditions": current_conditions,
+                "data_available": has_data,
+                "note": None if has_data else f"No driver attribution data available for '{target}'. Showing current conditions only.",
+            }
+            provenance = "watchlist_json + observations_db"
 
     ui_actions = [{"type": "zoom_to_city", "city": target}]
     followups = [
@@ -1042,6 +1063,8 @@ async def get_explain_drivers(
         ui_actions=ui_actions,
         followups=followups,
         provenance=provenance,
+        tool="aq_explain_drivers",
+        target=target,
     )
 
 
@@ -1078,7 +1101,7 @@ async def get_incident_summary(
                     "severity": sev,
                     "sensor_id": entry.get("sensor_id"),
                     "station_name": entry.get("station_name", ""),
-                    "city": entry.get("city_name") or entry.get("city") or "",
+                    "city": entry.get("city_name", ""),
                     "pm25_forecast": entry.get("pm25_forecast"),
                     "risk_band": entry.get("risk_band"),
                     "reason": entry.get("reason") or entry.get("label") or wl_name.replace("_", " "),
@@ -1190,6 +1213,8 @@ async def get_incident_summary(
         {"incidents": incidents, "counts": counts},
         followups=followups,
         provenance="watchlist_json + observations_db" if watchlist_data else "observations_db_fallback",
+        tool="aq_incident_summary",
+        target=severity,
     )
 
 
@@ -1214,6 +1239,8 @@ async def get_forecast_audit(
                 dt,
                 {"message": "No drift report available for this date."},
                 provenance="drift_json",
+                tool="aq_forecast_audit",
+                target=dt,
             )
 
         data: dict = {}
@@ -1265,6 +1292,8 @@ async def get_forecast_audit(
             dt, data,
             provenance="drift_json",
             followups=["Show me accuracy trend over the last 7 days"],
+            tool="aq_forecast_audit",
+            target=dt,
         )
 
     else:
@@ -1272,7 +1301,7 @@ async def get_forecast_audit(
         try:
             end = date_cls.fromisoformat(dt)
         except ValueError:
-            return _make_envelope(dt, {"message": f"Invalid date: {dt}"})
+            return _make_envelope(dt, {"message": f"Invalid date: {dt}"}, tool="aq_forecast_audit", target=dt)
 
         daily: list[dict] = []
         for i in range(n_days):
@@ -1307,6 +1336,8 @@ async def get_forecast_audit(
                 dt,
                 {"message": f"No drift reports found in the last {n_days} days."},
                 provenance="drift_json",
+                tool="aq_forecast_audit",
+                target=dt,
             )
 
         daily.sort(key=lambda x: x["date"])
@@ -1329,6 +1360,8 @@ async def get_forecast_audit(
             },
             provenance="drift_json",
             followups=["Show me today's detailed accuracy"],
+            tool="aq_forecast_audit",
+            target=dt,
         )
 
 
@@ -1339,8 +1372,139 @@ def _all_city_names(entries: list[dict]) -> list[str]:
     seen: set[str] = set()
     names: list[str] = []
     for e in entries:
-        c = e.get("city_name") or e.get("city") or ""
+        c = e.get("city_name", "")
         if c and c not in seen:
             seen.add(c)
             names.append(c)
     return names
+
+
+def _estimate_drivers_from_forecast(forecast: dict, target: str) -> dict | None:
+    """Heuristic driver estimation from forecast data when no driver_summary exists.
+
+    Infers likely pollution drivers from D+1 forecast signals:
+    - Stagnation: many stations elevated + uniform readings → low mixing
+    - Fire: ramp_detected flags + very high PM2.5 → biomass burning
+    - Transport: high PM2.5 variability across stations → regional transport
+    - Local buildup: moderate/uniform PM2.5, residual attribution
+
+    Returns same schema as pre-computed driver_summary entries, or None if
+    no forecast data matches the target city.
+    """
+    entries = forecast.get("forecasts", [])
+    target_lower = target.lower()
+
+    # Filter D+1 entries for target city (fuzzy)
+    d1 = [
+        e for e in entries
+        if e.get("lead_days") == 1
+        and target_lower in e.get("city_name", "").lower()
+    ]
+    if not d1:
+        # Try fuzzy match on all city names
+        import difflib
+        all_cities = _all_city_names([e for e in entries if e.get("lead_days") == 1])
+        matches = difflib.get_close_matches(target, all_cities, n=1, cutoff=0.6)
+        if matches:
+            matched = matches[0].lower()
+            d1 = [
+                e for e in entries
+                if e.get("lead_days") == 1
+                and e.get("city_name", "").lower() == matched
+            ]
+            if d1:
+                target = matches[0]  # use canonical name
+
+    if not d1:
+        return None
+
+    # Compute city-level stats
+    pms = [e["pm25_forecast"] for e in d1 if e.get("pm25_forecast") is not None]
+    if not pms:
+        return None
+
+    median_pm = sorted(pms)[len(pms) // 2]
+    mean_pm = sum(pms) / len(pms)
+    max_pm = max(pms)
+    spread = max_pm - min(pms) if len(pms) > 1 else 0
+    cv = (spread / mean_pm) if mean_pm > 0 else 0  # coefficient of variation proxy
+    n_ramp = sum(1 for e in d1 if e.get("ramp_detected"))
+    frac_ramp = n_ramp / len(d1) if d1 else 0
+    n_elevated = sum(1 for pm in pms if pm > 75)
+    frac_elevated = n_elevated / len(pms) if pms else 0
+
+    risk_band = _classify_band(median_pm)
+
+    # ── Score drivers (0–1 scale, heuristic) ──
+    # Stagnation: uniform high readings → low mixing / boundary layer trapping
+    stagnation = 0.0
+    if frac_elevated > 0.6 and cv < 0.5:
+        stagnation = min(0.9, 0.3 + frac_elevated * 0.5 + (1 - cv) * 0.2)
+    elif frac_elevated > 0.3:
+        stagnation = 0.2 + frac_elevated * 0.3
+
+    # Fire: ramp detections + very high PM2.5
+    fire = 0.0
+    if frac_ramp > 0 and max_pm > 150:
+        fire = min(0.9, frac_ramp * 0.6 + (max_pm - 150) / 300)
+    elif frac_ramp > 0:
+        fire = frac_ramp * 0.4
+
+    # Transport: high variability across stations → non-local source
+    transport = 0.0
+    if cv > 0.6 and median_pm > 50:
+        transport = min(0.8, cv * 0.5 + 0.1)
+    elif cv > 0.3 and median_pm > 75:
+        transport = cv * 0.3
+
+    # Local buildup: residual — moderate PM, low variability, no ramp
+    local = max(0.0, 1.0 - stagnation - fire - transport)
+    local = min(0.7, local)
+
+    # Normalize so scores sum to ~1
+    total = stagnation + fire + transport + local
+    if total > 0:
+        stagnation /= total
+        fire /= total
+        transport /= total
+        local /= total
+
+    drivers = []
+    for name, score, evidence in [
+        ("stagnation", stagnation,
+         f"{frac_elevated:.0%} of stations above 75 µg/m³, low variability (CV={cv:.2f})"),
+        ("fire_biomass", fire,
+         f"{n_ramp} ramp detections out of {len(d1)} stations, max PM2.5={max_pm:.0f}"),
+        ("regional_transport", transport,
+         f"PM2.5 spread={spread:.0f} µg/m³ across {len(pms)} stations (CV={cv:.2f})"),
+        ("local_buildup", local,
+         f"Median PM2.5={median_pm:.0f} µg/m³, {len(pms)} stations"),
+    ]:
+        if score >= 0.05:
+            drivers.append({
+                "driver": name,
+                "score": round(score, 2),
+                "evidence": evidence,
+            })
+
+    drivers.sort(key=lambda d: d["score"], reverse=True)
+    primary = drivers[0]["driver"] if drivers else "local_buildup"
+
+    # Build narrative
+    primary_label = primary.replace("_", " ")
+    narrative = (
+        f"{target} D+1 median forecast is {median_pm:.0f} µg/m³ ({risk_band}). "
+        f"Primary estimated driver: {primary_label} "
+        f"(score {drivers[0]['score']:.0%})."
+    )
+
+    return {
+        "city_name": target,
+        "pm25_d1_median": round(median_pm, 1),
+        "risk_band": risk_band,
+        "drivers": drivers,
+        "primary_driver": primary,
+        "narrative": narrative,
+        "confidence": "low",
+        "limitation": "Estimated from forecast data only — meteorological features not available",
+    }
