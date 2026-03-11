@@ -39,6 +39,15 @@ When the user asks to change the forecast horizon, emit:
   {{ACTION:{"type":"set_horizon","horizon":1}}}
 Only emit ONE action per response. Place it at the end of the relevant sentence.
 
+## Forecast accuracy
+- When asked about accuracy, use audit_forecast_accuracy for a single day or \
+  audit_accuracy_trend for trends.
+- Key metrics: MAE (mean absolute error), RMSE, Bias (positive = over-prediction), \
+  R² (1.0 = perfect), F1@150 (classification accuracy for unhealthy threshold).
+- T-3 verification: accuracy is computed by comparing 3-day-old forecasts with \
+  actual observations. If delayed_performance is null, explain that not enough \
+  days have elapsed.
+
 ## Risk bands (PM2.5 µg/m³)
 - good: 0–35
 - moderate: 35–75
@@ -90,6 +99,8 @@ def get_agent():
     agent.tool(tools.get_watchlist)
     agent.tool(tools.compare_dates)
     agent.tool(tools.search_stations)
+    agent.tool(tools.audit_forecast_accuracy)
+    agent.tool(tools.audit_accuracy_trend)
 
     _copilot_agent = agent
     logger.info("Copilot agent initialized (gemini-2.5-flash)")

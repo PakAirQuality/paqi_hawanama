@@ -446,3 +446,13 @@ def _load_summary_safe(date_str: Optional[str]) -> Optional[Dict[str, Any]]:
         return _gcs_read_json(f"forecasts/summary_{ds}.json")
     except Exception:
         return None
+
+
+def _load_drift_report(date_str: str) -> Optional[Dict[str, Any]]:
+    """Load drift report JSON for a given date, returning None on failure."""
+    try:
+        ds = _date_str(date_str)
+        key = f"monitoring/drift/drift_{ds}.json"
+        return _gcs_read_json(key)
+    except Exception:
+        return None

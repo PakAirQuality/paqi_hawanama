@@ -8,12 +8,15 @@ from typing import Optional
 
 from pydantic_ai import RunContext
 
+from fastapi import HTTPException
+
 from app.routers.analyst_desk import (
     _gcs_read_json,
     _load_forecast,
     _load_summary_safe,
     _load_watchlist_safe,
     _resolve_latest_date,
+    _load_drift_report,
 )
 
 from .context import CopilotSession
@@ -30,13 +33,22 @@ def _effective_date(ctx: RunContext[CopilotSession]) -> str:
     return ctx.deps.current_date or _resolve_latest_date()
 
 
+def _load_forecast_safe(dt: str) -> dict:
+    """Load forecast JSON, returning empty dict on missing data."""
+    try:
+        return _load_forecast(dt)
+    except (HTTPException, Exception) as e:
+        logger.warning(f"Forecast load failed for {dt}: {e}")
+        return {}
+
+
 async def get_national_overview(ctx: RunContext[CopilotSession]) -> dict:
     """Get national-level PM2.5 overview: mean/max forecasts, band counts, priority counts, ramp count.
 
     Use when the user asks about overall air quality, national summary, or general conditions.
     """
     dt = _effective_date(ctx)
-    forecast = _load_forecast(dt)
+    forecast = _load_forecast_safe(dt)
     entries = forecast.get("forecasts", [])
     d1 = [e for e in entries if e.get("lead_days") == 1]
 
@@ -124,7 +136,7 @@ async def get_city_detail(
                 break
 
     # Station-level forecasts
-    forecast = _load_forecast(dt)
+    forecast = _load_forecast_safe(dt)
     entries = forecast.get("forecasts", [])
     city_stations = [
         {
@@ -168,7 +180,7 @@ async def get_station_forecast(
         sensor_id: The numeric station sensor ID.
     """
     dt = _effective_date(ctx)
-    forecast = _load_forecast(dt)
+    forecast = _load_forecast_safe(dt)
     entries = forecast.get("forecasts", [])
 
     rows = [e for e in entries if e.get("sensor_id") == sensor_id]
@@ -247,8 +259,8 @@ async def compare_dates(
         date2: Second date (YYYY-MM-DD), typically the later date.
         city: Optional city name to filter comparison.
     """
-    f1 = _load_forecast(date1)
-    f2 = _load_forecast(date2)
+    f1 = _load_forecast_safe(date1)
+    f2 = _load_forecast_safe(date2)
 
     e1 = [e for e in f1.get("forecasts", []) if e.get("lead_days") == 1]
     e2 = [e for e in f2.get("forecasts", []) if e.get("lead_days") == 1]
@@ -293,7 +305,7 @@ async def search_stations(
         query: Search text to match against station names or city names.
     """
     dt = _effective_date(ctx)
-    forecast = _load_forecast(dt)
+    forecast = _load_forecast_safe(dt)
     entries = forecast.get("forecasts", [])
 
     q = query.lower()
@@ -318,3 +330,127 @@ async def search_stations(
             break
 
     return {"date": dt, "query": query, "count": len(matches), "stations": matches}
+
+
+async def audit_forecast_accuracy(
+    ctx: RunContext[CopilotSession],
+    date: Optional[str] = None,
+) -> dict:
+    """Get forecast accuracy metrics (MAE, RMSE, Bias, R², F1@150) from the drift monitoring report.
+
+    Accuracy is computed by comparing 3-day-old forecasts with actual observations (T-3 verification).
+
+    Args:
+        date: Forecast date (YYYY-MM-DD). Defaults to the session date.
+    """
+    dt = date or _effective_date(ctx)
+    report = _load_drift_report(dt)
+    if not report:
+        return {"date": dt, "message": "No drift report available for this date."}
+
+    result: dict = {"date": dt}
+
+    # Delayed performance (T-3 verification)
+    perf = report.get("delayed_performance")
+    if perf:
+        result["check_date"] = perf.get("check_date")
+        result["n_matched"] = perf.get("n_matched")
+        horizons = {}
+        for key in ("D+1", "D+2", "D+3"):
+            h = perf.get(key)
+            if h:
+                horizons[key] = {
+                    "mae": round(h["mae"], 1) if h.get("mae") is not None else None,
+                    "rmse": round(h["rmse"], 1) if h.get("rmse") is not None else None,
+                    "bias": round(h["bias"], 1) if h.get("bias") is not None else None,
+                    "r2": round(h["r2"], 3) if h.get("r2") is not None else None,
+                    "f1_150": round(h["f1_150"], 3) if h.get("f1_150") is not None else None,
+                }
+        result["accuracy"] = horizons
+    else:
+        result["accuracy"] = None
+        result["accuracy_note"] = "T-3 verification not yet available (needs 3+ days of forecasts)."
+
+    # Prediction distribution stats
+    pred = report.get("prediction_stats")
+    if pred:
+        result["prediction_stats"] = {
+            "mean": round(pred["mean"], 1) if pred.get("mean") is not None else None,
+            "median": round(pred["median"], 1) if pred.get("median") is not None else None,
+            "p90": round(pred["p90"], 1) if pred.get("p90") is not None else None,
+            "n_stations": pred.get("n_stations"),
+            "pct_above_150": round(pred["pct_above_150"] * 100, 1) if pred.get("pct_above_150") is not None else None,
+        }
+
+    # Feature drift (top drifting features)
+    psi = report.get("feature_psi", {})
+    if psi:
+        drifting = sorted(psi.items(), key=lambda x: x[1], reverse=True)[:5]
+        result["top_feature_drift"] = [
+            {"feature": f, "psi": round(v, 3)} for f, v in drifting if v > 0
+        ]
+
+    # Alerts
+    alerts = report.get("alerts", [])
+    if alerts:
+        result["alerts"] = alerts
+
+    return result
+
+
+async def audit_accuracy_trend(
+    ctx: RunContext[CopilotSession],
+    n_days: int = 7,
+) -> dict:
+    """Get forecast accuracy trend over the last N days to see if performance is improving or degrading.
+
+    Args:
+        n_days: Number of days to look back (default 7).
+    """
+    from datetime import date as date_cls, timedelta
+
+    dt = _effective_date(ctx)
+    try:
+        end = date_cls.fromisoformat(dt)
+    except ValueError:
+        return {"message": f"Invalid date: {dt}"}
+
+    daily: list[dict] = []
+    for i in range(n_days):
+        d = end - timedelta(days=i)
+        d_str = d.isoformat()
+        report = _load_drift_report(d_str)
+        if not report:
+            continue
+
+        entry: dict = {"date": d_str}
+        perf = report.get("delayed_performance")
+        if perf:
+            for key in ("D+1", "D+2", "D+3"):
+                h = perf.get(key)
+                if h:
+                    entry[f"{key}_mae"] = round(h["mae"], 1) if h.get("mae") is not None else None
+                    entry[f"{key}_rmse"] = round(h["rmse"], 1) if h.get("rmse") is not None else None
+            entry["n_matched"] = perf.get("n_matched")
+        else:
+            entry["accuracy"] = None
+
+        # Prediction stats summary
+        pred = report.get("prediction_stats")
+        if pred:
+            entry["pred_mean"] = round(pred["mean"], 1) if pred.get("mean") is not None else None
+            entry["n_stations"] = pred.get("n_stations")
+
+        # Alert count
+        entry["n_alerts"] = len(report.get("alerts", []))
+        daily.append(entry)
+
+    if not daily:
+        return {"message": f"No drift reports found in the last {n_days} days."}
+
+    daily.sort(key=lambda x: x["date"])
+    return {
+        "period": f"{daily[0]['date']} to {daily[-1]['date']}",
+        "n_reports": len(daily),
+        "daily": daily,
+    }
