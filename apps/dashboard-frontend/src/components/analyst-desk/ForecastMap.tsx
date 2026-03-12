@@ -493,40 +493,57 @@ export function ForecastMap({
     onActionProcessed?.()
   }, [pendingAction, forecasts, onActionProcessed])
 
-  // Timeline steps
+  // Timeline steps — date-formatted labels
+  const formatHorizonDate = (daysAhead: number) => {
+    const d = new Date()
+    d.setDate(d.getDate() + daysAhead)
+    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+  }
   const steps = [
-    { value: 0, label: 'Now', sub: 'Live' },
-    { value: 1, label: 'Tomorrow', sub: 'D+1' },
-    { value: 2, label: 'Day After', sub: 'D+2' },
-    { value: 3, label: '3-Day Outlook', sub: 'D+3' },
+    { value: 0, label: `Today \u2014 ${formatHorizonDate(0)}` },
+    { value: 1, label: formatHorizonDate(1) },
+    { value: 2, label: formatHorizonDate(2) },
+    { value: 3, label: formatHorizonDate(3) },
   ]
 
   return (
     <div className="relative w-full h-full">
-      {/* ── Timeline toggle — top center ── */}
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10">
-        <div className="flex items-center bg-white/95 backdrop-blur-sm rounded-full shadow-lg border border-slate-200/60 p-1">
-          {steps.map((step) => {
-            const isActive = selectedHorizon === step.value
-            return (
-              <button
-                key={step.value}
-                onClick={() => onHorizonChange(step.value)}
-                className={`relative flex flex-col items-center px-5 py-1.5 rounded-full transition-all duration-200 ${
-                  isActive
-                    ? 'bg-slate-800 text-white shadow-md'
-                    : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'
-                }`}
-              >
-                <span className={`text-xs font-semibold leading-tight ${isActive ? 'text-white' : ''}`}>
-                  {step.label}
-                </span>
-                <span className={`text-[9px] leading-tight ${isActive ? 'text-slate-300' : 'text-slate-400'}`}>
-                  {step.sub}
-                </span>
-              </button>
-            )
-          })}
+      {/* ── Timeline slider — bottom of map ── */}
+      <div className="absolute bottom-3 left-4 right-4 z-10 flex items-center gap-3">
+        <button
+          onClick={() => { if (selectedHorizon > 0) onHorizonChange(selectedHorizon - 1) }}
+          disabled={selectedHorizon <= 0}
+          className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors"
+        >
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+        </button>
+
+        <div className="text-center min-w-[130px] text-sm font-semibold text-slate-800 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 shadow-sm">
+          {steps[selectedHorizon].label}
+        </div>
+
+        <button
+          onClick={() => { if (selectedHorizon < 3) onHorizonChange(selectedHorizon + 1) }}
+          disabled={selectedHorizon >= 3}
+          className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors"
+        >
+          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+        </button>
+
+        <div className="flex-1 relative flex items-center h-6">
+          <div className="absolute left-0 right-0 h-[5px] rounded-full bg-slate-300/60" />
+          <div
+            className="absolute left-0 h-[5px] rounded-full bg-slate-700"
+            style={{ width: `${(selectedHorizon / 3) * 100}%` }}
+          />
+          <input
+            type="range"
+            min={0}
+            max={3}
+            value={selectedHorizon}
+            onChange={(e) => onHorizonChange(parseInt(e.target.value, 10))}
+            className="horizon-slider relative z-10 w-full h-[5px] appearance-none cursor-pointer bg-transparent"
+          />
         </div>
       </div>
 
@@ -535,6 +552,17 @@ export function ForecastMap({
 
       {/* Popup styling */}
       <style jsx global>{`
+        .horizon-slider::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          appearance: none;
+          width: 20px;
+          height: 20px;
+          border-radius: 50%;
+          background: #34d399;
+          box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -2px rgba(0,0,0,0.1);
+          cursor: grab;
+          border: 2px solid white;
+        }
         .mapboxgl-popup-content {
           border-radius: 12px !important;
           padding: 12px 14px !important;

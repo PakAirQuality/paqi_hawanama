@@ -88,7 +88,7 @@ export function LoginScreen() {
           </button>
           
           <div className="text-xs text-center text-gray-500">
-            Only @pakairquality.com accounts are allowed access
+            Team and approved guest accounts only
           </div>
         </div>
       </div>

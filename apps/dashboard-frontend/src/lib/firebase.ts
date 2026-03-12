@@ -11,6 +11,11 @@ import {
 import { Firestore, getFirestore } from "firebase/firestore";
 import { FirebaseStorage, getStorage } from "firebase/storage";
 
+// Approved guest emails (external collaborators granted dashboard access)
+const GUEST_EMAILS: string[] = [
+  "redacted@example.org",
+];
+
 const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || '',
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || '',
@@ -40,7 +45,6 @@ export function initializeFirebase() {
       // Configure Google Auth Provider
       googleProvider = new GoogleAuthProvider();
       googleProvider.setCustomParameters({
-        hd: "pakairquality.com",
         prompt: "select_account",
       });
     } catch (error) {
@@ -81,14 +85,15 @@ export async function signInWithGoogle(): Promise<User> {
     const user = result.user;
     const email = user.email?.toLowerCase() || "";
 
-    // Enforce domain restriction - this is the actual security check
-    const isDomainValid = 
-      user.emailVerified && 
-      email.endsWith("@pakairquality.com");
+    // Enforce access control: team domain + approved guests
+    const isTeamMember =
+      user.emailVerified && email.endsWith("@pakairquality.com");
+    const isGuest =
+      user.emailVerified && GUEST_EMAILS.includes(email);
 
-    if (!isDomainValid) {
+    if (!isTeamMember && !isGuest) {
       await firebaseSignOut(firebase.auth);
-      throw new Error("Access restricted to @pakairquality.com accounts only.");
+      throw new Error("Access restricted. Contact the team for an invitation.");
     }
 
     return user;
@@ -113,9 +118,12 @@ export async function signOut(): Promise<void> {
  */
 export function isValidUser(user: User | null): boolean {
   if (!user || !user.email) return false;
-  
-  return user.emailVerified && 
-         user.email.toLowerCase().endsWith("@pakairquality.com");
+  const email = user.email.toLowerCase();
+
+  return user.emailVerified && (
+    email.endsWith("@pakairquality.com") ||
+    GUEST_EMAILS.includes(email)
+  );
 }
 
 /**

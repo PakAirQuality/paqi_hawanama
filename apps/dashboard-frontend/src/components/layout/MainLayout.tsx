@@ -30,7 +30,6 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const currentModule = getCurrentModuleFromPath()
   const isDashboard = pathname === '/'
   const isFullBleed = isDashboard || pathname === '/analyst-desk'
-
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col">
       {/* Sticky header container */}

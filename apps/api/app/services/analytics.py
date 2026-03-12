@@ -109,6 +109,7 @@ def _make_envelope(
     provenance: str = "observations_db",
     tool: str = "",
     target: str = "",
+    basis: dict | None = None,
 ) -> dict:
     """Standard response wrapper for all analytics functions."""
     import json as _json
@@ -119,6 +120,7 @@ def _make_envelope(
         action_hint = "{{ACTION:" + _json.dumps(actions[0]) + "}}"
     return {
         "meta": {"tool": tool, "target": target, "provenance": provenance},
+        "basis": basis or {},
         "date": date,
         "data": data,
         "action_hint": action_hint,
@@ -218,6 +220,16 @@ async def get_hotspots_daily(
     if forecast_outlook:
         data["forecast_outlook"] = forecast_outlook
 
+    basis = {
+        "description": "Latest station observations (last 24h)"
+        + (", enriched with forecast outlook" if forecast_outlook else ""),
+        "sources": ["station_observations"]
+        + (["forecast_json"] if forecast_outlook else []),
+        "observation_window": "24h",
+    }
+    if forecast_outlook:
+        basis["forecast_date"] = dt
+
     return _make_envelope(
         dt, data,
         ui_actions=ui_actions,
@@ -225,6 +237,7 @@ async def get_hotspots_daily(
         provenance="observations_db + forecast_json",
         tool="aq_hotspots_daily",
         target=geography,
+        basis=basis,
     )
 
 
@@ -565,6 +578,37 @@ async def get_city_detail(
         if outlook:
             result["forecast_outlook"] = outlook
 
+    # ── Compact driver summary (when available) ─────────────
+    compact_drivers = None
+    driver_data = _load_driver_summary_safe(dt)
+    if driver_data:
+        summaries = driver_data.get("driver_summaries", [])
+        matched_city_lower = matched_city.lower()
+        city_drivers = next(
+            (s for s in summaries if s.get("city_name", "").lower() == matched_city_lower),
+            None,
+        )
+        if city_drivers:
+            drivers_sorted = sorted(
+                city_drivers.get("drivers", []),
+                key=lambda d: d.get("score", 0),
+                reverse=True,
+            )[:2]
+            compact_drivers = {
+                "primary_driver": city_drivers.get("primary_driver", ""),
+                "top_drivers": [
+                    {
+                        "driver": d["driver"],
+                        "score": d["score"],
+                        "evidence": d.get("evidence", [])[:2],
+                    }
+                    for d in drivers_sorted
+                ],
+                "narrative": city_drivers.get("narrative", ""),
+            }
+    if compact_drivers:
+        result["compact_drivers"] = compact_drivers
+
     ui_actions = [{"type": "zoom_to_city", "city": matched_city}]
     followups = [
         f"Why is {matched_city} so polluted?",
@@ -572,7 +616,20 @@ async def get_city_detail(
         "What stations need attention?",
     ]
 
-    return _make_envelope(dt, result, ui_actions=ui_actions, followups=followups, tool="aq_city_detail", target=matched_city)
+    basis = {
+        "description": f"Station observations for {matched_city} (last 24h)",
+        "sources": ["station_observations"],
+        "observation_window": "24h",
+    }
+    if "forecast" in include and result.get("forecast_outlook"):
+        basis["sources"].append("forecast_json")
+        basis["forecast_date"] = dt
+        basis["forecast_horizons"] = ["D+1", "D+2", "D+3"]
+    if compact_drivers:
+        basis["sources"].append("driver_summary_json")
+        basis["driver_source"] = "driver_summary_json"
+
+    return _make_envelope(dt, result, ui_actions=ui_actions, followups=followups, tool="aq_city_detail", target=matched_city, basis=basis)
 
 
 async def _station_detail(
@@ -675,7 +732,16 @@ async def _station_detail(
 
     followups = [f"Tell me about {city}" if city else "What needs attention today?"]
 
-    return _make_envelope(dt, data, ui_actions=ui_actions, followups=followups, tool="aq_city_detail", target=station_id)
+    basis = {
+        "description": f"Station observation for {station_id} (last 24h)",
+        "sources": ["station_observations"] + (["forecast_json"] if data.get("forecast_horizons") else []),
+        "observation_window": "24h",
+    }
+    if data.get("forecast_horizons"):
+        basis["forecast_date"] = dt
+        basis["forecast_horizons"] = ["D+1", "D+2", "D+3"]
+
+    return _make_envelope(dt, data, ui_actions=ui_actions, followups=followups, tool="aq_city_detail", target=station_id, basis=basis)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -849,29 +915,92 @@ async def get_compare_dates(
                     "delta": float(m["delta"]) if m["delta"] is not None else None,
                 })
 
+    # ── Driver explanation for comparison ────────────────────
+    driver_deltas = None
+    ds1 = _load_driver_summary_safe(date1)
+    ds2 = _load_driver_summary_safe(date2)
+    if ds1 and ds2:
+        summaries1 = {s["city_name"].lower(): s for s in ds1.get("driver_summaries", []) if s.get("city_name")}
+        summaries2 = {s["city_name"].lower(): s for s in ds2.get("driver_summaries", []) if s.get("city_name")}
+
+        if geography.lower() != "national":
+            target_cities = [geography.lower()]
+        elif biggest_movers:
+            target_cities = [m["city"].lower() for m in biggest_movers[:3]]
+        else:
+            target_cities = []
+
+        city_deltas = []
+        for tc in target_cities:
+            d1_drv = summaries1.get(tc)
+            d2_drv = summaries2.get(tc)
+            if d1_drv and d2_drv:
+                drivers1 = {d["driver"]: d["score"] for d in d1_drv.get("drivers", [])}
+                drivers2 = {d["driver"]: d["score"] for d in d2_drv.get("drivers", [])}
+                all_drivers = set(drivers1) | set(drivers2)
+                deltas = []
+                for drv in all_drivers:
+                    s1_score = drivers1.get(drv, 0)
+                    s2_score = drivers2.get(drv, 0)
+                    delta = s2_score - s1_score
+                    if abs(delta) >= 10:
+                        deltas.append({
+                            "driver": drv,
+                            "score_date1": s1_score,
+                            "score_date2": s2_score,
+                            "delta": delta,
+                            "direction": "increased" if delta > 0 else "decreased",
+                        })
+                if deltas:
+                    deltas.sort(key=lambda d: abs(d["delta"]), reverse=True)
+                    city_deltas.append({
+                        "city": d2_drv.get("city_name", tc),
+                        "primary_driver_date1": d1_drv.get("primary_driver", ""),
+                        "primary_driver_date2": d2_drv.get("primary_driver", ""),
+                        "driver_shifts": deltas[:3],
+                    })
+        if city_deltas:
+            driver_deltas = city_deltas
+
     followups = []
     if direction == "worsening":
         followups.append("What's driving the deterioration?")
     elif direction == "improving":
         followups.append("Which areas improved the most?")
+    if driver_deltas:
+        followups.append(f"Tell me more about the driver changes in {driver_deltas[0]['city']}")
+
+    basis = {
+        "description": f"Station observations compared between {date1} and {date2}",
+        "sources": ["station_observations"],
+        "observation_window": "24h per date",
+    }
+    if driver_deltas:
+        basis["sources"].append("driver_summary_json")
+        basis["driver_source"] = "driver_summary_json"
+
+    data = {
+        "date1": date1,
+        "date2": date2,
+        "geography": geography,
+        "stats_date1": s1,
+        "stats_date2": s2,
+        "delta_mean_pm25": delta_mean,
+        "direction": direction,
+        "biggest_movers": biggest_movers,
+        "source": "observations",
+    }
+    if driver_deltas:
+        data["driver_explanation"] = driver_deltas
 
     return _make_envelope(
         date2,
-        {
-            "date1": date1,
-            "date2": date2,
-            "geography": geography,
-            "stats_date1": s1,
-            "stats_date2": s2,
-            "delta_mean_pm25": delta_mean,
-            "direction": direction,
-            "biggest_movers": biggest_movers,
-            "source": "observations",
-        },
+        data,
         followups=followups,
         provenance="observations_db",
         tool="aq_compare_dates",
         target=geography,
+        basis=basis,
     )
 
 
@@ -1057,6 +1186,35 @@ async def get_explain_drivers(
         "What other areas need attention?",
     ]
 
+    # Build basis block based on which path was taken
+    if city_drivers:
+        basis: dict = {
+            "description": "Scored driver attribution from forecast pipeline",
+            "sources": ["driver_summary_json", "station_observations"],
+            "driver_source": "driver_summary_json",
+            "forecast_date": dt,
+        }
+        if nrt_fire:
+            basis["sources"].append("firms_nrt")
+            basis["fire_source"] = "firms_nrt"
+        traj = result_data.get("trajectory")
+        if traj:
+            basis["trajectory_available"] = True
+            basis["sources"].append("hysplit_trajectory")
+    elif result_data.get("estimated"):
+        basis = {
+            "description": "Estimated from forecast patterns (no scored drivers available)",
+            "sources": ["forecast_json", "station_observations"],
+            "driver_source": "forecast_estimation",
+            "limitations": ["Driver scores estimated heuristically from forecast data only"],
+        }
+    else:
+        basis = {
+            "description": "Watchlist alerts only (no driver attribution available)",
+            "sources": ["watchlist_json", "station_observations"],
+            "limitations": ["No driver attribution data for this city/date"],
+        }
+
     return _make_envelope(
         dt,
         result_data,
@@ -1065,6 +1223,7 @@ async def get_explain_drivers(
         provenance=provenance,
         tool="aq_explain_drivers",
         target=target,
+        basis=basis,
     )
 
 
@@ -1208,6 +1367,20 @@ async def get_incident_summary(
             followups.append(f"Tell me about {top['city']}")
         followups.append("Why is this happening?")
 
+    if watchlist_data:
+        basis = {
+            "description": "Forecast watchlist alerts enriched with current observations",
+            "sources": ["watchlist_json", "station_observations"],
+            "observation_window": "24h",
+        }
+    else:
+        basis = {
+            "description": "Current station observations only (watchlist unavailable)",
+            "sources": ["station_observations"],
+            "observation_window": "24h",
+            "limitations": ["Watchlist data not available — showing observation-based alerts only"],
+        }
+
     return _make_envelope(
         dt,
         {"incidents": incidents, "counts": counts},
@@ -1215,6 +1388,7 @@ async def get_incident_summary(
         provenance="watchlist_json + observations_db" if watchlist_data else "observations_db_fallback",
         tool="aq_incident_summary",
         target=severity,
+        basis=basis,
     )
 
 
@@ -1294,6 +1468,10 @@ async def get_forecast_audit(
             followups=["Show me accuracy trend over the last 7 days"],
             tool="aq_forecast_audit",
             target=dt,
+            basis={
+                "description": "Drift verification report (single day)",
+                "sources": ["drift_report_json"],
+            },
         )
 
     else:
@@ -1362,6 +1540,10 @@ async def get_forecast_audit(
             followups=["Show me today's detailed accuracy"],
             tool="aq_forecast_audit",
             target=dt,
+            basis={
+                "description": f"Drift verification report ({n_days}-day trend)",
+                "sources": ["drift_report_json"],
+            },
         )
 
 

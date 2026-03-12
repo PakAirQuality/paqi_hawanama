@@ -16,7 +16,7 @@ import type {
 } from './types'
 
 export const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
-export const API_TOKEN = "***REMOVED***" // TODO: Move to env/auth
+export const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
 
 const headers = {
   Authorization: `Bearer ${API_TOKEN}`,

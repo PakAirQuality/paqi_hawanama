@@ -16,9 +16,10 @@ from app.services.copilot.context import get_or_create_session
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-ACTION_RE = re.compile(r"\{\{ACTION:(.*?)\}\}")
-# Model sometimes leaks isolated } or {} from tool JSON envelopes — strip them
-STRAY_BRACE_RE = re.compile(r"^\s*\}?\s*$", re.MULTILINE)
+ACTION_RE = re.compile(r"\{\{ACTION:(\{.*?\})\}\}")
+# Model sometimes leaks isolated } from tool JSON envelopes — strip them
+# Matches: (a) lines that are just "}", (b) inline "}" after sentence punctuation
+STRAY_BRACE_RE = re.compile(r"^\s*\}\s*$|(?<=[.!?])\s*\}", re.MULTILINE)
 
 
 class ChatRequest(BaseModel):

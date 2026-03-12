@@ -8,7 +8,7 @@ const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-1527828254
 const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
 const DESK_PREFIX = `${API_BASE}/api/v1/ops/analyst-desk`
 
-const ACTION_RE = /\{\{ACTION:(.*?)\}\}/g
+const ACTION_RE = /\{\{ACTION:(\{.*?\})\}\}/g
 
 const SUGGESTED_QUESTIONS = [
   "What are the most polluted cities today?",
@@ -217,30 +217,30 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
   return (
     <div className="flex flex-col h-full bg-white">
       {/* Header */}
-      <div className="px-5 py-4 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <div className={`w-2 h-2 rounded-full ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-          <h2 className="text-base font-semibold text-slate-900">Copilot</h2>
+      <div className="px-3 py-2 border-b border-slate-100">
+        <div className="flex items-center gap-1.5">
+          <div className={`w-1.5 h-1.5 rounded-full ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Copilot</h2>
         </div>
       </div>
 
       {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
         {messages.map(msg => (
           <ChatMessage key={msg.id} message={msg} />
         ))}
 
         {/* Suggested questions */}
         {showSuggestions && (
-          <div className="mt-4 space-y-1.5">
-            <p className="text-[11px] text-slate-400 font-medium uppercase tracking-wide mb-2">
+          <div className="mt-3 space-y-1">
+            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-1.5">
               Ask about...
             </p>
             {SUGGESTED_QUESTIONS.map((q, i) => (
               <button
                 key={i}
                 onClick={() => handleSuggestion(q)}
-                className="w-full text-left px-3 py-2 rounded-lg text-[13px] text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors border border-slate-100"
+                className="w-full text-left px-2.5 py-1.5 rounded-md text-[11px] text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors border border-slate-100"
               >
                 {q}
               </button>
@@ -250,15 +250,15 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
 
         {/* Empty state */}
         {messages.length === 0 && !isStreaming && (
-          <div className="flex items-center justify-center h-full text-slate-400 text-sm">
+          <div className="flex items-center justify-center h-full text-slate-400 text-xs">
             Loading briefing...
           </div>
         )}
       </div>
 
       {/* Input */}
-      <form onSubmit={handleSubmit} className="px-4 py-3 border-t border-slate-100">
-        <div className="flex items-center gap-2">
+      <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-slate-100">
+        <div className="flex items-center gap-1.5">
           <input
             ref={inputRef}
             type="text"
@@ -266,14 +266,14 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
             onChange={e => setInput(e.target.value)}
             placeholder="Ask about forecasts, cities, watchlists..."
             disabled={isStreaming}
-            className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-sm text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-300 focus:border-transparent disabled:opacity-50"
+            className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-transparent disabled:opacity-50"
           />
           <button
             type="submit"
             disabled={isStreaming || !input.trim()}
-            className="p-2.5 rounded-xl bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+            className="p-1.5 rounded-lg bg-slate-800 text-white hover:bg-slate-700 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14M12 5l7 7-7 7" />
             </svg>
           </button>

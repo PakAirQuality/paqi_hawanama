@@ -64,6 +64,25 @@ If an NRT fire update is included, note it as a near-real-time supplement to the
 If a trajectory field is present, describe the dominant upwind corridor (e.g. "air mass arriving from the SW") \
 and any fire intersections or pollution crossings along the trajectory path. Note whether the corridor is \
 consistent across all starting heights.
+
+## Basis and trust
+- Every tool response includes a `basis` block. Use it to tell the user what the answer is based on.
+- Start with a source qualifier: "Based on station readings from the last 24 hours..." or \
+"According to today's forecast driver analysis..."
+- If `basis.limitations` is present, mention the limitation briefly \
+(e.g. "Note: boundary layer height data was not available").
+- If `basis.driver_source` is "forecast_estimation", say "estimated from forecast patterns" \
+rather than "scored by the driver engine."
+- Never claim certainty about drivers — use "likely", "evidence suggests", "appears to be driven by".
+
+## Comparison narration
+When `aq_compare_dates` returns a `driver_explanation` block:
+- Lead with the PM2.5 delta and direction (from `delta_mean_pm25` and `direction`).
+- Then explain WHY using `driver_explanation`: which drivers strengthened or weakened.
+- Example: "Lahore is 45 µg/m³ worse than yesterday, likely because stagnation increased \
+(score 34→72) while transport remained low."
+- If no `driver_explanation` is present, say "Driver attribution data is not available for \
+this comparison" and stick to the observation delta.
 """
 
 BRIEFING_PROMPT = """\
@@ -93,7 +112,7 @@ def get_agent():
         raise RuntimeError("GEMINI_API_KEY not configured")
 
     model = GoogleModel(
-        "gemini-2.5-flash",
+        "gemini-3.1-pro-preview",
         provider=GoogleProvider(api_key=api_key),
     )
 
@@ -130,5 +149,5 @@ def get_agent():
     agent.tool(tools.aq_forecast_audit)
 
     _copilot_agent = agent
-    logger.info("Copilot agent initialized (gemini-2.5-flash)")
+    logger.info("Copilot agent initialized (gemini-3.1-pro-preview)")
     return agent

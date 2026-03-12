@@ -30,6 +30,59 @@ router = APIRouter()
 FORECASTS_BUCKET = settings.OPS_FORECASTS_BUCKET or "paqi-forecasts-hawanama-data"
 
 
+# ── Risk band thresholds for normalization ────────────────────────────────
+
+_PM25_BANDS = [
+    (35, "good"),
+    (75, "moderate"),
+    (150, "unhealthy"),
+    (250, "very_unhealthy"),
+]
+
+
+def _classify_band(pm25: float | None) -> str:
+    if pm25 is None:
+        return "unknown"
+    for threshold, band in _PM25_BANDS:
+        if pm25 <= threshold:
+            return band
+    return "severe"
+
+
+def _normalize_forecast(data: dict) -> dict:
+    """Normalize forecast JSON so downstream consumers get consistent fields.
+
+    Fixes:
+    - city → city_name (old forecasts use 'city')
+    - Computes risk_band from pm25_forecast if missing
+    - Adds default episode_state, confidence, priority if missing
+    """
+    for entry in data.get("forecasts", []):
+        # Normalize city field
+        if not entry.get("city_name") and entry.get("city"):
+            entry["city_name"] = entry["city"]
+
+        # Compute risk_band from pm25_forecast if missing
+        if not entry.get("risk_band"):
+            entry["risk_band"] = _classify_band(entry.get("pm25_forecast"))
+
+        # Defaults for decision-support fields
+        if not entry.get("episode_state"):
+            entry["episode_state"] = "stable"
+        if not entry.get("confidence"):
+            entry["confidence"] = "medium"
+        if not entry.get("priority"):
+            band = entry.get("risk_band", "unknown")
+            if band in ("severe", "very_unhealthy"):
+                entry["priority"] = "escalate"
+            elif band == "unhealthy":
+                entry["priority"] = "review"
+            else:
+                entry["priority"] = "monitor"
+
+    return data
+
+
 # ── GCS helpers (same pattern as ops_pipeline.py) ────────────────────────
 
 def _require_gcs():
@@ -225,7 +278,7 @@ async def get_forecasts(
     if horizon is not None:
         entries = [e for e in entries if e.get("lead_days") == horizon]
     if city:
-        entries = [e for e in entries if (e.get("city_name") or e.get("city", "")).lower() == city.lower()]
+        entries = [e for e in entries if e.get("city_name", "").lower() == city.lower()]
     if priority:
         entries = [e for e in entries if e.get("priority") == priority]
     if band:
@@ -418,12 +471,17 @@ def _resolve_latest_date() -> str:
 
 
 def _load_forecast(date_str: Optional[str] = None) -> Dict[str, Any]:
-    """Load forecast JSON from GCS. Falls back to latest.json."""
+    """Load forecast JSON from GCS. Falls back to latest.json.
+
+    Always normalizes fields (city→city_name, risk_band defaults, etc.)
+    so downstream consumers get consistent data regardless of pipeline version.
+    """
     if date_str:
         ds = _date_str(date_str)
-        return _gcs_read_json(f"forecasts/forecast_{ds}.json")
+        raw = _gcs_read_json(f"forecasts/forecast_{ds}.json")
     else:
-        return _gcs_read_json("forecasts/latest.json")
+        raw = _gcs_read_json("forecasts/latest.json")
+    return _normalize_forecast(raw)
 
 
 def _load_watchlist_safe(date_str: Optional[str]) -> Optional[Dict[str, Any]]:

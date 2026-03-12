@@ -85,9 +85,9 @@ export default function AnalystDeskPage() {
   const hasMapData = forecast || currentStations
 
   return (
-    <div className="flex" style={{ height: 'calc(100vh - 108px)' }}>
+    <div className="flex h-[calc(100vh-108px)]">
       {/* Left: Copilot chat */}
-      <div className="w-[340px] shrink-0">
+      <div className="w-[380px] shrink-0 border-r border-slate-200">
         <CopilotChat
           selectedDate={selectedDate}
           onAction={handleCopilotAction}
