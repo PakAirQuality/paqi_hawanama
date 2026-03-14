@@ -1690,3 +1690,199 @@ def _estimate_drivers_from_forecast(forecast: dict, target: str) -> dict | None:
         "confidence": "low",
         "limitation": "Estimated from forecast data only — meteorological features not available",
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. STATION FOCUS HELPERS
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+async def _resolve_station(
+    db: AsyncSession,
+    name_or_id: str,
+) -> dict | None:
+    """Resolve a station by station_id (hex) or fuzzy name match.
+
+    Returns {station_id, station_name, city_name, lat, lon} or None.
+    """
+    cleaned = name_or_id.strip()
+
+    # Hex station_id (16 chars) → direct lookup
+    if len(cleaned) == 16 and all(c in "0123456789abcdef" for c in cleaned.lower()):
+        query = text("""
+            SELECT s.station_id, s.name AS station_name,
+                   c.name AS city_name, s.lat, s.lon
+            FROM stations s
+            LEFT JOIN cities c ON s.city_id = c.id
+            WHERE s.station_id = :sid AND s.active = true
+            LIMIT 1
+        """)
+        row = (await db.execute(query, {"sid": cleaned})).mappings().first()
+        if row:
+            return dict(row)
+        return None
+
+    # Text → exact case-insensitive, then fuzzy
+    query = text("""
+        SELECT s.station_id, s.name AS station_name,
+               c.name AS city_name, s.lat, s.lon
+        FROM stations s
+        LEFT JOIN cities c ON s.city_id = c.id
+        WHERE LOWER(s.name) = LOWER(:name) AND s.active = true
+        LIMIT 1
+    """)
+    row = (await db.execute(query, {"name": cleaned})).mappings().first()
+    if row:
+        return dict(row)
+
+    # Fuzzy fallback
+    import difflib
+    all_query = text("""
+        SELECT s.station_id, s.name AS station_name,
+               c.name AS city_name, s.lat, s.lon
+        FROM stations s
+        LEFT JOIN cities c ON s.city_id = c.id
+        WHERE s.active = true AND s.name IS NOT NULL
+    """)
+    all_rows = (await db.execute(all_query)).mappings().all()
+    names = [r["station_name"] for r in all_rows if r["station_name"]]
+    matches = difflib.get_close_matches(cleaned, names, n=1, cutoff=0.6)
+    if matches:
+        for r in all_rows:
+            if r["station_name"] == matches[0]:
+                return dict(r)
+    return None
+
+
+async def get_station_history(
+    db: AsyncSession,
+    station_id: str,
+    hours: int = 24,
+) -> dict | None:
+    """Get recent PM2.5 readings for a station.
+
+    Returns {station_name, city, hours, readings, stats} or None.
+    """
+    query = text("""
+        SELECT s.name AS station_name, c.name AS city_name,
+               r.pm25, r.ts_utc
+        FROM readings r
+        JOIN stations s ON r.scope_key = s.station_id
+        LEFT JOIN cities c ON s.city_id = c.id
+        WHERE r.scope_key = :station_id
+          AND r.scope_type = 'station'
+          AND r.ts_utc >= NOW() - MAKE_INTERVAL(hours => :hours)
+          AND r.pm25 IS NOT NULL
+        ORDER BY r.ts_utc ASC
+    """)
+    rows = (await db.execute(query, {
+        "station_id": station_id,
+        "hours": hours,
+    })).mappings().all()
+
+    if not rows:
+        return None
+
+    station_name = rows[0]["station_name"] or ""
+    city = rows[0]["city_name"] or ""
+    readings = [
+        {"timestamp": r["ts_utc"].isoformat(), "pm25": _safe_round(r["pm25"])}
+        for r in rows
+    ]
+    vals = [r["pm25"] for r in rows if r["pm25"] is not None]
+
+    # Trend: compare last 6h mean to previous 6h mean
+    trend_direction = "stable"
+    if len(rows) >= 4:
+        mid = len(rows) // 2
+        first_half = [r["pm25"] for r in rows[:mid] if r["pm25"] is not None]
+        second_half = [r["pm25"] for r in rows[mid:] if r["pm25"] is not None]
+        if first_half and second_half:
+            m1 = sum(first_half) / len(first_half)
+            m2 = sum(second_half) / len(second_half)
+            if m2 > m1 + 5:
+                trend_direction = "rising"
+            elif m2 < m1 - 5:
+                trend_direction = "falling"
+
+    return {
+        "station_name": station_name,
+        "city": city,
+        "hours": hours,
+        "readings": readings,
+        "stats": {
+            "min": _safe_round(min(vals)) if vals else None,
+            "max": _safe_round(max(vals)) if vals else None,
+            "mean": _safe_round(sum(vals) / len(vals)) if vals else None,
+            "current": _safe_round(vals[-1]) if vals else None,
+            "trend_direction": trend_direction,
+        },
+    }
+
+
+async def get_station_neighbours(
+    db: AsyncSession,
+    station_id: str,
+    radius_km: int = 25,
+    limit: int = 5,
+) -> list[dict]:
+    """Find nearby stations with their latest PM2.5 reading.
+
+    Uses PostGIS ST_DWithin for spatial search, sorted by distance.
+    """
+    radius_m = radius_km * 1000
+    query = text("""
+        WITH target AS (
+            SELECT station_id, lat, lon,
+                   ST_SetSRID(ST_MakePoint(lon, lat), 4326)::geography AS geog
+            FROM stations
+            WHERE station_id = :station_id
+            LIMIT 1
+        )
+        SELECT s.station_id, s.sensor_id, s.name AS station_name,
+               c.name AS city_name,
+               ROUND(ST_Distance(
+                   ST_SetSRID(ST_MakePoint(s.lon, s.lat), 4326)::geography,
+                   t.geog
+               )::numeric / 1000, 1) AS distance_km,
+               r.pm25, r.ts_utc
+        FROM stations s
+        CROSS JOIN target t
+        LEFT JOIN cities c ON s.city_id = c.id
+        LEFT JOIN LATERAL (
+            SELECT pm25, ts_utc
+            FROM readings
+            WHERE scope_key = s.station_id
+              AND scope_type = 'station'
+              AND ts_utc >= NOW() - INTERVAL '24 hours'
+              AND pm25 IS NOT NULL
+            ORDER BY ts_utc DESC
+            LIMIT 1
+        ) r ON true
+        WHERE s.station_id != t.station_id
+          AND s.active = true
+          AND ST_DWithin(
+              ST_SetSRID(ST_MakePoint(s.lon, s.lat), 4326)::geography,
+              t.geog,
+              :radius_m
+          )
+        ORDER BY distance_km ASC
+        LIMIT :lim
+    """)
+    rows = (await db.execute(query, {
+        "station_id": station_id,
+        "radius_m": radius_m,
+        "lim": limit,
+    })).mappings().all()
+
+    return [
+        {
+            "station_name": r["station_name"] or "",
+            "sensor_id": r["sensor_id"],
+            "city": r["city_name"] or "",
+            "distance_km": float(r["distance_km"]) if r["distance_km"] is not None else None,
+            "latest_pm25": _safe_round(r["pm25"]),
+            "latest_timestamp": r["ts_utc"].isoformat() if r["ts_utc"] else None,
+        }
+        for r in rows
+    ]

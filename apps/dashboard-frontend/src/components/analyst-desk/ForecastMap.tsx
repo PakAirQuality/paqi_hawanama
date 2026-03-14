@@ -1,9 +1,10 @@
 "use client"
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import type { ForecastEntry, CurrentStation, CopilotAction } from './types'
+import type { ForecastEntry, CurrentStation, CopilotAction, StationMention } from './types'
+import type { FiresGeoJSON } from './api'
 import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 
 mapboxgl.accessToken = '***REMOVED***'
@@ -127,14 +128,23 @@ function createMarkerEl(value: number | null | undefined, colorClass: string): H
 
 // ── Component ──
 
+interface ProviderMap {
+  by_sensor_id: Record<string, string>
+  by_station_id: Record<string, string>
+  by_name: Record<string, string>
+}
+
 interface ForecastMapProps {
   forecasts: ForecastEntry[]
   currentStations: CurrentStation[]
   selectedHorizon: number  // 0 = Now, 1/2/3 = D+1/D+2/D+3
   onHorizonChange: (h: number) => void
-  onStationClick: (sensorId: number) => void
+  onStationClick: (mention: StationMention) => void
   pendingAction?: CopilotAction | null
   onActionProcessed?: () => void
+  networkFilter?: string | null
+  onClearNetworkFilter?: () => void
+  firesGeoJSON?: FiresGeoJSON | null
 }
 
 export function ForecastMap({
@@ -145,15 +155,32 @@ export function ForecastMap({
   onStationClick,
   pendingAction,
   onActionProcessed,
+  networkFilter,
+  onClearNetworkFilter,
+  firesGeoJSON,
 }: ForecastMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const markersRef = useRef<mapboxgl.Marker[]>([])
   const mapLoaded = useRef(false)
+  const providerMapRef = useRef<ProviderMap | null>(null)
+  const fireSourceAdded = useRef(false)
+
+  const [showFires, setShowFires] = useState(true)
+  const [showStations, setShowStations] = useState(true)
+  const [showSatellite, setShowSatellite] = useState(true)
 
   // Keep refs to latest data to avoid stale closures in map callbacks
   const dataRef = useRef({ forecasts, currentStations, selectedHorizon, onStationClick })
   dataRef.current = { forecasts, currentStations, selectedHorizon, onStationClick }
+
+  // Load provider map for network filtering
+  useEffect(() => {
+    fetch('/station-providers.json')
+      .then(r => r.json())
+      .then((d: ProviderMap) => { providerMapRef.current = d })
+      .catch(() => {})
+  }, [])
 
   // Initialize map
   useEffect(() => {
@@ -267,6 +294,69 @@ export function ForecastMap({
         paint: { 'line-color': '#64748b', 'line-width': 1.5, 'line-opacity': 0.9 },
       })
 
+      // ── Active fires (FIRMS VIIRS) ──
+      map.current.addSource('fires', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+
+      map.current.addLayer({
+        id: 'fires-glow',
+        type: 'circle',
+        source: 'fires',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'frp'], 0, 12, 50, 24, 200, 40],
+          'circle-color': '#ff8c00',
+          'circle-opacity': 0.15,
+          'circle-blur': 1,
+        },
+      })
+
+      map.current.addLayer({
+        id: 'fires-layer',
+        type: 'circle',
+        source: 'fires',
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['get', 'frp'], 0, 3, 50, 6, 200, 10],
+          'circle-color': [
+            'match', ['get', 'confidence'],
+            'h', '#ff2200',
+            'high', '#ff2200',
+            '#ff8c00',
+          ],
+          'circle-opacity': 0.85,
+          'circle-stroke-width': 1,
+          'circle-stroke-color': 'rgba(0,0,0,0.3)',
+        },
+      })
+
+      // Fire hover popup
+      const firePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '200px' })
+
+      map.current.on('mouseenter', 'fires-layer', (e) => {
+        if (!map.current || !e.features?.[0]) return
+        map.current.getCanvas().style.cursor = 'pointer'
+        const props = e.features[0].properties!
+        const coords = (e.features[0].geometry as GeoJSON.Point).coordinates.slice() as [number, number]
+        firePopup.setLngLat(coords).setHTML(`
+          <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">
+            <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Fire Detection</div>
+            <div>FRP: <b>${props.frp} MW</b></div>
+            <div>Confidence: <b style="text-transform:capitalize">${props.confidence}</b></div>
+            <div>Satellite: <b>${props.satellite}</b></div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">${props.acq_date}</div>
+          </div>
+        `).addTo(map.current)
+      })
+
+      map.current.on('mouseleave', 'fires-layer', () => {
+        if (!map.current) return
+        map.current.getCanvas().style.cursor = ''
+        firePopup.remove()
+      })
+
+      fireSourceAdded.current = true
+
       // ── District hover tracking ──
       let hoveredId: string | null = null
 
@@ -341,16 +431,23 @@ export function ForecastMap({
   // Render markers for current or forecast data (always reads from dataRef)
   const renderMarkers = () => {
     if (!map.current || !mapLoaded.current) return
-    const { forecasts: fc, currentStations: cs, selectedHorizon: sh, onStationClick: osc } = dataRef.current
 
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
+
+    if (!showStations) return
+
+    const { forecasts: fc, currentStations: cs, selectedHorizon: sh, onStationClick: osc } = dataRef.current
+
+    const nf = networkFilter ?? null
+    const pm = providerMapRef.current
 
     if (sh === 0) {
       // Current/live station markers — Pakistan only
       cs.filter(s =>
         s.latitude != null && s.longitude != null &&
-        isInsidePakistan(s.longitude, s.latitude)
+        isInsidePakistan(s.longitude, s.latitude) &&
+        (!nf || !pm || (pm.by_station_id[s.id] || pm.by_name[s.name] || '').toLowerCase().includes(nf.toLowerCase()))
       ).forEach((station) => {
         if (station.pm25 == null && station.aqi_raw == null) return
 
@@ -384,12 +481,20 @@ export function ForecastMap({
 
         el.addEventListener('mouseenter', () => marker.togglePopup())
         el.addEventListener('mouseleave', () => marker.togglePopup())
+        el.addEventListener('click', () => osc({
+          sensorId: 0,
+          stationName: station.name || 'Station',
+          cityName: station.city || '',
+        }))
 
         markersRef.current.push(marker)
       })
     } else {
       // Forecast markers (D+1/D+2/D+3)
-      fc.filter(f => f.lead_days === sh).forEach((entry) => {
+      fc.filter(f =>
+        f.lead_days === sh &&
+        (!nf || !pm || (pm.by_sensor_id[String(f.sensor_id)] || pm.by_name[f.station_name] || '').toLowerCase().includes(nf.toLowerCase()))
+      ).forEach((entry) => {
         if (entry.latitude == null || entry.longitude == null) return
 
         const rawBand = entry.risk_band
@@ -447,7 +552,11 @@ export function ForecastMap({
 
         el.addEventListener('mouseenter', () => marker.togglePopup())
         el.addEventListener('mouseleave', () => marker.togglePopup())
-        el.addEventListener('click', () => osc(entry.sensor_id))
+        el.addEventListener('click', () => osc({
+          sensorId: entry.sensor_id,
+          stationName: entry.station_name || `Station ${entry.sensor_id}`,
+          cityName: entry.city_name || '',
+        }))
 
         markersRef.current.push(marker)
       })
@@ -460,7 +569,7 @@ export function ForecastMap({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     renderMarkers()
-  }, [forecasts, currentStations, selectedHorizon, onStationClick])
+  }, [forecasts, currentStations, selectedHorizon, onStationClick, networkFilter, showStations])
 
   // Handle copilot map actions
   useEffect(() => {
@@ -493,6 +602,38 @@ export function ForecastMap({
     onActionProcessed?.()
   }, [pendingAction, forecasts, onActionProcessed])
 
+  // Sync fire data to map source
+  useEffect(() => {
+    if (!map.current || !fireSourceAdded.current) return
+    const src = map.current.getSource('fires') as mapboxgl.GeoJSONSource | undefined
+    if (!src) return
+    if (firesGeoJSON) {
+      src.setData(firesGeoJSON as GeoJSON.FeatureCollection)
+    } else {
+      src.setData({ type: 'FeatureCollection', features: [] })
+    }
+  }, [firesGeoJSON])
+
+  // Toggle fire layer visibility
+  useEffect(() => {
+    if (!map.current || !fireSourceAdded.current) return
+    const vis = showFires ? 'visible' : 'none'
+    for (const id of ['fires-glow', 'fires-layer']) {
+      if (map.current.getLayer(id)) {
+        map.current.setLayoutProperty(id, 'visibility', vis)
+      }
+    }
+  }, [showFires])
+
+  // Toggle satellite layer visibility
+  useEffect(() => {
+    if (!map.current) return
+    const vis = showSatellite ? 'visible' : 'none'
+    if (map.current.getLayer('satpm25-layer')) {
+      map.current.setLayoutProperty('satpm25-layer', 'visibility', vis)
+    }
+  }, [showSatellite])
+
   // Timeline steps — date-formatted labels
   const formatHorizonDate = (daysAhead: number) => {
     const d = new Date()
@@ -508,47 +649,125 @@ export function ForecastMap({
 
   return (
     <div className="relative w-full h-full">
-      {/* ── Timeline slider — bottom of map ── */}
-      <div className="absolute bottom-3 left-4 right-4 z-10 flex items-center gap-3">
-        <button
-          onClick={() => { if (selectedHorizon > 0) onHorizonChange(selectedHorizon - 1) }}
-          disabled={selectedHorizon <= 0}
-          className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors"
-        >
-          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
-        </button>
+      {/* ── Unified top bar: network filter + timeline + analytics toggle ── */}
+      <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-3">
+        {/* Network filter badge (conditional) */}
+        {networkFilter && (
+          <div className="shrink-0 flex items-center gap-1.5 bg-white/95 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-sm font-medium text-slate-700">
+            <span>{networkFilter}</span>
+            <button
+              onClick={onClearNetworkFilter}
+              className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-slate-200 hover:bg-slate-300 text-slate-500 text-xs leading-none"
+            >
+              &times;
+            </button>
+          </div>
+        )}
 
-        <div className="text-center min-w-[130px] text-sm font-semibold text-slate-800 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 shadow-sm">
-          {steps[selectedHorizon].label}
+        {/* Timeline pill */}
+        <div className="flex-1 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm">
+          <button
+            onClick={() => { if (selectedHorizon > 0) onHorizonChange(selectedHorizon - 1) }}
+            disabled={selectedHorizon <= 0}
+            className="p-1 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors shrink-0"
+          >
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+          </button>
+
+          <div className="text-center min-w-[120px] text-sm font-semibold text-slate-800 shrink-0">
+            {steps[selectedHorizon].label}
+          </div>
+
+          <button
+            onClick={() => { if (selectedHorizon < 3) onHorizonChange(selectedHorizon + 1) }}
+            disabled={selectedHorizon >= 3}
+            className="p-1 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors shrink-0"
+          >
+            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+          </button>
+
+          <div className="flex-1 relative flex items-center h-5">
+            <div className="absolute left-0 right-0 h-[4px] rounded-full bg-slate-300/60" />
+            <div
+              className="absolute left-0 h-[4px] rounded-full bg-slate-700"
+              style={{ width: `${(selectedHorizon / 3) * 100}%` }}
+            />
+            <input
+              type="range"
+              min={0}
+              max={3}
+              value={selectedHorizon}
+              onChange={(e) => onHorizonChange(parseInt(e.target.value, 10))}
+              className="horizon-slider relative z-10 w-full h-[4px] appearance-none cursor-pointer bg-transparent"
+            />
+          </div>
         </div>
 
-        <button
-          onClick={() => { if (selectedHorizon < 3) onHorizonChange(selectedHorizon + 1) }}
-          disabled={selectedHorizon >= 3}
-          className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors"
-        >
-          <svg className="w-4 h-4 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
-        </button>
-
-        <div className="flex-1 relative flex items-center h-6">
-          <div className="absolute left-0 right-0 h-[5px] rounded-full bg-slate-300/60" />
-          <div
-            className="absolute left-0 h-[5px] rounded-full bg-slate-700"
-            style={{ width: `${(selectedHorizon / 3) * 100}%` }}
-          />
-          <input
-            type="range"
-            min={0}
-            max={3}
-            value={selectedHorizon}
-            onChange={(e) => onHorizonChange(parseInt(e.target.value, 10))}
-            className="horizon-slider relative z-10 w-full h-[5px] appearance-none cursor-pointer bg-transparent"
-          />
-        </div>
       </div>
 
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
+
+      {/* ── Layer toggle buttons ── */}
+      <div className="absolute right-3 bottom-3 z-10 flex flex-col gap-1.5">
+        {/* Stations */}
+        <button
+          onClick={() => setShowStations(v => !v)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
+            showStations ? 'bg-white/95 text-slate-700' : 'bg-white/60 text-slate-400'
+          }`}
+          title={showStations ? 'Hide stations' : 'Show stations'}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+          </svg>
+        </button>
+
+        {/* Satellite */}
+        <button
+          onClick={() => setShowSatellite(v => !v)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
+            showSatellite ? 'bg-white/95 text-slate-700' : 'bg-white/60 text-slate-400'
+          }`}
+          title={showSatellite ? 'Hide satellite PM2.5' : 'Show satellite PM2.5'}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5" />
+            <circle cx="12" cy="12" r="3" />
+          </svg>
+        </button>
+
+        {/* Wind (disabled placeholder) */}
+        <button
+          disabled
+          className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm bg-white/40 text-slate-300 cursor-not-allowed"
+          title="Wind layer — coming soon"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 8h8a4 4 0 100-8H6m0 16h10a4 4 0 010 8H6m2-8h6a4 4 0 100-8H8" />
+          </svg>
+        </button>
+
+        {/* Fires */}
+        <button
+          onClick={() => setShowFires(v => !v)}
+          className={`relative w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
+            showFires ? 'bg-white/95 text-orange-600' : 'bg-white/60 text-slate-400'
+          }`}
+          title={showFires ? 'Hide fires' : 'Show fires'}
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18a3.75 3.75 0 00.495-7.468 5.99 5.99 0 00-1.925 3.547 5.975 5.975 0 01-2.133-1.001A3.75 3.75 0 0012 18z" />
+          </svg>
+          {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center text-[9px] font-bold bg-orange-500 text-white rounded-full px-1">
+              {firesGeoJSON.features.length}
+            </span>
+          )}
+        </button>
+      </div>
 
       {/* Popup styling */}
       <style jsx global>{`

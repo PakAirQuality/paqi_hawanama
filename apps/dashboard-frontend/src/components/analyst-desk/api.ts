@@ -61,6 +61,30 @@ export async function fetchCurrentStations(): Promise<{ stations: CurrentStation
   return res.json()
 }
 
+export interface FiresGeoJSON {
+  type: "FeatureCollection"
+  date: string
+  features: Array<{
+    type: "Feature"
+    geometry: { type: "Point"; coordinates: [number, number] }
+    properties: {
+      frp: number
+      confidence: string
+      satellite: string
+      acq_date: string
+    }
+  }>
+}
+
+export async function fetchFires(date: string): Promise<FiresGeoJSON> {
+  const res = await fetch(`${DESK_PREFIX}/fires?date=${date}`, {
+    headers,
+    cache: 'no-store',
+  })
+  if (!res.ok) throw new Error(`Failed to load fires for ${date}`)
+  return res.json()
+}
+
 export async function fetchOverview(date?: string): Promise<Record<string, unknown>> {
   const params = date ? `?date=${date}` : ''
   const res = await fetch(`${DESK_PREFIX}/overview${params}`, {

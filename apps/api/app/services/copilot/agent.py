@@ -19,6 +19,9 @@ analysts monitoring PM2.5 across Pakistan.
 - Use your tools to retrieve real data before answering. Never fabricate numbers.
 - Be concise and direct. Lead with the key finding, then give supporting detail.
 - Use µg/m³ units for PM2.5 values.
+- Always pass country="Pakistan" to tools that accept it (aq_hotspots_daily, \
+aq_compare_dates, aq_incident_summary) unless the user explicitly asks about \
+another country. The monitoring network covers South Asia but this desk focuses on Pakistan.
 
 ## Data sources
 - **Hotspots, city detail, and date comparisons** use actual station observations \
@@ -37,6 +40,12 @@ from the monitoring network — these show real current conditions, not predicti
 | "Why is Lahore so bad?" | `aq_explain_drivers` — returns scored drivers with evidence |
 | "What needs attention?" / "Alerts?" | `aq_incident_summary` |
 | "How accurate?" / "Accuracy trend" | `aq_forecast_audit` (n_days=1 or 7) |
+| @StationName or "tell me about station X" | `aq_station_focus` |
+| "Show trend" / "neighbors" (after station focus) | `aq_station_history` |
+
+When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
+For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
+The station remains focused until the user mentions a different station or changes topic.
 
 One tool call usually suffices.
 
@@ -75,6 +84,20 @@ consistent across all starting heights.
 rather than "scored by the driver engine."
 - Never claim certainty about drivers — use "likely", "evidence suggests", "appears to be driven by".
 
+## Network filtering
+When users ask to filter by network/provider, emit a filter_network action.
+
+Available networks: PAQI, IQAir, Urban Unit, Punjab EPA
+
+Aliases: "IQAir"/"Airvisual" → IQAir, "PAQI"/"PAK AQI" → PAQI, \
+"Punjab AQMS"/"Punjab government" → Punjab EPA, "Urban Unit"/"urban-unit" → Urban Unit, \
+"all"/"clear filter"/"show everything" → network: null
+
+Format: {{ACTION:{"type":"filter_network","network":"PAQI"}}}
+Clear: {{ACTION:{"type":"filter_network","network":null}}}
+
+Tell the user what filter was applied and suggest "say 'show all stations' to clear the filter."
+
 ## Comparison narration
 When `aq_compare_dates` returns a `driver_explanation` block:
 - Lead with the PM2.5 delta and direction (from `delta_mean_pm25` and `direction`).
@@ -87,10 +110,11 @@ this comparison" and stick to the observation delta.
 
 BRIEFING_PROMPT = """\
 Generate a brief opening briefing for an air-quality analyst starting their \
-shift. Call aq_hotspots_daily and aq_incident_summary. \
+shift. Call aq_hotspots_daily (with country="Pakistan") and aq_incident_summary \
+(with country="Pakistan"). \
 Summarise in 3-4 sentences: overall conditions, worst city, how many stations \
 are unhealthy or worse, any ramp events, and any critical incidents. Be direct \
-and factual.
+and factual. Do NOT include any {{ACTION:...}} tags in briefings.
 """
 
 # Lazy singleton — avoids import-time crash when GEMINI_API_KEY is unset
@@ -130,15 +154,17 @@ def get_agent():
         lines = [
             f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'.",
         ]
-        if s.focused_city or s.last_entities:
+        if s.focused_city or s.last_entities or s.focused_station_id:
             lines.append("")
             lines.append("Session context:")
             lines.append(f"- Focus: {s.focus_type} — {s.focused_city or 'national'}")
+            if s.focused_station_id:
+                lines.append(f"- Currently focused station: station_id={s.focused_station_id}")
             if s.comparison_date:
                 lines.append(f"- Last comparison date: {s.comparison_date}")
             if s.last_entities:
                 lines.append(f"- Recent entities: {', '.join(s.last_entities[:5])}")
-            lines.append('When the user says "it", "there", or "that city", resolve to the focused city.')
+            lines.append('When the user says "it", "there", or "that station/city", resolve to the focused entity.')
         return "\n".join(lines)
 
     agent.tool(tools.aq_hotspots_daily)
@@ -147,6 +173,8 @@ def get_agent():
     agent.tool(tools.aq_explain_drivers)
     agent.tool(tools.aq_incident_summary)
     agent.tool(tools.aq_forecast_audit)
+    agent.tool(tools.aq_station_focus)
+    agent.tool(tools.aq_station_history)
 
     _copilot_agent = agent
     logger.info("Copilot agent initialized (gemini-3.1-pro-preview)")

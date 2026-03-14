@@ -103,11 +103,25 @@ async def copilot_briefing(req: ChatRequest, _auth=Depends(verify_tasks_token)):
                 deps=session,
                 message_history=[],
             ) as result:
+                buffer = ""
+                last_sent = 0  # track how much clean text we've emitted
                 async for chunk in result.stream_text(delta=True):
-                    clean = ACTION_RE.sub("", chunk)
+                    buffer += chunk
+                    # Strip any complete ACTION tags from the full buffer
+                    clean = ACTION_RE.sub("", buffer)
                     clean = STRAY_BRACE_RE.sub("", clean)
-                    if clean.strip():
-                        yield _sse_event({"type": "text", "content": clean})
+                    # Only emit the new portion since last send
+                    new_text = clean[last_sent:]
+                    if new_text.strip():
+                        yield _sse_event({"type": "text", "content": new_text})
+                    last_sent = len(clean)
+
+                # Flush any remaining text
+                clean = ACTION_RE.sub("", buffer)
+                clean = STRAY_BRACE_RE.sub("", clean)
+                final = clean[last_sent:]
+                if final.strip():
+                    yield _sse_event({"type": "text", "content": final})
 
                 session.message_history = result.all_messages()
 

@@ -34,6 +34,7 @@ def _update_session(
     tool: str,
     focus_type: str | None = None,
     focused_city: str | None = None,
+    focused_station_id: str | None = None,
     comparison_date: str | None = None,
     entities: list[str] | None = None,
 ) -> None:
@@ -44,6 +45,8 @@ def _update_session(
         sess.focus_type = focus_type
     if focused_city is not None:
         sess.focused_city = focused_city
+    if focused_station_id is not None:
+        sess.focused_station_id = focused_station_id
     if comparison_date is not None:
         sess.comparison_date = comparison_date
     if entities is not None:
@@ -249,3 +252,153 @@ async def aq_forecast_audit(
     result = await get_forecast_audit(dt, n_days)
     _update_session(ctx, tool="aq_forecast_audit")
     return result
+
+
+# ── Tool 7: aq_station_focus ───────────────────────────────────────────
+
+
+async def aq_station_focus(
+    ctx: RunContext[CopilotSession],
+    station_name_or_id: str,
+) -> dict:
+    """Focus on a specific station — show current reading, forecast, and risk status.
+
+    Resolves the station by name (fuzzy matched) or station_id (hex).
+    Sets the session focus so follow-up questions ("show trend", "neighbors")
+    automatically target this station.
+
+    Args:
+        station_name_or_id: Station name (fuzzy matched) or station_id (hex string).
+    """
+    from app.services.analytics import _resolve_station, _load_forecast_safe, _safe_round
+
+    dt = _effective_date(ctx)
+    db = await _get_db()
+    try:
+        station = await _resolve_station(db, station_name_or_id)
+    finally:
+        await db.close()
+
+    if not station:
+        return {"date": dt, "data": {"message": f"Station '{station_name_or_id}' not found."}, "followups": []}
+
+    station_id = station["station_id"]  # hex
+    station_name = station["station_name"] or ""
+    city = station["city_name"] or ""
+
+    # Load forecast for this station (match by station_id hex, then by name)
+    forecast = _load_forecast_safe(dt)
+    entries = forecast.get("forecasts", [])
+    fc_rows = [e for e in entries if e.get("station_id") == station_id]
+    if not fc_rows:
+        sname = station_name.lower()
+        fc_rows = [e for e in entries if (e.get("station_name") or "").lower() == sname and sname]
+
+    fc_by_horizon = {}
+    current_pm25 = None
+    risk_band = "unknown"
+    episode_state = "stable"
+    confidence = "medium"
+    priority = "monitor"
+    for e in fc_rows:
+        ld = e.get("lead_days")
+        if ld:
+            fc_by_horizon[f"D+{ld}"] = {
+                "pm25_forecast": _safe_round(e.get("pm25_forecast")),
+                "pm25_q90": _safe_round(e.get("pm25_q90")),
+                "risk_band": e.get("risk_band"),
+                "ramp_detected": e.get("ramp_detected", False),
+            }
+            if ld == 1:
+                current_pm25 = _safe_round(e.get("pm25_forecast"))
+                risk_band = e.get("risk_band", "unknown")
+                episode_state = e.get("episode_state", "stable")
+                confidence = e.get("confidence", "medium")
+                priority = e.get("priority", "monitor")
+
+    _update_session(
+        ctx, tool="aq_station_focus",
+        focus_type="station",
+        focused_city=city,
+        focused_station_id=station_id,
+        entities=[station_name],
+    )
+
+    import json as _json
+    action_hint = "{{ACTION:" + _json.dumps({
+        "type": "zoom_to_station",
+        "station_id": station_id,
+        "lat": station["lat"],
+        "lng": station["lon"],
+    }) + "}}"
+
+    return {
+        "date": dt,
+        "data": {
+            "station_name": station_name,
+            "city": city,
+            "station_id": station_id,
+            "current_pm25": current_pm25,
+            "forecast": fc_by_horizon,
+            "risk_band": risk_band,
+            "episode_state": episode_state,
+            "confidence": confidence,
+            "priority": priority,
+        },
+        "action_hint": action_hint,
+        "followups": [
+            "Show 24h trend",
+            "Compare with neighbors",
+            "Why is it elevated?",
+        ],
+    }
+
+
+# ── Tool 8: aq_station_history ─────────────────────────────────────────
+
+
+async def aq_station_history(
+    ctx: RunContext[CopilotSession],
+    hours: int = 24,
+) -> dict:
+    """Show recent PM2.5 readings and nearby station comparison for the focused station.
+
+    Uses the station set by a previous aq_station_focus call. If no station is
+    focused, asks the user to mention one first.
+
+    Args:
+        hours: Number of hours of history to return (default 24).
+    """
+    from app.services.analytics import get_station_history, get_station_neighbours
+
+    station_id = ctx.deps.focused_station_id
+    if not station_id:
+        return {"date": _effective_date(ctx), "data": {"message": "Please mention a station first (e.g. @StationName)."}, "followups": []}
+
+    dt = _effective_date(ctx)
+
+    db = await _get_db()
+    try:
+        history = await get_station_history(db, station_id, hours)
+        neighbours = await get_station_neighbours(db, station_id)
+    finally:
+        await db.close()
+
+    _update_session(ctx, tool="aq_station_history")
+
+    data: dict = {}
+    if history:
+        data["history"] = history
+    else:
+        data["history"] = {"message": f"No readings found in the last {hours} hours."}
+    data["neighbours"] = neighbours
+
+    followups = ["Why is it elevated?", "What's the forecast?"]
+    if neighbours:
+        followups.insert(0, f"Tell me about {neighbours[0]['station_name']}")
+
+    return {
+        "date": dt,
+        "data": data,
+        "followups": followups,
+    }

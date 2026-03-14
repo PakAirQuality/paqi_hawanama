@@ -56,6 +56,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
                 {action.type === 'set_horizon' && (
                   <>D+{action.horizon}</>
                 )}
+                {action.type === 'filter_network' && (
+                  <>{action.network ? `Filter: ${action.network}` : 'All networks'}</>
+                )}
               </span>
             ))}
           </div>

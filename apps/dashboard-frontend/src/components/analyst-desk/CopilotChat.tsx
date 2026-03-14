@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { ChatMessage } from './ChatMessage'
-import type { ChatMessage as ChatMessageType, CopilotAction } from './types'
+import { AnalystPanel, type TrayStation } from './AnalystTray'
+import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
 const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
@@ -17,12 +18,23 @@ const SUGGESTED_QUESTIONS = [
   "Which stations should I prioritize?",
 ]
 
+const STATION_CHIPS = [
+  "What's the forecast?",
+  "Show 24h trend",
+  "Compare with neighbors",
+  "Why is it elevated?",
+]
+
 interface CopilotChatProps {
   selectedDate: string
   onAction?: (action: CopilotAction) => void
+  stationMention?: StationMention | null
+  onMentionConsumed?: () => void
+  stations?: TrayStation[]
 }
 
-export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
+export function CopilotChat({ selectedDate, onAction, stationMention, onMentionConsumed, stations }: CopilotChatProps) {
+  const [activeTab, setActiveTab] = useState<'chat' | 'analytics'>('chat')
   const [messages, setMessages] = useState<ChatMessageType[]>([])
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -30,6 +42,16 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
   const [briefingDone, setBriefingDone] = useState(false)
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [showStationChips, setShowStationChips] = useState(false)
+
+  // Pre-fill input when a station is mentioned (map click)
+  useEffect(() => {
+    if (!stationMention) return
+    setInput(`@${stationMention.stationName} `)
+    setShowStationChips(true)
+    inputRef.current?.focus()
+    onMentionConsumed?.()
+  }, [stationMention, onMentionConsumed])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -94,13 +116,14 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
 
             if (event.type === 'text') {
               accumulated += event.content
-              const { clean, actions } = extractActions(accumulated)
-              allActions.push(...actions)
+              const { clean, actions: extractedActions } = extractActions(accumulated)
 
-              // Dispatch actions immediately
-              for (const action of actions) {
+              // Only dispatch newly found actions (avoid duplicates)
+              const newActions = extractedActions.slice(allActions.length)
+              for (const action of newActions) {
                 onAction?.(action)
               }
+              allActions.push(...newActions)
 
               setMessages(prev =>
                 prev.map(m =>
@@ -190,6 +213,8 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
 
     setMessages(prev => [...prev, userMsg, assistantMsg])
     setInput('')
+    setShowStationChips(false)
+    setActiveTab('chat')
 
     await streamResponse('/copilot/chat', {
       session_id: sessionId,
@@ -216,45 +241,86 @@ export function CopilotChat({ selectedDate, onAction }: CopilotChatProps) {
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Header */}
-      <div className="px-3 py-2 border-b border-slate-100">
-        <div className="flex items-center gap-1.5">
-          <div className={`w-1.5 h-1.5 rounded-full ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-          <h2 className="text-xs font-semibold text-slate-500 uppercase tracking-wide">Copilot</h2>
+      {/* Tab header */}
+      <div className="flex border-b border-slate-100">
+        <button
+          onClick={() => setActiveTab('chat')}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+            activeTab === 'chat'
+              ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+          Chat
+        </button>
+        <button
+          onClick={() => setActiveTab('analytics')}
+          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+            activeTab === 'analytics'
+              ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
+              : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" />
+          </svg>
+          Analytics
+        </button>
+      </div>
+
+      {/* Content area */}
+      {activeTab === 'chat' ? (
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
+          {messages.map(msg => (
+            <ChatMessage key={msg.id} message={msg} />
+          ))}
+
+          {/* Suggested questions */}
+          {showSuggestions && (
+            <div className="mt-3 space-y-1">
+              <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-1.5">
+                Ask about...
+              </p>
+              {SUGGESTED_QUESTIONS.map((q, i) => (
+                <button
+                  key={i}
+                  onClick={() => handleSuggestion(q)}
+                  className="w-full text-left px-2.5 py-1.5 rounded-md text-[11px] text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors border border-slate-100"
+                >
+                  {q}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Empty state */}
+          {messages.length === 0 && !isStreaming && (
+            <div className="flex items-center justify-center h-full text-slate-400 text-xs">
+              Loading briefing...
+            </div>
+          )}
         </div>
-      </div>
+      ) : (
+        <div className="flex-1 overflow-hidden">
+          <AnalystPanel stations={stations ?? []} />
+        </div>
+      )}
 
-      {/* Messages */}
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
-        {messages.map(msg => (
-          <ChatMessage key={msg.id} message={msg} />
-        ))}
-
-        {/* Suggested questions */}
-        {showSuggestions && (
-          <div className="mt-3 space-y-1">
-            <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-1.5">
-              Ask about...
-            </p>
-            {SUGGESTED_QUESTIONS.map((q, i) => (
-              <button
-                key={i}
-                onClick={() => handleSuggestion(q)}
-                className="w-full text-left px-2.5 py-1.5 rounded-md text-[11px] text-slate-500 hover:bg-slate-50 hover:text-slate-800 transition-colors border border-slate-100"
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Empty state */}
-        {messages.length === 0 && !isStreaming && (
-          <div className="flex items-center justify-center h-full text-slate-400 text-xs">
-            Loading briefing...
-          </div>
-        )}
-      </div>
+      {/* Station suggestion chips */}
+      {showStationChips && input.startsWith('@') && (
+        <div className="px-3 py-1.5 border-t border-slate-100 flex flex-wrap gap-1">
+          {STATION_CHIPS.map((chip, i) => (
+            <button
+              key={i}
+              onClick={() => sendMessage(input + chip)}
+              className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+            >
+              {chip}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Input */}
       <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-slate-100">

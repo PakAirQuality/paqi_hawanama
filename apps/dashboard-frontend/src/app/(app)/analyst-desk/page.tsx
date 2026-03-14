@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import {
   fetchForecast,
@@ -8,17 +8,18 @@ import {
   fetchSummary,
   fetchAvailableDates,
   fetchCurrentStations,
+  fetchFires,
 } from '@/components/analyst-desk'
 import { ForecastMap } from '@/components/analyst-desk/ForecastMap'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
-import { StationDetailDrawer } from '@/components/analyst-desk/StationDetailDrawer'
-import type { CopilotAction } from '@/components/analyst-desk/types'
+import type { CopilotAction, StationMention } from '@/components/analyst-desk/types'
 
 export default function AnalystDeskPage() {
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedHorizon, setSelectedHorizon] = useState(0) // 0 = Now
-  const [selectedStation, setSelectedStation] = useState<number | null>(null)
+  const [stationMention, setStationMention] = useState<StationMention | null>(null)
   const [pendingAction, setPendingAction] = useState<CopilotAction | null>(null)
+  const [networkFilter, setNetworkFilter] = useState<string | null>(null)
 
   // Fetch available dates and auto-select the latest
   const { data: availableDates } = useQuery({
@@ -66,13 +67,27 @@ export default function AnalystDeskPage() {
     enabled: !!selectedDate,
   })
 
-  const handleStationClick = useCallback((sensorId: number) => {
-    setSelectedStation(sensorId)
+  const { data: firesGeoJSON } = useQuery({
+    queryKey: ['analyst-fires', selectedDate],
+    queryFn: () => fetchFires(selectedDate),
+    staleTime: 15 * 60 * 1000,
+    retry: 1,
+    enabled: !!selectedDate,
+  })
+
+  const handleStationClick = useCallback((mention: StationMention) => {
+    setStationMention(mention)
+  }, [])
+
+  const handleMentionConsumed = useCallback(() => {
+    setStationMention(null)
   }, [])
 
   const handleCopilotAction = useCallback((action: CopilotAction) => {
     if (action.type === 'set_horizon' && action.horizon != null) {
       setSelectedHorizon(action.horizon)
+    } else if (action.type === 'filter_network') {
+      setNetworkFilter(action.network ?? null)
     } else {
       setPendingAction(action)
     }
@@ -81,6 +96,27 @@ export default function AnalystDeskPage() {
   const handleActionProcessed = useCallback(() => {
     setPendingAction(null)
   }, [])
+
+  // Compute analytics stations for copilot sidebar
+  const analyticsStations = useMemo(() => {
+    if (selectedHorizon === 0) {
+      return (currentStations?.stations ?? [])
+        .filter(s => s.pm25 != null)
+        .map(s => {
+          const pm25 = s.pm25!
+          const band = pm25 <= 35 ? 'good' : pm25 <= 75 ? 'moderate' : pm25 <= 150 ? 'unhealthy' : pm25 <= 250 ? 'very_unhealthy' : 'severe'
+          return { pm25, band, city: s.city || '' }
+        })
+    }
+    return (forecast?.forecasts ?? [])
+      .filter(f => f.lead_days === selectedHorizon)
+      .map(f => {
+        const pm25 = f.pm25_forecast
+        const rawBand = f.risk_band
+        const band = (rawBand && rawBand !== 'unknown') ? rawBand : (pm25 == null ? 'moderate' : pm25 <= 35 ? 'good' : pm25 <= 75 ? 'moderate' : pm25 <= 150 ? 'unhealthy' : pm25 <= 250 ? 'very_unhealthy' : 'severe')
+        return { pm25, band, city: f.city_name || '' }
+      })
+  }, [forecast, currentStations, selectedHorizon])
 
   const hasMapData = forecast || currentStations
 
@@ -91,6 +127,9 @@ export default function AnalystDeskPage() {
         <CopilotChat
           selectedDate={selectedDate}
           onAction={handleCopilotAction}
+          stationMention={stationMention}
+          onMentionConsumed={handleMentionConsumed}
+          stations={analyticsStations}
         />
       </div>
 
@@ -105,6 +144,9 @@ export default function AnalystDeskPage() {
             onStationClick={handleStationClick}
             pendingAction={pendingAction}
             onActionProcessed={handleActionProcessed}
+            networkFilter={networkFilter}
+            onClearNetworkFilter={() => setNetworkFilter(null)}
+            firesGeoJSON={firesGeoJSON ?? null}
           />
         ) : forecastLoading ? (
           <div className="w-full h-full bg-slate-100 animate-pulse" />
@@ -115,20 +157,6 @@ export default function AnalystDeskPage() {
         )}
       </div>
 
-      {/* Station detail drawer */}
-      {selectedStation != null && forecast && (
-        <>
-          <div
-            className="fixed inset-0 bg-black/20 z-40"
-            onClick={() => setSelectedStation(null)}
-          />
-          <StationDetailDrawer
-            sensorId={selectedStation}
-            forecasts={forecast.forecasts}
-            onClose={() => setSelectedStation(null)}
-          />
-        </>
-      )}
     </div>
   )
 }

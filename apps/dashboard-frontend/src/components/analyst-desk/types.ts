@@ -94,15 +94,22 @@ export interface CurrentStation {
 
 export type TabType = 'overview' | 'map' | 'watchlists' | 'cities' | 'stations'
 
+export interface StationMention {
+  sensorId: number
+  stationName: string
+  cityName: string
+}
+
 // ── Copilot types ─────────────────────────────────────────────────────
 
 export interface CopilotAction {
-  type: 'zoom_to_city' | 'zoom_to_station' | 'set_horizon'
+  type: 'zoom_to_city' | 'zoom_to_station' | 'set_horizon' | 'filter_network'
   city?: string
   sensor_id?: number
   lat?: number
   lng?: number
   horizon?: number
+  network?: string | null  // null = show all / clear filter
 }
 
 export interface ChatMessage {

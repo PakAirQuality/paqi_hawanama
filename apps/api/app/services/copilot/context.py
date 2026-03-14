@@ -18,6 +18,7 @@ class CopilotSession:
     last_active: float = field(default_factory=time.time)
     # ── Session context ──
     focus_type: str = "national"
+    focused_station_id: Optional[str] = None  # hex station_id, set by aq_station_focus
     comparison_date: Optional[str] = None
     last_tool: Optional[str] = None
     last_entities: List[str] = field(default_factory=list)

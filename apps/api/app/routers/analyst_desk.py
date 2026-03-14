@@ -14,6 +14,8 @@ aggregation) happens in the forecast pipeline. This router reads the
 results and shapes them for the frontend.
 """
 
+import csv
+import io
 import json
 import logging
 import re
@@ -453,6 +455,68 @@ async def get_station_detail(
     }
 
 
+# ── Active fires (FIRMS) ─────────────────────────────────────────────────
+
+@router.get(
+    "/fires",
+    summary="Active fire detections",
+    description="VIIRS fire detections as GeoJSON for map overlay. Falls back to previous day if data not yet available.",
+)
+async def get_fires(
+    date: str = Query(None, description="Forecast date (YYYY-MM-DD). Defaults to latest."),
+) -> Dict[str, Any]:
+    init_date = date or _resolve_latest_date()
+    ds = _date_str(init_date)
+
+    # Try requested date, then fall back up to 2 days (FIRMS ~12h latency)
+    raw: Optional[str] = None
+    used_date = init_date
+    for offset in range(3):
+        d = datetime.strptime(init_date, "%Y-%m-%d") - timedelta(days=offset)
+        trial_ds = d.strftime("%Y%m%d")
+        raw = _gcs_read_text(f"hindcast/firms/firms_{trial_ds}.csv")
+        if raw and raw.strip():
+            used_date = d.strftime("%Y-%m-%d")
+            break
+
+    if not raw or not raw.strip():
+        return {
+            "type": "FeatureCollection",
+            "date": used_date,
+            "features": [],
+        }
+
+    # Parse CSV → GeoJSON features
+    features: List[Dict[str, Any]] = []
+    reader = csv.DictReader(io.StringIO(raw))
+    for row in reader:
+        try:
+            lat = float(row["latitude"])
+            lon = float(row["longitude"])
+        except (KeyError, ValueError, TypeError):
+            continue
+        try:
+            frp = float(row.get("frp", 0))
+        except (ValueError, TypeError):
+            frp = 0.0
+        features.append({
+            "type": "Feature",
+            "geometry": {"type": "Point", "coordinates": [lon, lat]},
+            "properties": {
+                "frp": round(frp, 1),
+                "confidence": row.get("confidence", ""),
+                "satellite": row.get("satellite", ""),
+                "acq_date": row.get("acq_date", used_date),
+            },
+        })
+
+    return {
+        "type": "FeatureCollection",
+        "date": used_date,
+        "features": features,
+    }
+
+
 # ── Internal helpers ─────────────────────────────────────────────────────
 
 def _resolve_latest_date() -> str:
@@ -532,6 +596,19 @@ def _load_firms_nrt_safe() -> Optional[Dict[str, Any]]:
     try:
         return _gcs_read_json("forecasts/firms_nrt_latest.json")
     except Exception:
+        return None
+
+
+def _gcs_read_text(blob_path: str) -> Optional[str]:
+    """Read raw text from a GCS blob, returning None if not found."""
+    try:
+        client = _gcs_client()
+        blob = client.bucket(FORECASTS_BUCKET).blob(blob_path)
+        if not blob.exists(client):
+            return None
+        return blob.download_as_text()
+    except Exception as e:
+        logger.warning(f"GCS text read failed: {blob_path}: {e}")
         return None
 
 
