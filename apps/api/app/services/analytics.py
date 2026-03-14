@@ -1839,7 +1839,7 @@ async def get_station_neighbours(
             WHERE station_id = :station_id
             LIMIT 1
         )
-        SELECT s.station_id, s.sensor_id, s.name AS station_name,
+        SELECT s.station_id, s.name AS station_name,
                c.name AS city_name,
                ROUND(ST_Distance(
                    ST_SetSRID(ST_MakePoint(s.lon, s.lat), 4326)::geography,
@@ -1878,7 +1878,7 @@ async def get_station_neighbours(
     return [
         {
             "station_name": r["station_name"] or "",
-            "sensor_id": r["sensor_id"],
+            "station_id": r["station_id"],
             "city": r["city_name"] or "",
             "distance_km": float(r["distance_km"]) if r["distance_km"] is not None else None,
             "latest_pm25": _safe_round(r["pm25"]),
