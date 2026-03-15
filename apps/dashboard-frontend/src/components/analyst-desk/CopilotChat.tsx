@@ -1,8 +1,8 @@
 "use client"
 
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ChatMessage } from './ChatMessage'
-import { AnalystPanel, type TrayStation } from './AnalystTray'
+import { AnalystPanel, StationTrendPanel, type TrayStation, type StationTrendInfo } from './AnalystTray'
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
@@ -29,11 +29,12 @@ interface CopilotChatProps {
   selectedDate: string
   onAction?: (action: CopilotAction) => void
   stationMention?: StationMention | null
+  cityMention?: string | null
   onMentionConsumed?: () => void
   stations?: TrayStation[]
 }
 
-export function CopilotChat({ selectedDate, onAction, stationMention, onMentionConsumed, stations }: CopilotChatProps) {
+export function CopilotChat({ selectedDate, onAction, stationMention, cityMention, onMentionConsumed, stations }: CopilotChatProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'analytics'>('chat')
   const [messages, setMessages] = useState<ChatMessageType[]>([])
   const [input, setInput] = useState('')
@@ -43,6 +44,22 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [showStationChips, setShowStationChips] = useState(false)
+  const [trendStation, setTrendStation] = useState<StationTrendInfo | null>(null)
+
+  // Extract unique city names for clickable city detection in chat messages
+  const knownCities = useMemo(() => {
+    const cities = new Set<string>()
+    for (const s of (stations ?? [])) {
+      if (s.city) cities.add(s.city)
+    }
+    return cities
+  }, [stations])
+
+  const handleCityClick = useCallback((city: string) => {
+    setInput(`@${city} `)
+    setShowStationChips(true)
+    inputRef.current?.focus()
+  }, [])
 
   // Pre-fill input when a station is mentioned (map click)
   useEffect(() => {
@@ -52,6 +69,15 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
     inputRef.current?.focus()
     onMentionConsumed?.()
   }, [stationMention, onMentionConsumed])
+
+  // Pre-fill input when a district/city is clicked on the map
+  useEffect(() => {
+    if (!cityMention) return
+    setInput(`@${cityMention} `)
+    setShowStationChips(true)
+    inputRef.current?.focus()
+    onMentionConsumed?.()
+  }, [cityMention, onMentionConsumed])
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -121,6 +147,9 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
               // Only dispatch newly found actions (avoid duplicates)
               const newActions = extractedActions.slice(allActions.length)
               for (const action of newActions) {
+                if (action.type === 'show_station_trend' && action.station_id) {
+                  setTrendStation({ station_id: action.station_id, station_name: action.station_name || '', hours: action.hours ?? 24 })
+                }
                 onAction?.(action)
               }
               allActions.push(...newActions)
@@ -133,6 +162,10 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
                 )
               )
             } else if (event.type === 'action') {
+              if (event.action.type === 'show_station_trend' && event.action.station_id) {
+                setTrendStation({ station_id: event.action.station_id, station_name: event.action.station_name || '', hours: event.action.hours ?? 24 })
+                setActiveTab('analytics')
+              }
               allActions.push(event.action)
               onAction?.(event.action)
               setMessages(prev =>
@@ -256,16 +289,24 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
         </button>
         <button
           onClick={() => setActiveTab('analytics')}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+          className={`relative flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
             activeTab === 'analytics'
               ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
-              : 'text-slate-400 hover:text-slate-600'
+              : trendStation && activeTab !== 'analytics'
+                ? 'text-blue-600 border-b-2 border-blue-400 animate-pulse'
+                : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" />
           </svg>
           Analytics
+          {trendStation && activeTab !== 'analytics' && (
+            <span className="absolute top-1.5 right-4 flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+            </span>
+          )}
         </button>
       </div>
 
@@ -273,7 +314,7 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
       {activeTab === 'chat' ? (
         <div ref={scrollRef} className="flex-1 overflow-y-auto px-3 py-2">
           {messages.map(msg => (
-            <ChatMessage key={msg.id} message={msg} />
+            <ChatMessage key={msg.id} message={msg} knownCities={knownCities} onCityClick={handleCityClick} />
           ))}
 
           {/* Suggested questions */}
@@ -303,7 +344,14 @@ export function CopilotChat({ selectedDate, onAction, stationMention, onMentionC
         </div>
       ) : (
         <div className="flex-1 overflow-hidden">
-          <AnalystPanel stations={stations ?? []} />
+          {trendStation ? (
+            <StationTrendPanel
+              station={trendStation}
+              onBack={() => setTrendStation(null)}
+            />
+          ) : (
+            <AnalystPanel stations={stations ?? []} />
+          )}
         </div>
       )}
 

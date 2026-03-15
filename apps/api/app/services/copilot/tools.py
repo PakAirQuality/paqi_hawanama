@@ -397,8 +397,93 @@ async def aq_station_history(
     if neighbours:
         followups.insert(0, f"Tell me about {neighbours[0]['station_name']}")
 
+    import json as _json
+    action_hint = "{{ACTION:" + _json.dumps({
+        "type": "show_station_trend",
+        "station_id": station_id,
+        "station_name": history.get("station_name", "") if history else "",
+        "hours": hours,
+    }) + "}}"
+
     return {
         "date": dt,
         "data": data,
+        "action_hint": action_hint,
+        "followups": followups,
+    }
+
+
+# ── Tool 9: aq_data_coverage ──────────────────────────────────────────
+
+
+async def aq_data_coverage(
+    ctx: RunContext[CopilotSession],
+    entity_name: str = "",
+    geography: str = "city",
+    detail_level: str = "summary",
+    sort_by: str = "earliest",
+    top_k: int = 5,
+) -> dict:
+    """Check data coverage and availability for any entity in the monitoring network.
+
+    Returns earliest/latest timestamps, observation counts, completeness ratio,
+    and station-level detail depending on detail_level.
+
+    Every response includes an oldest_station_preview (top 3) even at summary level,
+    so you can always name the oldest station without a follow-up call.
+
+    Args:
+        entity_name: City name, station name/ID, province name, or empty for national.
+        geography: "city", "station", "province", or "national" (default "city").
+        detail_level: Level of station detail to return.
+            "summary" — aggregate coverage + top 3 oldest stations preview.
+            "preview" — aggregate + top_k stations sorted by sort_by.
+            "station_breakdown" — aggregate + full station list (for city/province).
+        sort_by: How to sort stations — "earliest", "latest", "reading_count" (default "earliest").
+        top_k: Number of stations in preview mode (default 5).
+    """
+    from app.services.analytics import get_data_coverage
+
+    db = await _get_db()
+    try:
+        result = await get_data_coverage(
+            db, geography, entity_name, detail_level, sort_by, top_k,
+        )
+    finally:
+        await db.close()
+
+    data = result.get("data", {})
+    entity = data.get("entity", entity_name)
+    _update_session(
+        ctx,
+        tool="aq_data_coverage",
+        focus_type=geography,
+        focused_city=entity if geography == "city" else None,
+        entities=[entity] if entity else [],
+    )
+
+    # Store query signature for deterministic follow-up routing
+    ctx.deps.last_coverage_query = {
+        "entity": entity,
+        "geography": geography,
+        "detail_level": detail_level,
+    }
+
+    followups = []
+    if detail_level == "summary":
+        followups.append(f"Show full station breakdown for {entity}")
+    if data.get("coverage_days"):
+        followups.append(f"Show historical trend for {entity}")
+    followups.append("Which cities have the longest history?")
+
+    return {
+        "date": _effective_date(ctx),
+        "data": data,
+        "basis": {
+            "description": "Coverage derived from raw observations table",
+            "sources": ["station_observations"],
+            "coverage_scope": "full_history",
+            "history_limit_applied": False,
+        },
         "followups": followups,
     }

@@ -4,9 +4,16 @@ import type { ChatMessage as ChatMessageType } from './types'
 
 interface ChatMessageProps {
   message: ChatMessageType
+  knownCities?: Set<string>
+  onCityClick?: (city: string) => void
 }
 
-export function ChatMessage({ message }: ChatMessageProps) {
+function formatTrendLabel(hours?: number): string {
+  if (!hours || hours <= 72) return `${hours || 24}h`
+  return `${Math.round(hours / 24)}d`
+}
+
+export function ChatMessage({ message, knownCities, onCityClick }: ChatMessageProps) {
   const isUser = message.role === 'user'
 
   return (
@@ -27,9 +34,15 @@ export function ChatMessage({ message }: ChatMessageProps) {
             <p key={i} className={i > 0 ? 'mt-1' : ''}>
               {parts.map((part, j) => {
                 if (part.startsWith('**') && part.endsWith('**')) {
+                  const text = part.slice(2, -2)
+                  const isCity = !isUser && knownCities?.has(text)
                   return (
-                    <span key={j} className="font-semibold">
-                      {part.slice(2, -2)}
+                    <span
+                      key={j}
+                      className={`font-semibold${isCity ? ' text-blue-600 cursor-pointer hover:underline' : ''}`}
+                      onClick={isCity ? () => onCityClick?.(text) : undefined}
+                    >
+                      {text}
                     </span>
                   )
                 }
@@ -58,6 +71,9 @@ export function ChatMessage({ message }: ChatMessageProps) {
                 )}
                 {action.type === 'filter_network' && (
                   <>{action.network ? `Filter: ${action.network}` : 'All networks'}</>
+                )}
+                {action.type === 'show_station_trend' && (
+                  <>{'\u{1F4C8}'} {formatTrendLabel(action.hours)} Trend</>
                 )}
               </span>
             ))}

@@ -103,13 +103,16 @@ export interface StationMention {
 // ── Copilot types ─────────────────────────────────────────────────────
 
 export interface CopilotAction {
-  type: 'zoom_to_city' | 'zoom_to_station' | 'set_horizon' | 'filter_network'
+  type: 'zoom_to_city' | 'zoom_to_station' | 'set_horizon' | 'filter_network' | 'show_station_trend'
   city?: string
   sensor_id?: number
+  station_id?: string
+  station_name?: string
   lat?: number
   lng?: number
   horizon?: number
   network?: string | null  // null = show all / clear filter
+  hours?: number
 }
 
 export interface ChatMessage {

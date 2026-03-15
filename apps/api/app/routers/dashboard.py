@@ -388,3 +388,70 @@ async def get_station_history_pm25_data(
     except Exception as e:
         logger.error(f"Error getting station PM2.5 history: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/stations/{station_id}/history/pm25/daily")
+async def get_station_daily_pm25_data(
+    station_id: str,
+    days: int = 30,
+    db: AsyncSession = Depends(get_database),
+):
+    """Get daily-aggregated PM2.5 data for a station (for 30d/90d/yearly views)."""
+    try:
+        # Verify station exists / is allowed
+        station_result = await db.execute(text("""
+            SELECT s.station_id, s.name
+            FROM stations s
+            LEFT JOIN providers p ON s.provider_id = p.id
+            WHERE s.station_id = :station_id
+              AND s.active = true
+              AND COALESCE(p.code, '') != 'punjab'
+        """), {"station_id": station_id})
+
+        target_station = station_result.fetchone()
+        if not target_station:
+            raise HTTPException(status_code=404, detail="Station not found")
+
+        if not isinstance(days, int) or days < 1 or days > 365:
+            raise HTTPException(status_code=400, detail="Invalid days parameter (1-365)")
+
+        from datetime import datetime, timedelta
+        start_time = datetime.now() - timedelta(days=days)
+
+        history_result = await db.execute(text("""
+            SELECT
+                date_trunc('day', r.ts_utc + INTERVAL '5 hours') AS day_pk,
+                AVG(r.pm25) AS pm25_mean,
+                MIN(r.pm25) AS pm25_min,
+                MAX(r.pm25) AS pm25_max,
+                COUNT(*) AS n_readings
+            FROM readings r
+            WHERE r.scope_key = :station_id
+                AND r.scope_type = 'station'
+                AND r.ts_utc >= :start_time
+                AND r.ts_utc <= NOW()
+                AND r.pm25 IS NOT NULL
+            GROUP BY day_pk
+            ORDER BY day_pk ASC
+        """), {"station_id": station_id, "start_time": start_time})
+
+        history_rows = history_result.fetchall()
+        # Return same shape as hourly endpoint (pm25 = daily mean)
+        history_data = [
+            {
+                "timestamp_utc": row.day_pk.strftime('%Y-%m-%dT00:00:00Z'),
+                "timestamp_pk": row.day_pk.strftime('%Y-%m-%dT05:00:00+05:00'),
+                "pm25": round(float(row.pm25_mean), 1) if row.pm25_mean is not None else None,
+                "pm25_min": round(float(row.pm25_min), 1) if row.pm25_min is not None else None,
+                "pm25_max": round(float(row.pm25_max), 1) if row.pm25_max is not None else None,
+            }
+            for row in history_rows
+        ]
+
+        return history_data
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting station daily PM2.5 history: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")

@@ -22,6 +22,8 @@ class CopilotSession:
     comparison_date: Optional[str] = None
     last_tool: Optional[str] = None
     last_entities: List[str] = field(default_factory=list)
+    # ── Coverage query tracking (for deterministic follow-up upgrades) ──
+    last_coverage_query: Optional[Dict] = None  # {entity, geography, detail_level}
 
 
 _sessions: Dict[str, CopilotSession] = {}

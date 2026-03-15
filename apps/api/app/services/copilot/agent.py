@@ -41,13 +41,28 @@ from the monitoring network — these show real current conditions, not predicti
 | "What needs attention?" / "Alerts?" | `aq_incident_summary` |
 | "How accurate?" / "Accuracy trend" | `aq_forecast_audit` (n_days=1 or 7) |
 | @StationName or "tell me about station X" | `aq_station_focus` |
-| "Show trend" / "neighbors" (after station focus) | `aq_station_history` |
+| "Show trend" / "neighbors" (after station focus) | `aq_station_history` (hours param — any value supported; the DB has multi-year data) |
+| "How far back?" / "Earliest reading?" / "Data coverage?" / "How many stations?" | `aq_data_coverage` (summary includes oldest 3 stations; use detail_level="preview" for top_k; "station_breakdown" for full list) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
 For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
 The station remains focused until the user mentions a different station or changes topic.
 
 One tool call usually suffices.
+
+## Critical: data coverage and availability
+- The monitoring database has **multi-year historical data** — do NOT assume any retention limit.
+- NEVER state data range, coverage, earliest/latest dates, or history length unless explicitly \
+returned by a tool (specifically `aq_data_coverage`).
+- If a user asks about data availability, history length, earliest readings, gaps, or station \
+lifespan, ALWAYS use `aq_data_coverage` — do not infer from other tools.
+- The `hours` parameter on `aq_station_history` is a query window, not a database limit. \
+The database may have years of data beyond any default window.
+- If the user requests detail not present in the current result, you may refine the query \
+once by calling the most relevant tool again with more specific parameters \
+(e.g. detail_level summary→preview→station_breakdown). Do not repeat the same call or \
+refine more than once per turn. If the refined result still lacks the requested field, \
+state that limitation clearly.
 
 ## Output rules
 - NEVER output raw JSON, curly braces, or tool return values. Always narrate in natural language.
@@ -165,6 +180,20 @@ def get_agent():
             if s.last_entities:
                 lines.append(f"- Recent entities: {', '.join(s.last_entities[:5])}")
             lines.append('When the user says "it", "there", or "that station/city", resolve to the focused entity.')
+        # ── Deterministic coverage follow-up guidance ──
+        cq = s.last_coverage_query
+        if cq and s.last_tool == "aq_data_coverage":
+            lines.append("")
+            lines.append("Coverage follow-up context:")
+            lines.append(f"- Last coverage query: entity={cq.get('entity')}, "
+                         f"geography={cq.get('geography')}, detail_level={cq.get('detail_level')}")
+            if cq.get("detail_level") == "summary":
+                lines.append(
+                    f"- To answer station-specific follow-ups (oldest station, station breakdown, "
+                    f"which station was first), call aq_data_coverage again with "
+                    f"entity_name=\"{cq.get('entity')}\", geography=\"{cq.get('geography')}\", "
+                    f"detail_level=\"preview\" or \"station_breakdown\"."
+                )
         return "\n".join(lines)
 
     agent.tool(tools.aq_hotspots_daily)
@@ -175,6 +204,7 @@ def get_agent():
     agent.tool(tools.aq_forecast_audit)
     agent.tool(tools.aq_station_focus)
     agent.tool(tools.aq_station_history)
+    agent.tool(tools.aq_data_coverage)
 
     _copilot_agent = agent
     logger.info("Copilot agent initialized (gemini-3.1-pro-preview)")

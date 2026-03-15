@@ -48,8 +48,8 @@ export function useWindData(enabled: boolean) {
       try {
         // Fetch texture and metadata in parallel
         const [texResp, metaResp] = await Promise.all([
-          fetch(`${BASE_URL}/v1/wind/texture`),
-          fetch(`${BASE_URL}/v1/wind/metadata`),
+          fetch(`${BASE_URL}/v1/data-sources/wind/texture`),
+          fetch(`${BASE_URL}/v1/data-sources/wind/metadata`),
         ])
 
         if (!texResp.ok) throw new Error(`Texture fetch failed: ${texResp.status}`)

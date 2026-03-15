@@ -1,11 +1,12 @@
 "use client"
 
-import { useMemo } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  PieChart, Pie, Cell,
+  CartesianGrid, PieChart, Pie, Cell,
 } from 'recharts'
 import { BAND_COLORS, BAND_LABELS } from './utils'
+import { fetchStationPM25History, fetchStationDailyHistory, type PM25Reading } from './api'
 
 export interface TrayStation {
   pm25: number | null
@@ -29,6 +30,225 @@ const BINS = [
 ]
 
 const BAND_ORDER = ['good', 'moderate', 'unhealthy', 'very_unhealthy', 'severe']
+
+// ── PM2.5 → color (matches public app AQI-style bands) ──
+function getPM25Color(pm25: number): string {
+  if (pm25 <= 35) return '#6ecc39'    // good
+  if (pm25 <= 75) return '#f0c20c'    // moderate
+  if (pm25 <= 150) return '#ef7855'   // unhealthy
+  if (pm25 <= 250) return '#a070b5'   // very_unhealthy
+  return '#991b1b'                     // severe
+}
+
+// ── Station Trend Panel (24h PM2.5 bar chart) ──
+export interface StationTrendInfo {
+  station_id: string
+  station_name: string
+  hours?: number
+}
+
+const RANGE_OPTIONS = [
+  { label: '24h', hours: 24 },
+  { label: '48h', hours: 48 },
+  { label: '72h', hours: 72 },
+  { label: '7d',  hours: 168 },
+  { label: '30d', hours: 720 },
+  { label: '90d', hours: 2160 },
+] as const
+
+export function StationTrendPanel({
+  station,
+  onBack,
+}: {
+  station: StationTrendInfo
+  onBack: () => void
+}) {
+  const [selectedHours, setSelectedHours] = useState(station.hours ?? 24)
+  const [readings, setReadings] = useState<PM25Reading[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    const fetch = selectedHours > 168
+      ? fetchStationDailyHistory(station.station_id, Math.ceil(selectedHours / 24))
+      : fetchStationPM25History(station.station_id, selectedHours)
+    fetch
+      .then(data => {
+        if (!cancelled) setReadings(data)
+      })
+      .catch(err => {
+        if (!cancelled) setError(err.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [station.station_id, selectedHours])
+
+  const isDaily = selectedHours > 168
+
+  const chartData = useMemo(() => {
+    return readings
+      .sort((a, b) => new Date(a.timestamp_pk).getTime() - new Date(b.timestamp_pk).getTime())
+      .map((r, i) => {
+        const d = new Date(r.timestamp_pk)
+        return {
+          idx: i,
+          hour: d.getHours(),
+          dateLabel: d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          pm25: r.pm25,
+          timestamp_pk: r.timestamp_pk,
+        }
+      })
+  }, [readings])
+
+  const stats = useMemo(() => {
+    const vals = chartData.map(d => d.pm25).filter(v => v != null)
+    if (!vals.length) return null
+    return {
+      current: vals[vals.length - 1],
+      min: Math.min(...vals),
+      max: Math.max(...vals),
+      mean: Math.round((vals.reduce((a, b) => a + b, 0) / vals.length) * 10) / 10,
+    }
+  }, [chartData])
+
+  return (
+    <div className="overflow-y-auto px-3 py-3 space-y-3">
+      {/* Header with back button */}
+      <div className="flex items-center gap-2">
+        <button
+          onClick={onBack}
+          className="p-1 rounded-md hover:bg-slate-100 text-slate-500 transition-colors"
+        >
+          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+          </svg>
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-semibold text-slate-800 truncate">{station.station_name}</p>
+          <p className="text-[10px] text-slate-400">{selectedHours <= 72 ? `${selectedHours}h` : `${selectedHours / 24}d`} PM2.5 Trend</p>
+        </div>
+      </div>
+
+      {/* Time-range toggle */}
+      <div className="flex gap-1">
+        {RANGE_OPTIONS.map(opt => (
+          <button
+            key={opt.hours}
+            onClick={() => setSelectedHours(opt.hours)}
+            className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
+              selectedHours === opt.hours
+                ? 'bg-slate-800 text-white'
+                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+            }`}
+          >
+            {opt.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Stats row */}
+      {stats && (
+        <div className="grid grid-cols-4 gap-1.5">
+          {([
+            ['Now', stats.current],
+            ['Avg', stats.mean],
+            ['Min', stats.min],
+            ['Max', stats.max],
+          ] as [string, number][]).map(([label, val]) => (
+            <div key={label} className="rounded-md px-2 py-1.5 text-center" style={{ backgroundColor: getPM25Color(val) + '22' }}>
+              <div className="text-[10px] text-slate-500">{label}</div>
+              <div className="text-sm font-bold" style={{ color: getPM25Color(val) }}>{Math.round(val)}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Chart */}
+      {loading ? (
+        <div className="h-[180px] flex items-center justify-center text-slate-400 text-xs">Loading...</div>
+      ) : error ? (
+        <div className="h-[180px] flex items-center justify-center text-red-400 text-xs">{error}</div>
+      ) : chartData.length === 0 ? (
+        <div className="h-[180px] flex items-center justify-center text-slate-400 text-xs">No readings found</div>
+      ) : (
+        <div className="bg-white border border-slate-100 rounded-lg p-2">
+          <div style={{ width: '100%', height: 180 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 8, right: 8, bottom: 4, left: -12 }}>
+                <CartesianGrid
+                  horizontal={true}
+                  vertical={false}
+                  strokeDasharray="4 4"
+                  stroke="#e2e8f0"
+                />
+                <XAxis
+                  dataKey="idx"
+                  type="number"
+                  domain={[0, chartData.length - 1]}
+                  axisLine={{ stroke: '#e2e8f0', strokeWidth: 1 }}
+                  tickLine={false}
+                  stroke="#9ca3af"
+                  tick={{ fontSize: 10 }}
+                  tickCount={5}
+                  tickFormatter={(value) => {
+                    const d = chartData[Math.round(value)]
+                    if (!d) return ''
+                    return isDaily ? d.dateLabel : `${d.hour.toString().padStart(2, '0')}:00`
+                  }}
+                />
+                <YAxis
+                  orientation="right"
+                  axisLine={false}
+                  tickLine={false}
+                  stroke="#9ca3af"
+                  tick={{ fontSize: 10 }}
+                  width={35}
+                  tickFormatter={(v) => `${Math.round(v)}`}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'white',
+                    border: '1px solid #e5e7eb',
+                    borderRadius: '8px',
+                    fontSize: '11px',
+                    padding: '6px',
+                  }}
+                  formatter={(value: number) => [`${value} µg/m³`, isDaily ? 'Daily avg' : 'PM2.5']}
+                  labelFormatter={(_label, payload) => {
+                    const d = payload?.[0]?.payload?.timestamp_pk
+                    if (!d) return ''
+                    const date = new Date(d)
+                    if (isDaily) {
+                      return date.toLocaleDateString('en-US', {
+                        weekday: 'short', month: 'short', day: 'numeric',
+                        timeZone: 'Asia/Karachi',
+                      })
+                    }
+                    return date.toLocaleString('en-US', {
+                      month: 'short', day: 'numeric',
+                      hour: '2-digit', minute: '2-digit',
+                      hour12: false, timeZone: 'Asia/Karachi',
+                    }) + ' PKT'
+                  }}
+                />
+                <Bar dataKey="pm25" radius={[2, 2, 0, 0]} maxBarSize={12} isAnimationActive={false}>
+                  {chartData.map((entry, i) => (
+                    <Cell key={i} fill={getPM25Color(entry.pm25)} />
+                  ))}
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Standalone panel for copilot sidebar (single-column, scrollable) ──
 export function AnalystPanel({ stations }: { stations: TrayStation[] }) {

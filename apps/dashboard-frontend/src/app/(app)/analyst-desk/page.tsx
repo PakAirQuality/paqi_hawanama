@@ -18,6 +18,7 @@ export default function AnalystDeskPage() {
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedHorizon, setSelectedHorizon] = useState(0) // 0 = Now
   const [stationMention, setStationMention] = useState<StationMention | null>(null)
+  const [cityMention, setCityMention] = useState<string | null>(null)
   const [pendingAction, setPendingAction] = useState<CopilotAction | null>(null)
   const [networkFilter, setNetworkFilter] = useState<string | null>(null)
 
@@ -81,6 +82,11 @@ export default function AnalystDeskPage() {
 
   const handleMentionConsumed = useCallback(() => {
     setStationMention(null)
+    setCityMention(null)
+  }, [])
+
+  const handleDistrictClick = useCallback((cityName: string) => {
+    setCityMention(cityName)
   }, [])
 
   const handleCopilotAction = useCallback((action: CopilotAction) => {
@@ -128,6 +134,7 @@ export default function AnalystDeskPage() {
           selectedDate={selectedDate}
           onAction={handleCopilotAction}
           stationMention={stationMention}
+          cityMention={cityMention}
           onMentionConsumed={handleMentionConsumed}
           stations={analyticsStations}
         />
@@ -142,6 +149,7 @@ export default function AnalystDeskPage() {
             selectedHorizon={selectedHorizon}
             onHorizonChange={setSelectedHorizon}
             onStationClick={handleStationClick}
+            onDistrictClick={handleDistrictClick}
             pendingAction={pendingAction}
             onActionProcessed={handleActionProcessed}
             networkFilter={networkFilter}

@@ -1820,6 +1820,160 @@ async def get_station_history(
     }
 
 
+async def get_data_coverage(
+    db: AsyncSession,
+    geography: str = "city",
+    entity_name: str = "",
+    detail_level: str = "summary",
+    sort_by: str = "earliest",
+    top_k: int = 5,
+) -> dict:
+    """Return data coverage metadata with configurable detail.
+
+    geography: "city", "station", "province", or "national"
+    entity_name: city name (fuzzy), station_id (hex), or province name.
+    detail_level:
+        "summary"            — aggregate coverage + oldest_station_preview (top 3)
+        "preview"            — aggregate + top_k stations sorted by sort_by
+        "station_breakdown"  — aggregate + full station list (city/province only)
+    sort_by: "earliest", "latest", "reading_count", "completeness"
+    top_k: number of stations in preview mode (default 5)
+    """
+    # ── Resolve target stations ──
+    if geography == "station":
+        station = await _resolve_station(db, entity_name)
+        if not station:
+            return {"data": {"message": f"Station '{entity_name}' not found."}}
+        station_ids = [station["station_id"]]
+        target_name = station["station_name"]
+    elif geography == "city":
+        city_q = text("""
+            SELECT c.id, c.name
+            FROM cities c
+            WHERE LOWER(c.name) = LOWER(:name)
+            LIMIT 1
+        """)
+        city_row = (await db.execute(city_q, {"name": entity_name})).fetchone()
+        if not city_row:
+            import difflib
+            all_q = text("SELECT name FROM cities ORDER BY name")
+            all_cities = [r.name for r in (await db.execute(all_q)).fetchall()]
+            matches = difflib.get_close_matches(entity_name, all_cities, n=1, cutoff=0.5)
+            if matches:
+                city_row = (await db.execute(city_q, {"name": matches[0]})).fetchone()
+        if not city_row:
+            return {"data": {"message": f"City '{entity_name}' not found."}}
+        target_name = city_row.name
+        q = text("SELECT s.station_id FROM stations s WHERE s.city_id = :cid AND s.active = true")
+        rows = (await db.execute(q, {"cid": city_row.id})).fetchall()
+        station_ids = [r.station_id for r in rows]
+        if not station_ids:
+            return {"data": {"message": f"No active stations found in {target_name}."}}
+    elif geography == "province":
+        target_name = entity_name
+        q = text("SELECT s.station_id FROM stations s WHERE LOWER(s.state) = LOWER(:prov) AND s.active = true")
+        rows = (await db.execute(q, {"prov": entity_name})).fetchall()
+        station_ids = [r.station_id for r in rows]
+        if not station_ids:
+            return {"data": {"message": f"No active stations found in {entity_name}."}}
+    else:
+        target_name = "National"
+        q = text("SELECT station_id FROM stations WHERE active = true")
+        rows = (await db.execute(q)).fetchall()
+        station_ids = [r.station_id for r in rows]
+
+    # ── Aggregate coverage ──
+    placeholders = ",".join(f":sid{i}" for i in range(len(station_ids)))
+    params = {f"sid{i}": sid for i, sid in enumerate(station_ids)}
+
+    agg = (await db.execute(text(f"""
+        SELECT MIN(r.ts_utc) AS earliest_ts, MAX(r.ts_utc) AS latest_ts,
+               COUNT(*) AS n_obs, COUNT(DISTINCT r.scope_key) AS n_with_data
+        FROM readings r
+        WHERE r.scope_key IN ({placeholders})
+          AND r.scope_type = 'station' AND r.pm25 IS NOT NULL
+    """), params)).fetchone()
+
+    if not agg or agg.earliest_ts is None:
+        return {"data": {"entity": target_name, "geography": geography,
+                         "message": "No PM2.5 observations found."}}
+
+    earliest = agg.earliest_ts
+    latest = agg.latest_ts
+    total_hours = (latest - earliest).total_seconds() / 3600
+    n_stations = len(station_ids)
+    expected = n_stations * total_hours if total_hours > 0 else 1
+    completeness = min(round(agg.n_obs / expected, 3), 1.0)
+
+    data: dict = {
+        "entity": target_name,
+        "geography": geography,
+        "detail_level": detail_level,
+        "earliest_ts_utc": earliest.isoformat() + "Z",
+        "latest_ts_utc": latest.isoformat() + "Z",
+        "coverage_days": round(total_hours / 24, 1),
+        "n_observations": agg.n_obs,
+        "n_stations_total": n_stations,
+        "n_stations_with_data": agg.n_with_data,
+        "completeness_ratio": completeness,
+    }
+
+    # ── Station-level query (shared by all detail levels) ──
+    sort_col = {
+        "earliest": "earliest_ts ASC",
+        "latest": "latest_ts DESC",
+        "reading_count": "n_readings DESC",
+        "completeness": "n_readings DESC",
+    }.get(sort_by, "earliest_ts ASC")
+
+    # Determine how many stations to fetch
+    if detail_level == "station_breakdown":
+        limit_clause = "" if len(station_ids) <= 200 else "LIMIT 200"
+    elif detail_level == "preview":
+        limit_clause = f"LIMIT {top_k}"
+    else:  # summary — always fetch top 3 oldest as preview
+        limit_clause = "LIMIT 3"
+        sort_col = "earliest_ts ASC"
+
+    bd_q = text(f"""
+        SELECT r.scope_key AS station_id, s.name AS station_name,
+               MIN(r.ts_utc) AS earliest_ts, MAX(r.ts_utc) AS latest_ts,
+               COUNT(*) AS n_readings
+        FROM readings r
+        JOIN stations s ON r.scope_key = s.station_id
+        WHERE r.scope_key IN ({placeholders})
+          AND r.scope_type = 'station' AND r.pm25 IS NOT NULL
+        GROUP BY r.scope_key, s.name
+        ORDER BY {sort_col}
+        {limit_clause}
+    """)
+    bd_rows = (await db.execute(bd_q, params)).fetchall()
+
+    station_list = [
+        {
+            "station_name": r.station_name,
+            "station_id": r.station_id,
+            "earliest_ts_utc": r.earliest_ts.isoformat() + "Z",
+            "latest_ts_utc": r.latest_ts.isoformat() + "Z",
+            "n_readings": r.n_readings,
+            "coverage_days": round(
+                (r.latest_ts - r.earliest_ts).total_seconds() / 86400, 1
+            ),
+        }
+        for r in bd_rows
+    ]
+
+    if detail_level == "station_breakdown":
+        data["station_breakdown"] = station_list
+    elif detail_level == "preview":
+        data["stations"] = station_list
+    else:
+        # summary — always include a compact preview of oldest stations
+        data["oldest_station_preview"] = station_list
+
+    return {"data": data}
+
+
 async def get_station_neighbours(
     db: AsyncSession,
     station_id: str,

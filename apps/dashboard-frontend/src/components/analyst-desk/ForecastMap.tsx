@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import type { ForecastEntry, CurrentStation, CopilotAction, StationMention } from './types'
+import { WindParticleRenderer, type WindMetadata } from './WindParticleLayer'
 import type { FiresGeoJSON } from './api'
 import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 
@@ -140,6 +141,7 @@ interface ForecastMapProps {
   selectedHorizon: number  // 0 = Now, 1/2/3 = D+1/D+2/D+3
   onHorizonChange: (h: number) => void
   onStationClick: (mention: StationMention) => void
+  onDistrictClick?: (cityName: string) => void
   pendingAction?: CopilotAction | null
   onActionProcessed?: () => void
   networkFilter?: string | null
@@ -153,6 +155,7 @@ export function ForecastMap({
   selectedHorizon,
   onHorizonChange,
   onStationClick,
+  onDistrictClick,
   pendingAction,
   onActionProcessed,
   networkFilter,
@@ -169,10 +172,14 @@ export function ForecastMap({
   const [showFires, setShowFires] = useState(true)
   const [showStations, setShowStations] = useState(true)
   const [showSatellite, setShowSatellite] = useState(true)
+  const [showWind, setShowWind] = useState(true)
+  const [windImage, setWindImage] = useState<HTMLImageElement | null>(null)
+  const [windMetadata, setWindMetadata] = useState<WindMetadata | null>(null)
+  const windRendererRef = useRef<WindParticleRenderer | null>(null)
 
   // Keep refs to latest data to avoid stale closures in map callbacks
-  const dataRef = useRef({ forecasts, currentStations, selectedHorizon, onStationClick })
-  dataRef.current = { forecasts, currentStations, selectedHorizon, onStationClick }
+  const dataRef = useRef({ forecasts, currentStations, selectedHorizon, onStationClick, onDistrictClick })
+  dataRef.current = { forecasts, currentStations, selectedHorizon, onStationClick, onDistrictClick }
 
   // Load provider map for network filtering
   useEffect(() => {
@@ -380,9 +387,13 @@ export function ForecastMap({
         }
       })
 
-      // ── District click → zoom to bounds ──
+      // ── District click → zoom to bounds + mention in chat ──
       map.current.on('click', 'districts-fill', (e) => {
         if (!map.current || !e.features?.[0]) return
+        const districtName = (e.features[0].properties?.shapeName || e.features[0].id || '') as string
+        if (districtName) {
+          dataRef.current.onDistrictClick?.(districtName)
+        }
         const geom = e.features[0].geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon
         const coords: [number, number][] = []
         if (geom.type === 'Polygon') {
@@ -634,6 +645,68 @@ export function ForecastMap({
     }
   }, [showSatellite])
 
+  // Fetch wind texture + metadata when wind is enabled (lazy)
+  useEffect(() => {
+    if (!showWind) return
+    if (windImage && windMetadata) return // already cached
+
+    let mounted = true
+    const fetchWind = async () => {
+      try {
+        const [texResp, metaResp] = await Promise.all([
+          fetch(`${API_BASE}/api/v1/data-sources/wind/texture`),
+          fetch(`${API_BASE}/api/v1/data-sources/wind/metadata`),
+        ])
+        if (!texResp.ok || !metaResp.ok) return
+
+        const [blob, meta] = await Promise.all([texResp.blob(), metaResp.json()])
+
+        const img = new Image()
+        img.crossOrigin = 'anonymous'
+        await new Promise<void>((resolve, reject) => {
+          img.onload = () => resolve()
+          img.onerror = () => reject(new Error('Failed to decode wind texture'))
+          img.src = URL.createObjectURL(blob)
+        })
+
+        if (mounted) {
+          setWindImage(img)
+          setWindMetadata(meta)
+        }
+      } catch (err) {
+        console.warn('Wind data fetch failed:', err)
+      }
+    }
+
+    fetchWind()
+    return () => { mounted = false }
+  }, [showWind, windImage, windMetadata])
+
+  // Create/destroy wind particle renderer
+  useEffect(() => {
+    if (windRendererRef.current) {
+      windRendererRef.current.destroy()
+      windRendererRef.current = null
+    }
+
+    if (!map.current || !mapLoaded.current || !windImage || !windMetadata || !showWind) return
+
+    try {
+      const renderer = new WindParticleRenderer(map.current, windImage, windMetadata)
+      renderer.start()
+      windRendererRef.current = renderer
+    } catch (err) {
+      console.warn('Wind renderer failed:', err)
+    }
+
+    return () => {
+      if (windRendererRef.current) {
+        windRendererRef.current.destroy()
+        windRendererRef.current = null
+      }
+    }
+  }, [windImage, windMetadata, showWind])
+
   // Timeline steps — date-formatted labels
   const formatHorizonDate = (daysAhead: number) => {
     const d = new Date()
@@ -708,8 +781,8 @@ export function ForecastMap({
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* ── Layer toggle buttons ── */}
-      <div className="absolute right-3 bottom-3 z-10 flex flex-col gap-1.5">
+      {/* ── Layer toggle buttons (upper right, below zoom controls) ── */}
+      <div className="absolute right-3 top-[70px] z-10 flex flex-col gap-1.5">
         {/* Stations */}
         <button
           onClick={() => setShowStations(v => !v)}
@@ -738,14 +811,16 @@ export function ForecastMap({
           </svg>
         </button>
 
-        {/* Wind (disabled placeholder) */}
+        {/* Wind */}
         <button
-          disabled
-          className="w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm bg-white/40 text-slate-300 cursor-not-allowed"
-          title="Wind layer — coming soon"
+          onClick={() => setShowWind(v => !v)}
+          className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
+            showWind ? 'bg-white/95 text-sky-600' : 'bg-white/60 text-slate-400'
+          }`}
+          title={showWind ? 'Hide wind' : 'Show wind'}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 8h8a4 4 0 100-8H6m0 16h10a4 4 0 010 8H6m2-8h6a4 4 0 100-8H8" />
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2" />
           </svg>
         </button>
 
