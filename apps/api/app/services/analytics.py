@@ -468,6 +468,9 @@ async def get_city_detail(
 
     # Stations section — current readings
     if "stations" in include:
+        # Recency threshold: recently reporting stations rank first
+        recency_cutoff = window_end - timedelta(hours=3)
+
         stations_query = text("""
             SELECT s.station_id, s.name AS station_name, s.lat, s.lon,
                    r.pm25, r.aqi_us, r.ts_utc
@@ -484,17 +487,16 @@ async def get_city_detail(
                 LIMIT 1
             ) r ON true
             WHERE s.city_id = :city_id AND s.active = true
-            ORDER BY r.pm25 DESC
+            ORDER BY
+                CASE WHEN r.ts_utc >= :recency_cutoff THEN 0 ELSE 1 END,
+                r.pm25 DESC
         """)
         station_rows = (await db.execute(stations_query, {
             "city_id": city_id,
             "window_start": window_start,
             "window_end": window_end,
+            "recency_cutoff": recency_cutoff,
         })).mappings().all()
-
-        # Recency threshold: only stations reporting within last 3h count
-        # as "current" for summary stats and ranking
-        recency_cutoff = window_end - timedelta(hours=3)
 
         stations = []
         for s in station_rows[:20]:
