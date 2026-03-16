@@ -1,6 +1,7 @@
 """PydanticAI agent for the analyst desk copilot."""
 
 import logging
+import os
 
 from pydantic_ai import RunContext
 
@@ -43,6 +44,8 @@ from the monitoring network — these show real current conditions, not predicti
 | @StationName or "tell me about station X" | `aq_station_focus` |
 | "Show trend" / "neighbors" (after station focus) | `aq_station_history` (hours param — any value supported; the DB has multi-year data) |
 | "How far back?" / "Earliest reading?" / "Data coverage?" / "How many stations?" | `aq_data_coverage` (summary includes oldest 3 stations; use detail_level="preview" for top_k; "station_breakdown" for full list) |
+| "What is near that fire?" / nearby hospitals/schools | `aq_nearest_assets` (pass lat/lon from a previous tool result) |
+| "Show satellite image" / "Sentinel imagery" | `aq_satellite_image` (pass lat/lon, optional date range and cloud threshold) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
 For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
@@ -113,6 +116,17 @@ Clear: {{ACTION:{"type":"filter_network","network":null}}}
 
 Tell the user what filter was applied and suggest "say 'show all stations' to clear the filter."
 
+## Spatial context and imagery
+- `aq_nearest_assets` queries OpenStreetMap for hospitals, schools, factories, etc. near a \
+lat/lon. You must provide coordinates — extract them from a previous tool's response \
+(e.g. station lat/lon from aq_station_focus, fire coordinates from aq_explain_drivers).
+  Valid asset_types: hospital, clinic, school, university, factory, road, settlement, \
+worship, market, bus_station. Default: hospital + school.
+- `aq_satellite_image` searches Copernicus for Sentinel-2 L2A imagery near a location. \
+If status is "no_suitable_scene", say so clearly — that is informative, not an error. \
+When a preview_url is returned, share it with the analyst. Modes: latest, nearest_to_date, before_after.
+- Both tools return distances in meters. Use "within X km" language when narrating results.
+
 ## Comparison narration
 When `aq_compare_dates` returns a `driver_explanation` block:
 - Lead with the PM2.5 delta and direction (from `delta_mean_pm25` and `direction`).
@@ -132,14 +146,27 @@ are unhealthy or worse, any ramp events, and any critical incidents. Be direct \
 and factual. Do NOT include any {{ACTION:...}} tags in briefings.
 """
 
+# Model fallback chain: best → good → fast
+MODEL_FALLBACK_CHAIN = [
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
+]
+
 # Lazy singleton — avoids import-time crash when GEMINI_API_KEY is unset
 _copilot_agent = None
 
 
-def get_agent():
-    """Return the copilot agent, creating it on first call."""
+def get_agent(model_name: str | None = None):
+    """Return the copilot agent, creating it on first call.
+
+    Args:
+        model_name: Optional model override (e.g. "gemini-2.5-flash").
+                    If provided, skips the singleton cache so each call
+                    can use a different model. Default: gemini-3.1-pro-preview.
+    """
     global _copilot_agent
-    if _copilot_agent is not None:
+    if model_name is None and _copilot_agent is not None:
         return _copilot_agent
 
     from pydantic_ai import Agent
@@ -151,7 +178,7 @@ def get_agent():
         raise RuntimeError("GEMINI_API_KEY not configured")
 
     model = GoogleModel(
-        "gemini-3.1-pro-preview",
+        model_name or "gemini-3.1-pro-preview",
         provider=GoogleProvider(api_key=api_key),
     )
 
@@ -205,7 +232,40 @@ def get_agent():
     agent.tool(tools.aq_station_focus)
     agent.tool(tools.aq_station_history)
     agent.tool(tools.aq_data_coverage)
+    agent.tool(tools.aq_nearest_assets)
+    agent.tool(tools.aq_satellite_image)
 
+    # ── Langfuse tracing via OTEL (opt-in via env var) ──
+    if os.getenv("LANGFUSE_SECRET_KEY"):
+        try:
+            import base64
+            from opentelemetry.sdk.trace import TracerProvider
+            from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+            pk = os.getenv("LANGFUSE_PUBLIC_KEY", "")
+            sk = os.getenv("LANGFUSE_SECRET_KEY", "")
+            host = os.getenv("LANGFUSE_HOST", "https://us.cloud.langfuse.com")
+            auth = base64.b64encode(f"{pk}:{sk}".encode()).decode()
+
+            exporter = OTLPSpanExporter(
+                endpoint=f"{host}/api/public/otel/v1/traces",
+                headers={"Authorization": f"Basic {auth}"},
+            )
+            provider = TracerProvider()
+            provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+            from pydantic_ai import Agent as _Agent
+            _Agent.instrument_all()
+
+            from opentelemetry import trace
+            trace.set_tracer_provider(provider)
+
+            logger.info("Langfuse tracing enabled via OTEL → %s", host)
+        except Exception as e:
+            logger.warning(f"Langfuse/OTEL init failed (non-fatal): {e}")
+
+    actual_model = model_name or "gemini-3.1-pro-preview"
     _copilot_agent = agent
-    logger.info("Copilot agent initialized (gemini-3.1-pro-preview)")
+    logger.info("Copilot agent initialized (%s)", actual_model)
     return agent

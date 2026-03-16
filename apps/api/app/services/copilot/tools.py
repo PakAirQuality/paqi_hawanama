@@ -487,3 +487,115 @@ async def aq_data_coverage(
         },
         "followups": followups,
     }
+
+
+# ── Tool 10: aq_nearest_assets ────────────────────────────────────────
+
+
+async def aq_nearest_assets(
+    ctx: RunContext[CopilotSession],
+    lat: float,
+    lon: float,
+    asset_types: Optional[list[str]] = None,
+    radius_m: int = 5000,
+    limit: int = 20,
+) -> dict:
+    """Find hospitals, schools, factories, and other civic assets near a location.
+
+    Use after identifying a fire, hotspot, or station of interest.
+    Queries OpenStreetMap for nearby points of interest within the
+    specified radius and returns structured results with distances.
+
+    Args:
+        lat: Latitude of the anchor point (decimal degrees).
+        lon: Longitude of the anchor point (decimal degrees).
+        asset_types: Types to search for — any combination of: hospital,
+            clinic, school, university, factory, road, settlement,
+            worship, market, bus_station. Defaults to ["hospital", "school"].
+        radius_m: Search radius in meters (default 5000, max 25000).
+        limit: Maximum results to return (default 20).
+    """
+    from app.services.spatial import get_nearest_assets
+
+    if asset_types is None:
+        asset_types = ["hospital", "school"]
+
+    result = await get_nearest_assets(
+        lat, lon, asset_types, radius_m, limit,
+    )
+
+    _update_session(ctx, tool="aq_nearest_assets")
+
+    counts = result.get("counts_by_type", {})
+    followups = []
+    if counts:
+        followups.append("Show satellite imagery for this area")
+    followups.append("What's driving the pollution here?")
+    followups.append("Expand search radius to 10 km")
+
+    return {
+        "date": _effective_date(ctx),
+        "data": result,
+        "basis": {
+            "description": "Nearby civic assets from pre-seeded OpenStreetMap data (GCS Parquet)",
+            "sources": ["OpenStreetMap"],
+            "limitations": "OSM coverage varies; some facilities may be unmapped. Data refreshed periodically.",
+        },
+        "followups": followups,
+    }
+
+
+# ── Tool 11: aq_satellite_image ───────────────────────────────────────
+
+
+async def aq_satellite_image(
+    ctx: RunContext[CopilotSession],
+    lat: float,
+    lon: float,
+    date_from: Optional[str] = None,
+    date_to: Optional[str] = None,
+    max_cloud_cover: float = 20.0,
+    mode: str = "latest",
+) -> dict:
+    """Find Sentinel-2 satellite imagery for a location.
+
+    Searches the Copernicus Data Space for cloud-free Sentinel-2 L2A scenes
+    intersecting the area of interest. Returns scene metadata and preview URL.
+    If no suitable scene exists, returns a clear "no suitable scene" status.
+
+    Args:
+        lat: Latitude of the center point (decimal degrees).
+        lon: Longitude of the center point (decimal degrees).
+        date_from: Start date (YYYY-MM-DD). Defaults to 30 days ago.
+        date_to: End date (YYYY-MM-DD). Defaults to today.
+        max_cloud_cover: Maximum acceptable cloud cover percent (default 20).
+        mode: Selection mode — "latest" (most recent low-cloud scene),
+            "nearest_to_date" (closest to date_from),
+            or "before_after" (one scene before and after date_from).
+    """
+    from app.services.spatial import get_sentinel_catalog
+
+    result = await get_sentinel_catalog(
+        lat, lon, date_from, date_to, max_cloud_cover, mode=mode,
+    )
+
+    _update_session(ctx, tool="aq_satellite_image")
+
+    followups = []
+    if result.get("status") == "ok":
+        followups.append("What civic assets are near this location?")
+        if mode != "before_after":
+            followups.append("Show before and after imagery")
+    elif result.get("status") == "no_suitable_scene":
+        followups.append("Try with higher cloud cover threshold (50%)")
+        followups.append("Expand the date range")
+
+    return {
+        "date": _effective_date(ctx),
+        "data": result,
+        "basis": {
+            "description": "Sentinel-2 L2A catalog from Copernicus Data Space Ecosystem",
+            "sources": ["Copernicus CDSE STAC"],
+        },
+        "followups": followups,
+    }
