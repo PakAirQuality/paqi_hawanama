@@ -492,6 +492,10 @@ async def get_city_detail(
             "window_end": window_end,
         })).mappings().all()
 
+        # Recency threshold: only stations reporting within last 3h count
+        # as "current" for summary stats and ranking
+        recency_cutoff = window_end - timedelta(hours=3)
+
         stations = []
         for s in station_rows[:20]:
             stations.append({
@@ -507,8 +511,13 @@ async def get_city_detail(
         result["stations"] = stations
         result["n_stations_total"] = len(station_rows)
 
-        # City current summary
-        all_pm = [s["pm25"] for s in station_rows if s["pm25"] is not None]
+        # City current summary — use only recently reporting stations
+        recent_pm = [
+            s["pm25"] for s in station_rows
+            if s["pm25"] is not None and s["ts_utc"] and s["ts_utc"] >= recency_cutoff
+        ]
+        # Fall back to all stations if none reported in last 3h
+        all_pm = recent_pm or [s["pm25"] for s in station_rows if s["pm25"] is not None]
         if all_pm:
             result["current_summary"] = {
                 "mean_pm25": _safe_round(sum(all_pm) / len(all_pm)),
@@ -516,6 +525,7 @@ async def get_city_detail(
                 "n_stations": len(all_pm),
                 "worst_band": _classify_band(max(all_pm)),
                 "source": "observations",
+                "recency": "last_3h" if recent_pm else "last_24h",
             }
 
     # 24h trend
