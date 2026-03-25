@@ -25,6 +25,7 @@ export function ResultsTab({
   selectedPredDate,
   setSelectedPredDate,
 }: ResultsTabProps) {
+  const [model, setModel] = useState<'backbone' | 'support_aware'>('backbone')
   const dates = tileDates?.dates || []
   const currentIndex = selectedPredDate ? dates.indexOf(selectedPredDate) : -1
 
@@ -44,7 +45,31 @@ export function ResultsTab({
       {/* Map with timeline overlay at bottom */}
       {selectedPredDate ? (
         <div className="relative bg-slate-50 rounded-lg overflow-hidden" style={{ height: 'calc(100vh - 180px)', minHeight: '500px' }}>
-          <PredictionMap selectedDate={selectedPredDate} smoothed={true} />
+          <PredictionMap selectedDate={selectedPredDate} smoothed={true} model={model} />
+
+          {/* Model toggle — top right of map */}
+          <div className="absolute top-4 right-4 z-10 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 p-1 flex">
+            <button
+              onClick={() => setModel('backbone')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                model === 'backbone'
+                  ? 'bg-slate-800 text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Satellite
+            </button>
+            <button
+              onClick={() => setModel('support_aware')}
+              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
+                model === 'support_aware'
+                  ? 'bg-emerald-600 text-white shadow-sm'
+                  : 'text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              Enhanced
+            </button>
+          </div>
 
           {/* Timeline bar — slim, floating at bottom of map */}
           <div className="absolute bottom-3 left-4 right-4 z-10 flex items-center gap-3">

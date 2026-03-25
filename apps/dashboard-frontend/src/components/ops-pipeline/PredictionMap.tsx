@@ -15,6 +15,7 @@ const INITIAL_ZOOM = 3.5
 interface PredictionMapProps {
   selectedDate: string
   smoothed?: boolean
+  model?: 'backbone' | 'support_aware'
 }
 
 interface SelectedDistrict {
@@ -22,7 +23,7 @@ interface SelectedDistrict {
   pm25: number | null
 }
 
-export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapProps) {
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone' }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -85,8 +86,8 @@ export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapP
       })
 
       // Add COG tile source
-      const smoothParam = smoothed ? '?smoothed=true' : ''
-      const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
+      const params = [smoothed && 'smoothed=true', model !== 'backbone' && `model=${model}`].filter(Boolean).join('&')
+      const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${params ? '?' + params : ''}`
       map.addSource('pm25-tiles', {
         type: 'raster',
         tiles: [tileUrl],
@@ -281,9 +282,9 @@ export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapP
 
         // Fetch PM2.5 value
         try {
-          const smoothParam = smoothed ? '&smoothed=true' : ''
+          const extraParams = [smoothed && 'smoothed=true', model !== 'backbone' && `model=${model}`].filter(Boolean).map(p => '&' + p).join('')
           const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${smoothParam}`,
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${extraParams}`,
             { headers: { Authorization: `Bearer ${API_TOKEN}` } }
           )
           if (res.ok) {
@@ -336,8 +337,8 @@ export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapP
     if (!mapRef.current || !mapLoaded) return
 
     const map = mapRef.current
-    const smoothParam = smoothed ? '?smoothed=true' : ''
-    const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${smoothParam}`
+    const params = [smoothed && 'smoothed=true', model !== 'backbone' && `model=${model}`].filter(Boolean).join('&')
+    const tileUrl = `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png${params ? '?' + params : ''}`
 
     // Remove old and re-add with new URL
     if (map.getLayer('pm25-raster')) map.removeLayer('pm25-raster')
@@ -366,7 +367,7 @@ export function PredictionMap({ selectedDate, smoothed = false }: PredictionMapP
 
     // Clear selection when date changes
     setSelectedDistrict(null)
-  }, [selectedDate, smoothed, mapLoaded])
+  }, [selectedDate, smoothed, model, mapLoaded])
 
   return (
     <div className="relative w-full h-full">
