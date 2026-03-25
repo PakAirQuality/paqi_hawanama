@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import 'mapbox-gl/dist/mapbox-gl.css';
-import Map, { Marker, Source, Layer, type ViewStateChangeEvent } from 'react-map-gl/mapbox';
+import Map, { Marker, Source, Layer, type ViewStateChangeEvent, type MapRef } from 'react-map-gl/mapbox';
 import { useStationSidebar } from '@/stores/stationSidebar';
 
 // Modular imports
@@ -17,6 +17,7 @@ interface MapProps {
   className?: string;
   heatmapVisible?: boolean;
   windVisible?: boolean;
+  modelVariant?: 'backbone' | 'support_aware';
 }
 
 export default function MapRefactored({
@@ -25,6 +26,7 @@ export default function MapRefactored({
   className = '',
   heatmapVisible = true,
   windVisible = true,
+  modelVariant = 'backbone',
 }: MapProps) {
   const { openStation } = useStationSidebar();
   const { stations, loading, error } = useStationsData();
@@ -37,6 +39,12 @@ export default function MapRefactored({
 
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>();
   const [map, setMap] = useState<any>(null);
+
+  // Prediction tile URL — uses the latest available date
+  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-152782825429.asia-south1.run.app/api';
+  const predDate = '2026-03-14'; // TODO: fetch latest from API
+  const modelParam = modelVariant === 'support_aware' ? '&model=support_aware' : '';
+  const tileUrl = `${API_BASE}/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true${modelParam}`;
 
   // Wind layer (lazy — only fetches data when toggled on)
   const { windImage, windMetadata } = useWindData(windVisible);
@@ -138,6 +146,26 @@ export default function MapRefactored({
         transitionDuration={300}
         pitchWithRotate={false}
       >
+        {/* PM2.5 Prediction Tile Layer */}
+        <Source
+          id="pm25-predictions"
+          type="raster"
+          tiles={[tileUrl]}
+          tileSize={256}
+          minzoom={0}
+          maxzoom={12}
+        >
+          <Layer
+            id="pm25-predictions-layer"
+            type="raster"
+            paint={{
+              'raster-opacity': 0.6,
+              'raster-fade-duration': 300,
+            }}
+            beforeId={undefined}
+          />
+        </Source>
+
         {features.map(feature => {
           const key = `marker-${feature.properties.id}`;
 

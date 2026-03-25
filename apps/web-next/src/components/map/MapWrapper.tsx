@@ -20,9 +20,10 @@ interface MapWrapperProps {
   className?: string
   heatmapVisible?: boolean
   windVisible?: boolean
+  modelVariant?: 'backbone' | 'support_aware'
 }
 
-export default function MapWrapper({ className, heatmapVisible = true, windVisible = false }: MapWrapperProps) {
+export default function MapWrapper({ className, heatmapVisible = true, windVisible = false, modelVariant = 'backbone' }: MapWrapperProps) {
   return (
     <div className={`${className}`} style={{
       width: '100%',
@@ -36,6 +37,7 @@ export default function MapWrapper({ className, heatmapVisible = true, windVisib
         zoom={MAP_CONFIG.zoom}
         heatmapVisible={heatmapVisible}
         windVisible={windVisible}
+        modelVariant={modelVariant}
       />
     </div>
   )

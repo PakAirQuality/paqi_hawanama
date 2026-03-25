@@ -743,6 +743,7 @@ async def get_prediction_tile(
     x: int,
     y: int,
     smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
+    model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
     _: bool = Depends(verify_tasks_token),
 ):
     """
@@ -754,6 +755,7 @@ async def get_prediction_tile(
         x: Tile X coordinate
         y: Tile Y coordinate
         smoothed: If True, serve from the Gaussian-smoothed COG
+        model: 'backbone' (default) or 'support_aware'
     """
     from fastapi.responses import Response
     import os
@@ -763,7 +765,8 @@ async def get_prediction_tile(
 
     # Download COG to temp file (GCS client uses Application Default Credentials)
     suffix = "_gaussian_smoothed" if smoothed else ""
-    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
+    prefix = "predictions/support_aware" if model == "support_aware" else "predictions"
+    blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}{suffix}.tif"
     tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:
@@ -871,6 +874,7 @@ async def get_prediction_tile(
 async def get_prediction_tilejson(
     pred_date: str,
     request: Request,
+    model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
     _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
@@ -878,6 +882,7 @@ async def get_prediction_tilejson(
 
     Args:
         pred_date: Date in YYYY-MM-DD format
+        model: 'backbone' (default) or 'support_aware'
     """
     import os
 
@@ -885,7 +890,8 @@ async def get_prediction_tilejson(
     outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file
-    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}.tif"
+    prefix = "predictions/support_aware" if model == "support_aware" else "predictions"
+    blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}.tif"
     tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:
@@ -894,7 +900,8 @@ async def get_prediction_tilejson(
 
             # Build tile URL template - use correct path /ops/pipeline
             base_url = str(request.base_url).rstrip("/")
-            tile_url = f"{base_url}/api/v1/ops/pipeline/tiles/{pred_date}/{{z}}/{{x}}/{{y}}.png"
+            model_param = f"&model={model}" if model != "backbone" else ""
+            tile_url = f"{base_url}/api/v1/ops/pipeline/tiles/{pred_date}/{{z}}/{{x}}/{{y}}.png?smoothed=true{model_param}"
 
             return {
                 "tilejson": "3.0.0",

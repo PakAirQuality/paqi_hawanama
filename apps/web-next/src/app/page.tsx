@@ -1,12 +1,18 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import MapWrapper from '@/components/map/MapWrapper'
 import { StationCard } from '@/components/station/StationCard'
 import { CitySearch } from '@/components/ui/CitySearch'
+import { ModelToggle } from '@/components/map/ModelToggle'
 
 export default function Home() {
   const [showCitySearch, setShowCitySearch] = useState(false)
+  const [modelVariant, setModelVariant] = useState<'backbone' | 'support_aware'>('backbone')
+
+  const handleModelToggle = useCallback((supportAware: boolean) => {
+    setModelVariant(supportAware ? 'support_aware' : 'backbone')
+  }, [])
 
   // Prevent body scrolling on map page only
   useEffect(() => {
@@ -26,14 +32,15 @@ export default function Home() {
       maxWidth: '100vw'
     }}>
       {/* Full Screen Map */}
-      <MapWrapper className="absolute inset-0 w-full h-full" windVisible={true} />
+      <MapWrapper className="absolute inset-0 w-full h-full" windVisible={true} modelVariant={modelVariant} />
 
-      {/* Live Data - Upper Left with safe area */}
-      <div className="absolute top-safe-or-4 left-4 sm:top-8 sm:left-8 z-50" style={{ top: 'max(env(safe-area-inset-top), 1rem)' }}>
+      {/* Live Data + Model Toggle - Upper Left with safe area */}
+      <div className="absolute top-safe-or-4 left-4 sm:top-8 sm:left-8 z-50 flex flex-col gap-2" style={{ top: 'max(env(safe-area-inset-top), 1rem)' }}>
         <div className="flex items-center space-x-2 bg-black/20 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 shadow-2xl">
           <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50"></div>
           <span className="text-xs font-medium text-white/90 tracking-wide">LIVE</span>
         </div>
+        <ModelToggle onToggle={handleModelToggle} />
       </div>
 
       {/* Logo - Lower Left (Floating) - Mobile Safe with safe area */}
