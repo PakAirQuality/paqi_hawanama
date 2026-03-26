@@ -209,15 +209,25 @@ export function ForecastMap({
       if (!map.current) return
       await loadPakBoundary()
 
-      // ── Satellite PM2.5 raster ──
+      // ── PM2.5 estimation raster (daily NRT/Final predictions) ──
+      // Fetch the latest available prediction date from the pipeline
+      let predDate: string
+      try {
+        const datesRes = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/dates`, { headers: { ...(process.env.NEXT_PUBLIC_TASKS_API_SECRET ? { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET}` } : {}) } })
+        const datesData = await datesRes.json()
+        predDate = datesData.dates?.[0] || new Date().toISOString().slice(0, 10)
+      } catch {
+        predDate = new Date().toISOString().slice(0, 10)
+      }
+
       map.current.addSource('satpm25', {
         type: 'raster',
-        tiles: [`${API_BASE}/api/v1/data-sources/satpm25/{z}/{x}/{y}.png`],
+        tiles: [`${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true`],
         tileSize: 256,
         minzoom: 3,
         maxzoom: 10,
-        bounds: [60.5, 23.5, 77.5, 37.5],
-        attribution: 'Typical PM2.5 (2022 satellite baseline)',
+        bounds: [60.5, 23.3, 77.9, 37.3],
+        attribution: `PAQi PM2.5 Estimation (${predDate})`,
       })
       map.current.addLayer({
         id: 'satpm25-layer',
@@ -803,7 +813,7 @@ export function ForecastMap({
           className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
             showSatellite ? 'bg-white/95 text-slate-700' : 'bg-white/60 text-slate-400'
           }`}
-          title={showSatellite ? 'Hide satellite PM2.5' : 'Show satellite PM2.5'}
+          title={showSatellite ? 'Hide PM2.5 estimation' : 'Show PM2.5 estimation'}
         >
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5" />
