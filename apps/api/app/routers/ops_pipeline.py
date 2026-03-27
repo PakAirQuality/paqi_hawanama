@@ -743,8 +743,7 @@ async def get_prediction_tile(
     x: int,
     y: int,
     smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
-    model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
-    _: bool = Depends(verify_tasks_token),
+    model: str = Query("backbone", description="Model variant: 'backbone', 'support_aware', or 'urban/{city}'"),
 ):
     """
     Serve XYZ tiles from Cloud Optimized GeoTIFF.
@@ -883,8 +882,7 @@ async def get_prediction_tile(
 async def get_prediction_tilejson(
     pred_date: str,
     request: Request,
-    model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
-    _: bool = Depends(verify_tasks_token)
+    model: str = Query("backbone", description="Model variant"),
 ) -> Dict[str, Any]:
     """
     Get TileJSON metadata for a prediction date.
@@ -991,7 +989,6 @@ def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
 )
 async def list_cog_dates(
     limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available COG prediction dates for tile serving."""
     dates = _gcs_list_cog_dates(limit=limit)

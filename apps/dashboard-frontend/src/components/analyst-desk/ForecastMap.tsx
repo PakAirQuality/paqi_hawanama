@@ -213,7 +213,7 @@ export function ForecastMap({
       // Fetch the latest available prediction date from the pipeline
       let predDate: string
       try {
-        const datesRes = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/dates`, { headers: { ...(process.env.NEXT_PUBLIC_TASKS_API_SECRET ? { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET}` } : {}) } })
+        const datesRes = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/dates`)
         const datesData = await datesRes.json()
         predDate = datesData.dates?.[0] || new Date().toISOString().slice(0, 10)
       } catch {
@@ -245,14 +245,11 @@ export function ForecastMap({
         { key: 'karachi', bounds: [66.7, 24.7, 67.3, 25.3] as [number, number, number, number] },
       ]
 
-      const authParam = process.env.NEXT_PUBLIC_TASKS_API_SECRET
-        ? `&token=${process.env.NEXT_PUBLIC_TASKS_API_SECRET}` : ''
-
       for (const city of cities) {
         map.current.addSource(`urban-${city.key}`, {
           type: 'raster',
           tiles: [
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true&model=urban/${city.key}${authParam}`,
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true&model=urban/${city.key}`,
           ],
           tileSize: 256,
           minzoom: 9,
