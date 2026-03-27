@@ -40,7 +40,13 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [sessionId] = useState(() => crypto.randomUUID())
-  const [briefingDone, setBriefingDone] = useState(false)
+  const [briefingDone, setBriefingDone] = useState(() => {
+    // Don't re-brief on page reload within the same browser session
+    if (typeof window !== 'undefined' && sessionStorage.getItem('analyst_briefing_done')) {
+      return true
+    }
+    return false
+  })
   const scrollRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const [showStationChips, setShowStationChips] = useState(false)
@@ -207,10 +213,13 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     }
   }, [extractActions, onAction])
 
-  // Auto-briefing on mount
+  // Auto-briefing on mount (once per browser session)
   useEffect(() => {
     if (briefingDone || !selectedDate) return
     setBriefingDone(true)
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('analyst_briefing_done', '1')
+    }
 
     const assistantId = crypto.randomUUID()
     setMessages([{
