@@ -36,14 +36,29 @@ interface CopilotChatProps {
 
 export function CopilotChat({ selectedDate, onAction, stationMention, cityMention, onMentionConsumed, stations }: CopilotChatProps) {
   const [activeTab, setActiveTab] = useState<'chat' | 'analytics'>('chat')
-  const [messages, setMessages] = useState<ChatMessageType[]>([])
+  const [messages, setMessages] = useState<ChatMessageType[]>(() => {
+    // Restore cached briefing from today if available
+    if (typeof window !== 'undefined') {
+      const lastBriefDate = localStorage.getItem('analyst_briefing_date')
+      const today = new Date().toISOString().slice(0, 10)
+      if (lastBriefDate === today) {
+        try {
+          const cached = localStorage.getItem('analyst_briefing_messages')
+          if (cached) return JSON.parse(cached)
+        } catch { /* ignore parse errors */ }
+      }
+    }
+    return []
+  })
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [sessionId] = useState(() => crypto.randomUUID())
   const [briefingDone, setBriefingDone] = useState(() => {
-    // Don't re-brief on page reload within the same browser session
-    if (typeof window !== 'undefined' && sessionStorage.getItem('analyst_briefing_done')) {
-      return true
+    // Only brief once per calendar day — show cached brief on reload
+    if (typeof window !== 'undefined') {
+      const lastBriefDate = localStorage.getItem('analyst_briefing_date')
+      const today = new Date().toISOString().slice(0, 10)
+      if (lastBriefDate === today) return true
     }
     return false
   })
@@ -213,12 +228,23 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     }
   }, [extractActions, onAction])
 
-  // Auto-briefing on mount (once per browser session)
+  // Cache briefing messages whenever they change (after streaming ends)
+  useEffect(() => {
+    if (briefingDone && messages.length > 0 && !messages.some(m => m.streaming)) {
+      try {
+        const today = new Date().toISOString().slice(0, 10)
+        localStorage.setItem('analyst_briefing_date', today)
+        localStorage.setItem('analyst_briefing_messages', JSON.stringify(messages))
+      } catch { /* quota exceeded — ignore */ }
+    }
+  }, [briefingDone, messages])
+
+  // Auto-briefing on mount (once per calendar day)
   useEffect(() => {
     if (briefingDone || !selectedDate) return
     setBriefingDone(true)
     if (typeof window !== 'undefined') {
-      sessionStorage.setItem('analyst_briefing_done', '1')
+      localStorage.setItem('analyst_briefing_date', new Date().toISOString().slice(0, 10))
     }
 
     const assistantId = crypto.randomUUID()
