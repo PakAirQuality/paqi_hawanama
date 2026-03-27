@@ -148,7 +148,15 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
 
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          // Stream ended — mark message as not streaming
+          setMessages(prev =>
+            prev.map(m =>
+              m.id === assistantId ? { ...m, streaming: false } : m
+            )
+          )
+          break
+        }
 
         const text = decoder.decode(value, { stream: true })
         const lines = text.split('\n')
