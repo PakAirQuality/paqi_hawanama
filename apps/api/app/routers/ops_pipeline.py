@@ -989,9 +989,32 @@ def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
 )
 async def list_cog_dates(
     limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
+    model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
 ) -> Dict[str, Any]:
     """List available COG prediction dates for tile serving."""
-    dates = _gcs_list_cog_dates(limit=limit)
+    backbone_dates = set(_gcs_list_cog_dates(limit=limit))
+
+    # Always include support_aware dates so the timeline shows all available dates
+    # regardless of which model toggle is active
+    try:
+        client = _gcs_client()
+        bucket_name = _get_outputs_bucket()
+        bucket = client.bucket(bucket_name)
+        blobs = bucket.list_blobs(prefix="predictions/support_aware/date=")
+        sa_dates = set()
+        for blob in blobs:
+            if blob.name.endswith(".tif"):
+                try:
+                    d = blob.name.split("support_aware/date=")[1].split("/")[0]
+                    sa_dates.add(d)
+                except Exception:
+                    continue
+        all_dates = sorted(backbone_dates | sa_dates)
+    except Exception as e:
+        logger.warning(f"Failed to list support_aware dates: {e}")
+        all_dates = sorted(backbone_dates)
+
+    dates = all_dates[-limit:]
     return {
         "dates": dates,
         "count": len(dates),
