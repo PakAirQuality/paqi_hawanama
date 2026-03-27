@@ -18,7 +18,9 @@ from .graders import (
     grade_tool_call_count,
     grade_session_state,
     grade_abstention,
+    grade_spatial,
 )
+from .fixtures.tool_outputs import MOCK_OUTPUTS
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
@@ -143,6 +145,21 @@ def grade_turn(
                 tool_calls,
                 must_refuse=abstention.get("must_refuse", False),
                 forbidden_claims=abstention.get("forbidden_claims"),
+            )
+        )
+
+    # Spatial checks (validate mock output properties)
+    spatial = assertions.get("spatial_checks")
+    if spatial:
+        mock_key = turn_spec.get("mock_output_key", "")
+        mock_output = MOCK_OUTPUTS.get(mock_key, {"data": {}})
+        tr.grades.append(
+            grade_spatial(
+                mock_output,
+                max_distance_m=spatial.get("max_distance_m"),
+                min_assets=spatial.get("min_assets"),
+                allowed_types=spatial.get("allowed_types"),
+                distances_monotonic=spatial.get("distances_monotonic", False),
             )
         )
 

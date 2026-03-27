@@ -764,9 +764,18 @@ async def get_prediction_tile(
     outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file (GCS client uses Application Default Credentials)
-    suffix = "_gaussian_smoothed" if smoothed else ""
-    prefix = "predictions/support_aware" if model == "support_aware" else "predictions"
-    blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}{suffix}.tif"
+    suffix = "_smoothed" if smoothed else ""
+    if model.startswith("urban/"):
+        # City-level 1 km predictions: model="urban/lahore"
+        city_key = model.split("/", 1)[1]
+        blob_path = f"predictions/urban/date={pred_date}/{city_key}{suffix}.tif"
+    elif model == "support_aware":
+        prefix = "predictions/support_aware"
+        suffix = "_gaussian_smoothed" if smoothed else ""
+        blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}{suffix}.tif"
+    else:
+        suffix = "_gaussian_smoothed" if smoothed else ""
+        blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
     tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:

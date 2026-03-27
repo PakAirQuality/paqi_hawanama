@@ -210,6 +210,53 @@ def _generate_text_from_output(tool_name: str, output: dict) -> str:
         lines = [f"Based on the observations database, **{entity}** has {total} stations with data going back to {year} ({days} days of coverage, earliest reading: {earliest})."]
         return "\n".join(lines)
 
+    if tool_name == "aq_satellite_image":
+        status = data.get("status", "ok")
+        if status == "no_suitable_scene":
+            reason = data.get("reason", "No suitable scene found.")
+            return f"I couldn't find a suitable Sentinel-2 scene. {reason}"
+        mode = data.get("mode", "latest")
+        if mode == "before_after":
+            before = data.get("before", {})
+            after = data.get("after", {})
+            lines = ["Based on the Copernicus CDSE catalog, here are the before and after Sentinel-2 scenes:\n"]
+            if before:
+                lines.append(f"- **Before:** {before['acquisition_date']} (cloud cover: {before.get('cloud_cover', 'N/A')}%)")
+                if before.get("preview_url"):
+                    lines.append(f"  Preview: {before['preview_url']}")
+            if after:
+                lines.append(f"- **After:** {after['acquisition_date']} (cloud cover: {after.get('cloud_cover', 'N/A')}%)")
+                if after.get("preview_url"):
+                    lines.append(f"  Preview: {after['preview_url']}")
+            return "\n".join(lines)
+        scene = data.get("scene", {})
+        lines = [f"Based on the Copernicus CDSE catalog, the {mode} Sentinel-2 L2A scene is:\n"]
+        lines.append(f"- **Date:** {scene.get('acquisition_date', 'N/A')}")
+        lines.append(f"- **Cloud cover:** {scene.get('cloud_cover', 'N/A')}%")
+        if scene.get("preview_url"):
+            lines.append(f"- **Preview:** {scene['preview_url']}")
+        return "\n".join(lines)
+
+    if tool_name == "aq_nearest_assets":
+        anchor = data.get("anchor", {})
+        radius = data.get("radius_m", 5000)
+        assets = data.get("assets", [])
+        status = data.get("status", "ok")
+        if status == "no_results" or not assets:
+            notes = data.get("notes", [])
+            note_text = notes[0] if notes else "No assets found within the search radius."
+            return f"I couldn't find any matching assets within {radius}m. {note_text}"
+        counts = data.get("counts_by_type", {})
+        lines = [f"Based on OpenStreetMap data, I found {len(assets)} assets within {radius}m of ({anchor.get('lat')}, {anchor.get('lon')}):\n"]
+        for a in assets:
+            admin = a.get("admin", {})
+            district = admin.get("district", "")
+            lines.append(f"- **{a['name']}** ({a['asset_type']}) — {a['distance_m']}m away, {district}")
+        if counts:
+            parts = [f"{v} {k}(s)" for k, v in counts.items()]
+            lines.append(f"\nTotal: {', '.join(parts)}")
+        return "\n".join(lines)
+
     return json.dumps(data, indent=2)
 
 
@@ -282,6 +329,12 @@ def update_fake_session(session: FakeSession, tool_name: str | None, mock_key: s
 
     elif tool_name == "aq_forecast_audit":
         pass  # no focus change
+
+    elif tool_name == "aq_nearest_assets":
+        pass  # no focus change — spatial context, not entity focus
+
+    elif tool_name == "aq_satellite_image":
+        pass  # no focus change — imagery context
 
 
 @pytest.fixture

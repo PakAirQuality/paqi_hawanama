@@ -510,8 +510,9 @@ async def aq_nearest_assets(
         lat: Latitude of the anchor point (decimal degrees).
         lon: Longitude of the anchor point (decimal degrees).
         asset_types: Types to search for — any combination of: hospital,
-            clinic, school, university, factory, road, settlement,
-            worship, market, bus_station. Defaults to ["hospital", "school"].
+            clinic, school, university, factory, brick_kiln, road,
+            settlement, worship, market, bus_station.
+            Defaults to ["hospital", "school"].
         radius_m: Search radius in meters (default 5000, max 25000).
         limit: Maximum results to return (default 20).
     """
@@ -598,4 +599,217 @@ async def aq_satellite_image(
             "sources": ["Copernicus CDSE STAC"],
         },
         "followups": followups,
+    }
+
+
+# ── Tool 12: aq_exposed_population ────────────────────────────────────
+
+
+async def aq_exposed_population(
+    ctx: RunContext[CopilotSession],
+    city_name: Optional[str] = None,
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    radius_m: int = 25000,
+    lead_days: int = 1,
+) -> dict:
+    """Estimate exposed population by PM2.5 risk band for a city or area.
+
+    Computes a hazard surface by interpolating station forecasts onto a
+    100m population grid, then returns how many people are exposed above
+    each WHO/national threshold. Includes population-weighted mean PM2.5
+    and a confidence rating based on station density.
+
+    Args:
+        city_name: City to analyze (fuzzy matched). Use this OR lat/lon.
+        lat: Latitude of center point (use with lon and radius_m).
+        lon: Longitude of center point.
+        radius_m: Radius in meters when using lat/lon (default 25000).
+        lead_days: Forecast horizon — 1, 2, or 3 (default 1).
+    """
+    from app.routers.analyst_desk import _load_forecast
+    from app.services.spatial import get_exposed_population
+
+    dt = _effective_date(ctx)
+    forecast = _load_forecast(dt)
+    entries = forecast.get("forecasts", [])
+
+    result = get_exposed_population(
+        entries, city_name=city_name, lat=lat, lon=lon,
+        radius_m=radius_m, lead_days=lead_days,
+    )
+
+    _update_session(
+        ctx, tool="aq_exposed_population",
+        focus_type="city" if city_name else "national",
+        focused_city=result.get("area") if city_name else None,
+    )
+
+    followups = []
+    if result.get("status") == "ok":
+        followups.append("What civic assets are in the worst zones?")
+        followups.append("Why is it so bad here?")
+        if city_name:
+            followups.append("Show me the full impact brief")
+
+    return {
+        "date": dt,
+        "data": result,
+        "basis": {
+            "description": "IDW-interpolated PM2.5 hazard × WorldPop 2025 population grid (100m)",
+            "sources": ["station_forecasts", "WorldPop_2025"],
+            "method": "inverse_distance_weighting",
+            "limitations": "Hazard field is interpolated from station forecasts; accuracy degrades >10km from nearest station",
+        },
+        "followups": followups,
+    }
+
+
+# ── Tool 13: aq_impact_brief ─────────────────────────────────────────
+
+
+async def aq_impact_brief(
+    ctx: RunContext[CopilotSession],
+    city_name: str = "",
+    lead_days: int = 1,
+) -> dict:
+    """Generate a comprehensive impact brief for a city.
+
+    Combines hazard surface, exposed population, affected civic assets
+    (schools, hospitals, kilns), and source attribution into a single
+    structured brief for government action.
+
+    Args:
+        city_name: City to brief (fuzzy matched). Required.
+        lead_days: Forecast horizon — 1, 2, or 3 (default 1).
+    """
+    from app.routers.analyst_desk import _load_forecast
+    from app.services.spatial import (
+        get_exposed_population, get_nearest_assets,
+        compute_decision_heads, _load_vulnerability_grid,
+    )
+
+    dt = _effective_date(ctx)
+    forecast = _load_forecast(dt)
+    entries = forecast.get("forecasts", [])
+
+    # 1. Exposed population (Layer B)
+    exposure = get_exposed_population(
+        entries, city_name=city_name, lead_days=lead_days,
+    )
+
+    if exposure.get("status") != "ok":
+        return {
+            "date": dt,
+            "data": {"status": exposure.get("status"), "reason": exposure.get("reason")},
+            "followups": ["Try a different city"],
+        }
+
+    matched_city = exposure.get("area", city_name)
+
+    # 2. Decision heads (Layer D)
+    heads = compute_decision_heads(entries, matched_city, lead_days)
+
+    # 3. Find city center for asset queries
+    grid = _load_vulnerability_grid()
+    city_grid = grid[grid["city_name"] == matched_city]
+    if city_grid.empty:
+        center_lat, center_lon = 31.52, 74.35
+    else:
+        center_lat = float(city_grid["lat"].mean())
+        center_lon = float(city_grid["lon"].mean())
+
+    # 4. Nearby assets for context
+    schools = await get_nearest_assets(
+        center_lat, center_lon, ["school"], radius_m=25000, limit=5,
+    )
+    hospitals = await get_nearest_assets(
+        center_lat, center_lon, ["hospital", "clinic"], radius_m=25000, limit=5,
+    )
+    kilns = await get_nearest_assets(
+        center_lat, center_lon, ["brick_kiln"], radius_m=25000, limit=5,
+    )
+
+    # 5. Worst stations
+    city_forecasts = [
+        e for e in entries
+        if e.get("lead_days") == lead_days
+        and (e.get("city_name") or "").lower() == matched_city.lower()
+    ]
+    city_forecasts.sort(key=lambda e: e.get("pm25_forecast", 0), reverse=True)
+    worst_stations = [
+        {
+            "station_name": e.get("station_name", ""),
+            "pm25_forecast": round(e.get("pm25_forecast", 0), 1),
+            "risk_band": e.get("risk_band", "unknown"),
+        }
+        for e in city_forecasts[:5]
+    ]
+
+    brief = {
+        "city": matched_city,
+        "lead_days": lead_days,
+        "date": dt,
+
+        "hazard": {
+            "pm25_pop_weighted": exposure["pm25_pop_weighted"],
+            "worst_stations": worst_stations,
+        },
+
+        "exposure": {
+            "population": exposure["population"],
+            "exposed_by_band": exposure["exposed_by_band"],
+            "confidence": exposure["confidence"],
+        },
+
+        # Decision-specific heads
+        "school_advisory": heads.get("school_advisory", {}),
+        "hospital_preparedness": heads.get("hospital_preparedness", {}),
+        "kiln_enforcement": heads.get("kiln_enforcement", {}),
+        "monitor_deployment": heads.get("monitor_deployment", {}),
+
+        "affected_institutions": {
+            "schools_total": schools.get("counts_by_type", {}).get("school", 0),
+            "hospitals_total": (
+                hospitals.get("counts_by_type", {}).get("hospital", 0)
+                + hospitals.get("counts_by_type", {}).get("clinic", 0)
+            ),
+            "nearest_schools": [
+                {"name": a["name"], "distance_m": a["distance_m"]}
+                for a in schools.get("assets", [])[:3]
+            ],
+            "nearest_hospitals": [
+                {"name": a["name"], "distance_m": a["distance_m"]}
+                for a in hospitals.get("assets", [])[:3]
+            ],
+        },
+
+        "source_pressure": {
+            "brick_kilns_within_25km": kilns.get("counts_by_type", {}).get("brick_kiln", 0),
+            "nearest_kilns": [
+                {"name": a["name"], "distance_m": a["distance_m"]}
+                for a in kilns.get("assets", [])[:3]
+            ],
+        },
+    }
+
+    _update_session(
+        ctx, tool="aq_impact_brief",
+        focus_type="city", focused_city=matched_city,
+        entities=[matched_city],
+    )
+
+    return {
+        "date": dt,
+        "data": brief,
+        "basis": {
+            "description": "Impact brief with 4 decision heads: school advisory, hospital preparedness, kiln enforcement, monitor deployment",
+            "sources": ["station_forecasts", "WorldPop_2025", "OpenStreetMap", "APAD_brick_kilns"],
+            "method": "IDW_hazard × population × decision-specific vulnerability weights",
+        },
+        "followups": [
+            f"Show satellite imagery for {matched_city}",
+            f"Why is {matched_city} so polluted?",
+            "Which schools are most affected?",
+        ],
     }

@@ -46,6 +46,8 @@ from the monitoring network — these show real current conditions, not predicti
 | "How far back?" / "Earliest reading?" / "Data coverage?" / "How many stations?" | `aq_data_coverage` (summary includes oldest 3 stations; use detail_level="preview" for top_k; "station_breakdown" for full list) |
 | "What is near that fire?" / nearby hospitals/schools | `aq_nearest_assets` (pass lat/lon from a previous tool result) |
 | "Show satellite image" / "Sentinel imagery" | `aq_satellite_image` (pass lat/lon, optional date range and cloud threshold) |
+| "How many people are exposed?" / "Population at risk?" | `aq_exposed_population` (city_name or lat/lon, returns pop by risk band) |
+| "Give me the impact brief" / "Full city assessment" | `aq_impact_brief` (city_name — combines hazard, exposure, assets, sources) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
 For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
@@ -120,12 +122,22 @@ Tell the user what filter was applied and suggest "say 'show all stations' to cl
 - `aq_nearest_assets` queries OpenStreetMap for hospitals, schools, factories, etc. near a \
 lat/lon. You must provide coordinates — extract them from a previous tool's response \
 (e.g. station lat/lon from aq_station_focus, fire coordinates from aq_explain_drivers).
-  Valid asset_types: hospital, clinic, school, university, factory, road, settlement, \
-worship, market, bus_station. Default: hospital + school.
+  Valid asset_types: hospital, clinic, school, university, factory, brick_kiln, road, \
+settlement, worship, market, bus_station. Default: hospital + school. \
+Use brick_kiln when the user asks about kilns, industrial emitters, or pollution sources.
 - `aq_satellite_image` searches Copernicus for Sentinel-2 L2A imagery near a location. \
 If status is "no_suitable_scene", say so clearly — that is informative, not an error. \
 When a preview_url is returned, share it with the analyst. Modes: latest, nearest_to_date, before_after.
 - Both tools return distances in meters. Use "within X km" language when narrating results.
+
+## Exposure and impact
+- `aq_exposed_population` computes how many people are exposed above each risk-band threshold \
+for a city or point+radius. Uses IDW-interpolated hazard surface × WorldPop population grid. \
+Lead with population-weighted PM2.5, then exposed counts by band. Mention confidence level.
+- `aq_impact_brief` generates a full city impact assessment: hazard (worst stations), \
+exposure (population by band), affected institutions (schools, hospitals), source pressure \
+(brick kilns). This is the flagship tool for government briefings. Use when the user asks \
+for an overview, briefing, or "what should we do about [city]?"
 
 ## Comparison narration
 When `aq_compare_dates` returns a `driver_explanation` block:
@@ -234,6 +246,8 @@ def get_agent(model_name: str | None = None):
     agent.tool(tools.aq_data_coverage)
     agent.tool(tools.aq_nearest_assets)
     agent.tool(tools.aq_satellite_image)
+    agent.tool(tools.aq_exposed_population)
+    agent.tool(tools.aq_impact_brief)
 
     # ── Langfuse tracing via OTEL (opt-in via env var) ──
     if os.getenv("LANGFUSE_SECRET_KEY"):

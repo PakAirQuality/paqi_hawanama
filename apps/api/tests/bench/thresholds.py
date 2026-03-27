@@ -23,6 +23,7 @@ GRADER_THRESHOLDS: dict[str, float] = {
     "tool_call_count":    0.95,
     "session_state":      0.85,
     "abstention":         0.95,
+    "spatial":            0.95,
 }
 
 

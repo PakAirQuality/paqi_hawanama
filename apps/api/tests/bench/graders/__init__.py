@@ -10,6 +10,7 @@ from .session_resolution import grade_session_resolution
 from .tool_call_count import grade_tool_call_count
 from .session_state import grade_session_state
 from .abstention import grade_abstention
+from .spatial import grade_spatial
 
 __all__ = [
     "GradeResult",
@@ -22,4 +23,5 @@ __all__ = [
     "grade_tool_call_count",
     "grade_session_state",
     "grade_abstention",
+    "grade_spatial",
 ]

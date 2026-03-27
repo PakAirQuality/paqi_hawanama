@@ -237,6 +237,44 @@ export function ForecastMap({
         slot: 'middle',
       })
 
+      // ── Urban 1 km city layers (overlay at higher zoom) ──
+      const cities = [
+        { key: 'lahore', bounds: [74.0, 31.2, 74.6, 31.8] as [number, number, number, number] },
+        { key: 'isb_rwp', bounds: [72.6, 33.3, 73.3, 33.9] as [number, number, number, number] },
+        { key: 'peshawar', bounds: [71.3, 33.8, 71.9, 34.3] as [number, number, number, number] },
+        { key: 'karachi', bounds: [66.7, 24.7, 67.3, 25.3] as [number, number, number, number] },
+      ]
+
+      const authParam = process.env.NEXT_PUBLIC_TASKS_API_SECRET
+        ? `&token=${process.env.NEXT_PUBLIC_TASKS_API_SECRET}` : ''
+
+      for (const city of cities) {
+        map.current.addSource(`urban-${city.key}`, {
+          type: 'raster',
+          tiles: [
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true&model=urban/${city.key}${authParam}`,
+          ],
+          tileSize: 256,
+          minzoom: 9,
+          maxzoom: 15,
+          bounds: city.bounds,
+        })
+        map.current.addLayer({
+          id: `urban-${city.key}-layer`,
+          type: 'raster',
+          source: `urban-${city.key}`,
+          minzoom: 9,
+          paint: {
+            'raster-opacity': [
+              'interpolate', ['linear'], ['zoom'],
+              9, 0,
+              10, 0.85,
+            ],
+          },
+          slot: 'middle',
+        })
+      }
+
       // ── District boundaries (ADM2) — clickable ──
       map.current.addSource('pakistan-districts', {
         type: 'geojson',
