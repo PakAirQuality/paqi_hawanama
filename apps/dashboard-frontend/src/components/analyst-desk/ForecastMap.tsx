@@ -1202,18 +1202,21 @@ export function ForecastMap({
                     hoverPM25.pm25 <= 150 ? 'Unhealthy' :
                     hoverPM25.pm25 <= 250 ? 'Very Unhealthy' : 'Severe'
                   }</div>
-                  {hoverPM25.population != null && hoverPM25.population > 0 && (
-                    <div className="text-slate-400 mt-0.5">
-                      Pop: <span className="text-purple-300 font-medium">{hoverPM25.population >= 1000 ? `${(hoverPM25.population / 1000).toFixed(1)}k` : Math.round(hoverPM25.population)}</span>
-                    </div>
-                  )}
                 </div>
-                {hoverPM25.popWeightedPM25 != null && hoverPM25.popWeightedPM25 > 0 && (
-                  <div className="text-center border-l border-white/10 pl-3 min-w-[44px]">
+                {hoverPM25.population != null && hoverPM25.population > 0 && (
+                  <div className="text-center border-l border-white/10 pl-3 min-w-[40px]">
                     <div className="text-lg font-bold tabular-nums leading-none text-purple-300">
+                      {hoverPM25.population >= 1000 ? `${(hoverPM25.population / 1000).toFixed(1)}k` : Math.round(hoverPM25.population)}
+                    </div>
+                    <div className="text-[8px] text-slate-500 font-medium mt-0.5">pop/km²</div>
+                  </div>
+                )}
+                {hoverPM25.popWeightedPM25 != null && hoverPM25.popWeightedPM25 > 0 && (
+                  <div className="text-center border-l border-white/10 pl-3 min-w-[36px]">
+                    <div className="text-sm font-bold tabular-nums leading-none text-purple-400/70">
                       {Math.round(hoverPM25.popWeightedPM25)}
                     </div>
-                    <div className="text-[8px] text-slate-500 font-medium mt-0.5">pop-wtd</div>
+                    <div className="text-[7px] text-slate-500 font-medium mt-0.5">city avg</div>
                   </div>
                 )}
               </>
