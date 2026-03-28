@@ -817,8 +817,11 @@ async def get_prediction_tile(
                 return tile_response(empty_tile_png())
 
             # Rescale data to 0-255 for colormap lookup
+            # Urban tiles use tighter range for more color contrast
+            vmin = 5.0 if model.startswith("urban/") else PM25_VMIN
+            vmax = 80.0 if model.startswith("urban/") else PM25_VMAX
             rescaled = np.clip(
-                (data - PM25_VMIN) / (PM25_VMAX - PM25_VMIN) * 255,
+                (data - vmin) / (vmax - vmin) * 255,
                 0, 255
             ).astype(np.uint8)
 

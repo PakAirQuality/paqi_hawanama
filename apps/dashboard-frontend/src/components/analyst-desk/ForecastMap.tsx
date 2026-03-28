@@ -659,7 +659,7 @@ export function ForecastMap({
       ]
 
       map.current.on('mousemove', (e) => {
-        if (!map.current || map.current.getZoom() < 5) {
+        if (!map.current || map.current.getZoom() < 7) {
           setHoverPM25(null)
           return
         }
@@ -700,7 +700,7 @@ export function ForecastMap({
               setHoverPM25({ pm25: data.pm25, lat: snapLat, lon: snapLon, label })
             }
           } catch { /* aborted or failed */ }
-        }, 80)
+        }, 50)
       })
 
       map.current.on('mouseout', () => setHoverPM25(null))
@@ -1098,25 +1098,41 @@ export function ForecastMap({
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* PM2.5 hover readout — upper left */}
-      {hoverPM25 && (
+      {/* PM2.5 hover readout — upper left, always visible at city zoom */}
+      {zoomLevel >= 8 && (
         <div className="absolute top-3 left-3 z-10 pointer-events-none">
-          <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-slate-800/90 backdrop-blur-sm shadow-lg ring-1 ring-white/10">
-            <div className="text-center">
-              <div className={`text-2xl font-bold tabular-nums ${
-                hoverPM25.pm25 <= 35 ? 'text-emerald-400' :
-                hoverPM25.pm25 <= 75 ? 'text-amber-400' :
-                hoverPM25.pm25 <= 150 ? 'text-orange-400' :
-                'text-red-400'
-              }`}>
-                {Math.round(hoverPM25.pm25)}
+          <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-slate-800/90 backdrop-blur-sm shadow-lg ring-1 ring-white/10 min-w-[180px]">
+            {hoverPM25 ? (
+              <>
+                <div className="text-center min-w-[44px]">
+                  <div className={`text-2xl font-bold tabular-nums leading-none ${
+                    hoverPM25.pm25 <= 15 ? 'text-emerald-300' :
+                    hoverPM25.pm25 <= 35 ? 'text-emerald-400' :
+                    hoverPM25.pm25 <= 55 ? 'text-amber-400' :
+                    hoverPM25.pm25 <= 75 ? 'text-orange-400' :
+                    hoverPM25.pm25 <= 150 ? 'text-orange-500' :
+                    'text-red-400'
+                  }`}>
+                    {Math.round(hoverPM25.pm25)}
+                  </div>
+                  <div className="text-[9px] text-slate-400 font-medium mt-0.5">µg/m³</div>
+                </div>
+                <div className="text-[10px] leading-tight">
+                  <div className="font-semibold text-white">{hoverPM25.label || 'PM2.5'}</div>
+                  <div className="text-slate-400">{hoverPM25.lat.toFixed(3)}°N, {hoverPM25.lon.toFixed(3)}°E</div>
+                  <div className="text-slate-500 mt-0.5">{
+                    hoverPM25.pm25 <= 35 ? 'Good' :
+                    hoverPM25.pm25 <= 75 ? 'Moderate' :
+                    hoverPM25.pm25 <= 150 ? 'Unhealthy' :
+                    hoverPM25.pm25 <= 250 ? 'Very Unhealthy' : 'Severe'
+                  }</div>
+                </div>
+              </>
+            ) : (
+              <div className="text-[11px] text-slate-400">
+                Hover over map to see PM2.5
               </div>
-              <div className="text-[9px] text-slate-400 font-medium">µg/m³</div>
-            </div>
-            <div className="text-[10px] text-slate-400 leading-tight">
-              <div className="font-medium text-slate-300">{hoverPM25.label || 'PM2.5 Estimate'}</div>
-              <div>{hoverPM25.lat.toFixed(3)}°N, {hoverPM25.lon.toFixed(3)}°E</div>
-            </div>
+            )}
           </div>
         </div>
       )}
