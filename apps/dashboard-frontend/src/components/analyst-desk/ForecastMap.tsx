@@ -307,26 +307,9 @@ export function ForecastMap({
         },
       }, labelLayerId)
 
-      // ── Zoom-based pitch deepening ──
-      // Starts at 45° (set in init). Steepens as user zooms into cities.
-      let pitchLocked = false
-      map.current.on('zoom', () => {
-        if (!map.current || pitchLocked) return
-        const z = map.current.getZoom()
-        // Gradually increase pitch: 30° at z4 → 50° at z10 → 60° at z13 → 65° at z16+
-        let targetPitch: number
-        if (z < 5) targetPitch = 30
-        else if (z < 10) targetPitch = 30 + (z - 5) * 4       // 30→50
-        else if (z < 14) targetPitch = 50 + (z - 10) * 2.5    // 50→60
-        else targetPitch = Math.min(65, 60 + (z - 14) * 2.5)  // 60→65
-
-        const currentPitch = map.current.getPitch()
-        if (Math.abs(currentPitch - targetPitch) > 2) {
-          pitchLocked = true
-          map.current.easeTo({ pitch: targetPitch, duration: 800, easing: (t) => t * (2 - t) })
-          map.current.once('moveend', () => { pitchLocked = false })
-        }
-      })
+      // Camera starts at 30° pitch. User controls pitch freely via
+      // right-click drag or two-finger tilt. No auto-pitch on zoom —
+      // it fights the user's scroll gesture and feels janky.
 
       // ── PM2.5 estimation raster (daily NRT/Final predictions) ──
       // Fetch the latest available prediction date from the pipeline
