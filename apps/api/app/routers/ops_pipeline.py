@@ -1068,6 +1068,7 @@ async def get_point_value(
     lat: float = Query(..., ge=20.0, le=40.0, description="Latitude"),
     lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
     smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
+    model: str = Query("backbone", description="Model variant: 'backbone', 'support_aware', or 'urban/{city}'"),
     _: bool = Depends(verify_tasks_token),
 ) -> Dict[str, Any]:
     """
@@ -1078,6 +1079,7 @@ async def get_point_value(
         lat: Latitude (WGS84)
         lon: Longitude (WGS84)
         smoothed: If True, query from the Gaussian-smoothed COG
+        model: Model variant to query
     """
     import os
     import math
@@ -1086,8 +1088,16 @@ async def get_point_value(
     outputs_bucket = _get_outputs_bucket()
 
     # Download COG to temp file
-    suffix = "_gaussian_smoothed" if smoothed else ""
-    blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
+    if model.startswith("urban/"):
+        city_key = model.split("/", 1)[1]
+        suffix = "_smoothed" if smoothed else ""
+        blob_path = f"predictions/urban/date={pred_date}/{city_key}{suffix}.tif"
+    elif model == "support_aware":
+        suffix = "_gaussian_smoothed" if smoothed else ""
+        blob_path = f"predictions/support_aware/date={pred_date}/pm25_{pred_date}{suffix}.tif"
+    else:
+        suffix = "_gaussian_smoothed" if smoothed else ""
+        blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
     tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
 
     try:

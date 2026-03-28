@@ -214,7 +214,7 @@ export function ForecastMap({
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
 
   // Hover readout for PM2.5 value under cursor
-  const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number } | null>(null)
+  const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number; label?: string } | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hoverAbortRef = useRef<AbortController | null>(null)
   const predDateRef = useRef<string>('')
@@ -645,8 +645,16 @@ export function ForecastMap({
       renderMarkers()
 
       // ── Hover readout: query PM2.5 under cursor (debounced) ──
+      // City bounds for urban model detection
+      const urbanCities = [
+        { key: 'lahore', w: 74.0, s: 31.2, e: 74.6, n: 31.8 },
+        { key: 'isb_rwp', w: 72.6, s: 33.3, e: 73.3, n: 33.9 },
+        { key: 'peshawar', w: 71.3, s: 33.8, e: 71.9, n: 34.3 },
+        { key: 'karachi', w: 66.7, s: 24.7, e: 67.3, n: 25.3 },
+      ]
+
       map.current.on('mousemove', (e) => {
-        if (!map.current || map.current.getZoom() < 9) {
+        if (!map.current || map.current.getZoom() < 5) {
           setHoverPM25(null)
           return
         }
@@ -660,17 +668,22 @@ export function ForecastMap({
           const ac = new AbortController()
           hoverAbortRef.current = ac
           try {
+            // Use urban model if cursor is inside a city with 1km coverage
+            const city = urbanCities.find(c => lng >= c.w && lng <= c.e && lat >= c.s && lat <= c.n)
+            const modelParam = city ? `&model=urban/${city.key}` : ''
+            const label = city ? '1km Downscaler' : 'National Estimate'
+
             const res = await fetch(
-              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`,
+              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true${modelParam}`,
               { signal: ac.signal, headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
             )
             if (!res.ok || ac.signal.aborted) return
             const data = await res.json()
             if (data.pm25 != null && !ac.signal.aborted) {
-              setHoverPM25({ pm25: data.pm25, lat, lon: lng })
+              setHoverPM25({ pm25: data.pm25, lat, lon: lng, label })
             }
           } catch { /* aborted or failed */ }
-        }, 150)
+        }, 120)
       })
 
       map.current.on('mouseout', () => setHoverPM25(null))
@@ -1079,7 +1092,7 @@ export function ForecastMap({
               <div className="text-[9px] text-slate-400 font-medium">µg/m³</div>
             </div>
             <div className="text-[10px] text-slate-400 leading-tight">
-              <div className="font-medium text-slate-300">PM2.5 Estimate</div>
+              <div className="font-medium text-slate-300">{hoverPM25.label || 'PM2.5 Estimate'}</div>
               <div>{hoverPM25.lat.toFixed(3)}°N, {hoverPM25.lon.toFixed(3)}°E</div>
             </div>
           </div>
