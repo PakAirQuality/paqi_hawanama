@@ -339,9 +339,10 @@ export function ForecastMap({
         paint: {
           'raster-opacity': [
             'interpolate', ['linear'], ['zoom'],
-            3, 0.6,
-            7, 0.5,
-            10, 0.35,
+            3, 0.8,
+            7, 0.65,
+            10, 0.45,
+            14, 0.3,
           ],
         },
         slot: 'middle',
