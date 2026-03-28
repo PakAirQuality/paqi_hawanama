@@ -1,6 +1,6 @@
 'use client'
 
-import { Flame, Wind, MapPin, Satellite } from 'lucide-react'
+import { Flame, Wind, MapPin, Satellite, Users } from 'lucide-react'
 
 interface LayersPanelProps {
   showStations: boolean
@@ -11,6 +11,8 @@ interface LayersPanelProps {
   onToggleFires: () => void
   showWind: boolean
   onToggleWind: () => void
+  showPopulation: boolean
+  onTogglePopulation: () => void
 }
 
 const LAYER_ITEMS: {
@@ -24,6 +26,7 @@ const LAYER_ITEMS: {
   { key: 'showSatellite', label: 'PM2.5 Estimation', description: 'ML model prediction heatmap', icon: Satellite, activeColor: 'text-indigo-600' },
   { key: 'showFires', label: 'Active Fires', description: 'FIRMS VIIRS fire detections', icon: Flame, activeColor: 'text-orange-500' },
   { key: 'showWind', label: 'Wind Field', description: 'Surface wind speed & direction', icon: Wind, activeColor: 'text-sky-500' },
+  { key: 'showPopulation', label: 'Population', description: 'WorldPop 2025 constrained 100m', icon: Users, activeColor: 'text-purple-500' },
 ]
 
 export function LayersPanel({
@@ -31,12 +34,14 @@ export function LayersPanel({
   showSatellite, onToggleSatellite,
   showFires, onToggleFires,
   showWind, onToggleWind,
+  showPopulation, onTogglePopulation,
 }: LayersPanelProps) {
   const toggles: Record<string, { value: boolean; toggle: () => void }> = {
     showStations: { value: showStations, toggle: onToggleStations },
     showSatellite: { value: showSatellite, toggle: onToggleSatellite },
     showFires: { value: showFires, toggle: onToggleFires },
     showWind: { value: showWind, toggle: onToggleWind },
+    showPopulation: { value: showPopulation, toggle: onTogglePopulation },
   }
 
   return (

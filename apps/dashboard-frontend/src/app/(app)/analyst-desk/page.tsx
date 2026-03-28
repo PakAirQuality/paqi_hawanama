@@ -33,6 +33,7 @@ export default function AnalystDeskPage() {
   const [showSatellite, setShowSatellite] = useState(true)
   const [showFires, setShowFires] = useState(true)
   const [showWind, setShowWind] = useState(true)
+  const [showPopulation, setShowPopulation] = useState(false)
 
   // Map ref for resize during panel animation
   const mapRef = useRef<{ resize: () => void } | null>(null)
@@ -205,6 +206,8 @@ export default function AnalystDeskPage() {
             onToggleFires={() => setShowFires(v => !v)}
             showWind={showWind}
             onToggleWind={() => setShowWind(v => !v)}
+            showPopulation={showPopulation}
+            onTogglePopulation={() => setShowPopulation(v => !v)}
           />
         </div>
       </div>
@@ -231,6 +234,8 @@ export default function AnalystDeskPage() {
           onToggleSatellite={() => setShowSatellite(v => !v)}
           onToggleFires={() => setShowFires(v => !v)}
           onToggleWind={() => setShowWind(v => !v)}
+          showPopulation={showPopulation}
+          onTogglePopulation={() => setShowPopulation(v => !v)}
           mapRef={mapRef}
         />
         {isLoading && (

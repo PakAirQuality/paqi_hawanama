@@ -764,8 +764,9 @@ async def get_prediction_tile(
 
     # Download COG to temp file (GCS client uses Application Default Credentials)
     suffix = "_smoothed" if smoothed else ""
-    if model.startswith("urban/"):
-        # City-level 1 km predictions: model="urban/lahore"
+    if model == "population":
+        blob_path = "static/pak_pop_2025_100m.tif"
+    elif model.startswith("urban/"):
         city_key = model.split("/", 1)[1]
         blob_path = f"predictions/urban/date={pred_date}/{city_key}{suffix}.tif"
     elif model == "support_aware":
@@ -817,20 +818,42 @@ async def get_prediction_tile(
                 return tile_response(empty_tile_png())
 
             # Rescale data to 0-255 for colormap lookup
-            # Urban tiles use tighter range for more color contrast
-            vmin = 5.0 if model.startswith("urban/") else PM25_VMIN
-            vmax = 80.0 if model.startswith("urban/") else PM25_VMAX
-            rescaled = np.clip(
-                (data - vmin) / (vmax - vmin) * 255,
-                0, 255
-            ).astype(np.uint8)
+            if model == "population":
+                # Population: log scale, 0-500 people per 100m cell
+                pop_data = np.where(data > 0, np.log1p(data), 0)
+                vmin_pop, vmax_pop = 0, np.log1p(500)
+                rescaled = np.clip(
+                    (pop_data - vmin_pop) / (vmax_pop - vmin_pop) * 255,
+                    0, 255
+                ).astype(np.uint8)
+            else:
+                # Urban tiles use tighter range for more color contrast
+                vmin = 5.0 if model.startswith("urban/") else PM25_VMIN
+                vmax = 80.0 if model.startswith("urban/") else PM25_VMAX
+                rescaled = np.clip(
+                    (data - vmin) / (vmax - vmin) * 255,
+                    0, 255
+                ).astype(np.uint8)
 
             # Create RGBA image with proper transparency
             h, w = rescaled.shape
             rgba = np.zeros((h, w, 4), dtype=np.uint8)
 
             # Apply colormap to get RGB values
-            for idx, color in TURBO_CMAP.items():
+            cmap = TURBO_CMAP
+            if model == "population":
+                # Inferno colormap for population density (dark → yellow)
+                try:
+                    import matplotlib.cm as mplcm
+                    inferno = mplcm.get_cmap('inferno')
+                    cmap = {}
+                    for i in range(256):
+                        r, g, b, _ = inferno(i / 255.0)
+                        cmap[i] = (int(r * 255), int(g * 255), int(b * 255))
+                except ImportError:
+                    pass  # fallback to turbo
+
+            for idx, color in cmap.items():
                 color_mask = (rescaled == idx)
                 rgba[color_mask, 0] = color[0]  # R
                 rgba[color_mask, 1] = color[1]  # G

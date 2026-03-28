@@ -26,7 +26,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     m.href === normalizedPath || (m.href !== '/' && normalizedPath.startsWith(m.href))
   )?.id || 'aqi-dashboard'
 
-  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk'
+  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk' || currentModule === 'ml-ops'
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Header container — shrink-0 keeps it fixed height, no sticky needed */}

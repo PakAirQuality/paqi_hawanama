@@ -163,10 +163,13 @@ interface ForecastMapProps {
   showSatellite?: boolean
   showFires?: boolean
   showWind?: boolean
+  showPopulation?: boolean
   onToggleStations?: () => void
   onToggleSatellite?: () => void
   onToggleFires?: () => void
   onToggleWind?: () => void
+  showPopulation?: boolean
+  onTogglePopulation?: () => void
   mapRef?: React.MutableRefObject<{ resize: () => void } | null>
 }
 
@@ -190,6 +193,8 @@ export function ForecastMap({
   onToggleSatellite,
   onToggleFires,
   onToggleWind,
+  showPopulation: showPopulationProp,
+  onTogglePopulation,
   mapRef: externalMapRef,
 }: ForecastMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
@@ -210,6 +215,8 @@ export function ForecastMap({
   const showStations = showStationsProp ?? showStationsLocal
   const showSatellite = showSatelliteProp ?? showSatelliteLocal
   const showWind = showWindProp ?? showWindLocal
+  const [showPopulationLocal, setShowPopulationLocal] = useState(false)
+  const showPopulation = showPopulationProp ?? showPopulationLocal
   const [windImage, setWindImage] = useState<HTMLImageElement | null>(null)
   const [windMetadata, setWindMetadata] = useState<WindMetadata | null>(null)
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
@@ -406,6 +413,32 @@ export function ForecastMap({
           console.warn(`[Urban] Failed to add ${layerId}:`, e)
         }
       }
+
+      // ── Population density layer ──
+      map.current.addSource('population', {
+        type: 'raster',
+        tiles: [
+          `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?model=population`,
+        ],
+        tileSize: 256,
+        minzoom: 4,
+        maxzoom: 14,
+        bounds: [60.8, 23.6, 77.9, 37.1],
+      })
+      map.current.addLayer({
+        id: 'population-layer',
+        type: 'raster',
+        source: 'population',
+        layout: { visibility: 'none' },
+        paint: {
+          'raster-opacity': [
+            'interpolate', ['linear'], ['zoom'],
+            4, 0.5,
+            10, 0.6,
+            14, 0.5,
+          ],
+        },
+      })
 
       // ── PM2.5 click-to-query (interactive raster) ──
       const pm25Popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '200px' })
@@ -981,6 +1014,14 @@ export function ForecastMap({
     }
   }, [showSatellite])
 
+  // Toggle population layer visibility
+  useEffect(() => {
+    if (!map.current) return
+    if (map.current.getLayer('population-layer')) {
+      map.current.setLayoutProperty('population-layer', 'visibility', showPopulation ? 'visible' : 'none')
+    }
+  }, [showPopulation])
+
   // Fetch wind texture + metadata when wind is enabled (lazy)
   useEffect(() => {
     if (!showWind) return
@@ -1206,6 +1247,17 @@ export function ForecastMap({
           >
             <svg className={`w-3.5 h-3.5 ${showFires ? 'text-orange-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+            </svg>
+          </button>
+          <button
+            onPointerDown={(e) => { e.stopPropagation(); onTogglePopulation?.(); if (!onTogglePopulation) setShowPopulationLocal(v => !v) }}
+            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+              showPopulation ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
+            }`}
+            title={showPopulation ? 'Hide population' : 'Show population'}
+          >
+            <svg className={`w-3.5 h-3.5 ${showPopulation ? 'text-purple-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
             </svg>
           </button>
         </div>
