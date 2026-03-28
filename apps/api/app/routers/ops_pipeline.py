@@ -1062,6 +1062,56 @@ async def list_cog_dates(
 
 
 @router.get(
+    "/tiles/{pred_date}/urban/{city_key}.json",
+    summary="Get urban 1km grid data",
+    description="Returns the full 1km PM2.5 grid for a city as JSON."
+)
+async def get_urban_grid_json(
+    pred_date: str,
+    city_key: str,
+) -> Dict[str, Any]:
+    """Serve the urban prediction JSON for client-side hover lookup."""
+    import json as _json
+    import tempfile
+
+    valid_cities = {'lahore', 'isb_rwp', 'peshawar', 'karachi'}
+    if city_key not in valid_cities:
+        raise HTTPException(status_code=404, detail=f"Unknown city: {city_key}")
+
+    bucket_name = _get_outputs_bucket()
+    blob_path = f"predictions/urban/date={pred_date}/{city_key}.json"
+
+    try:
+        client = _gcs_client()
+        blob = client.bucket(bucket_name).blob(blob_path)
+        if not blob.exists(client):
+            raise HTTPException(status_code=404, detail=f"No urban data for {city_key} on {pred_date}")
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+        blob.download_to_filename(tmp.name)
+        with open(tmp.name) as f:
+            data = _json.load(f)
+        import os
+        os.unlink(tmp.name)
+
+        # Return slim version for hover: just grid info + values
+        return {
+            "city": city_key,
+            "date": pred_date,
+            "grid": data.get("grid", {}),
+            "stats": data.get("stats", {}),
+            "lats": data.get("lats", []),
+            "lons": data.get("lons", []),
+            "pm25": data.get("pm25", []),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to load urban grid for {city_key}/{pred_date}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get(
     "/tiles/{pred_date}/point",
     summary="Get PM2.5 value at point",
     description="Returns PM2.5 prediction value at a specific lat/lon coordinate."

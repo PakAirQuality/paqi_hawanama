@@ -214,12 +214,19 @@ export function ForecastMap({
   const [windMetadata, setWindMetadata] = useState<WindMetadata | null>(null)
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
 
-  // Hover readout for PM2.5 value under cursor
-  const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number; label?: string } | null>(null)
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const hoverAbortRef = useRef<AbortController | null>(null)
-  const hoverCacheRef = useRef<Map<string, number>>(new Map())
+  // Hover readout — local grid lookup (no network on mousemove)
+  const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number; label: string } | null>(null)
   const predDateRef = useRef<string>('')
+
+  // Urban grid cache: city_key → { grid, lookup function }
+  type UrbanGrid = {
+    resolution: number
+    bounds: { west: number; east: number; south: number; north: number }
+    shape: [number, number]  // [rows, cols]
+    pm25: (number | null)[]
+  }
+  const urbanGridsRef = useRef<Map<string, UrbanGrid>>(new Map())
+  const urbanGridLoadingRef = useRef<Set<string>>(new Set())
 
   // Ref to latest fire data for use in map load callback
   const firesRef = useRef(firesGeoJSON)
@@ -350,8 +357,8 @@ export function ForecastMap({
             'interpolate', ['linear'], ['zoom'],
             3, 0.8,
             7, 0.65,
-            8.5, 0.4,
-            9, 0,
+            9, 0.3,
+            12, 0.15,
           ],
         },
         slot: 'middle',
@@ -649,8 +656,7 @@ export function ForecastMap({
       mapLoaded.current = true
       renderMarkers()
 
-      // ── Hover readout: query PM2.5 under cursor (debounced) ──
-      // City bounds for urban model detection
+      // ── Hover readout: local grid lookup (zero network latency) ──
       const urbanCities = [
         { key: 'lahore', w: 74.0, s: 31.2, e: 74.6, n: 31.8 },
         { key: 'isb_rwp', w: 72.6, s: 33.3, e: 73.3, n: 33.9 },
@@ -658,49 +664,64 @@ export function ForecastMap({
         { key: 'karachi', w: 66.7, s: 24.7, e: 67.3, n: 25.3 },
       ]
 
+      // Fetch urban grid data for a city (once, then cached in ref)
+      const ensureUrbanGrid = (cityKey: string) => {
+        if (urbanGridsRef.current.has(cityKey) || urbanGridLoadingRef.current.has(cityKey)) return
+        urbanGridLoadingRef.current.add(cityKey)
+        fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/urban/${cityKey}.json`)
+          .then(r => r.ok ? r.json() : null)
+          .then(data => {
+            if (!data) return
+            urbanGridsRef.current.set(cityKey, {
+              resolution: data.grid?.resolution || 0.01,
+              bounds: data.grid?.bounds || {},
+              shape: data.grid?.shape || [0, 0],
+              pm25: data.pm25 || [],
+            })
+          })
+          .catch(() => {})
+          .finally(() => urbanGridLoadingRef.current.delete(cityKey))
+      }
+
+      // Local grid lookup: O(1) from preloaded data
+      const lookupUrbanPM25 = (cityKey: string, lat: number, lng: number): number | null => {
+        const grid = urbanGridsRef.current.get(cityKey)
+        if (!grid || !grid.pm25.length) return null
+        const { bounds, shape, resolution } = grid
+        const row = Math.floor((lat - bounds.south) / resolution)
+        const col = Math.floor((lng - bounds.west) / resolution)
+        if (row < 0 || row >= shape[0] || col < 0 || col >= shape[1]) return null
+        const idx = row * shape[1] + col
+        return grid.pm25[idx]
+      }
+
       map.current.on('mousemove', (e) => {
-        if (!map.current || map.current.getZoom() < 7) {
+        if (!map.current || map.current.getZoom() < 8) {
           setHoverPM25(null)
           return
         }
         const { lng, lat } = e.lngLat
         if (!isInsidePakistan(lng, lat)) { setHoverPM25(null); return }
 
-        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
-        if (hoverAbortRef.current) hoverAbortRef.current.abort()
-
-        // Snap to grid cell (0.01° for urban, 0.1° for national)
+        // Check if cursor is inside a city with urban coverage
         const city = urbanCities.find(c => lng >= c.w && lng <= c.e && lat >= c.s && lat <= c.n)
-        const grid = city ? 0.01 : 0.1
-        const snapLat = (Math.floor(lat / grid) * grid + grid / 2)
-        const snapLon = (Math.floor(lng / grid) * grid + grid / 2)
-        const modelParam = city ? `&model=urban/${city.key}` : ''
-        const label = city ? '1km Downscaler' : 'National Estimate'
-        const cacheKey = `${snapLat.toFixed(4)},${snapLon.toFixed(4)},${city?.key || 'nat'}`
 
-        // Check cache first (instant)
-        const cached = hoverCacheRef.current.get(cacheKey)
-        if (cached !== undefined) {
-          setHoverPM25({ pm25: cached, lat: snapLat, lon: snapLon, label })
-          return
+        if (city) {
+          // Ensure grid is loaded (fires once per city)
+          ensureUrbanGrid(city.key)
+
+          // Instant local lookup
+          const val = lookupUrbanPM25(city.key, lat, lng)
+          if (val != null) {
+            setHoverPM25({ pm25: val, lat, lon: lng, label: '1km Downscaler' })
+          } else {
+            // Grid still loading — show placeholder
+            setHoverPM25(null)
+          }
+        } else {
+          // Outside urban coverage — clear (national layer visible anyway)
+          setHoverPM25(null)
         }
-
-        hoverTimerRef.current = setTimeout(async () => {
-          const ac = new AbortController()
-          hoverAbortRef.current = ac
-          try {
-            const res = await fetch(
-              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/point?lat=${snapLat.toFixed(4)}&lon=${snapLon.toFixed(4)}&smoothed=true${modelParam}`,
-              { signal: ac.signal, headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
-            )
-            if (!res.ok || ac.signal.aborted) return
-            const data = await res.json()
-            if (data.pm25 != null && !ac.signal.aborted) {
-              hoverCacheRef.current.set(cacheKey, data.pm25)
-              setHoverPM25({ pm25: data.pm25, lat: snapLat, lon: snapLon, label })
-            }
-          } catch { /* aborted or failed */ }
-        }, 50)
       })
 
       map.current.on('mouseout', () => setHoverPM25(null))
