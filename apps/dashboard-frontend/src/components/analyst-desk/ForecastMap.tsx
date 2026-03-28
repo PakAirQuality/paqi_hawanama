@@ -567,10 +567,19 @@ export function ForecastMap({
 
       fireSourceAdded.current = true
 
-      // Sync fire data if it arrived before map loaded
+      // Sync fire data if it arrived before map loaded (Pakistan only)
       if (firesRef.current) {
         const src = map.current.getSource('fires') as mapboxgl.GeoJSONSource | undefined
-        if (src) src.setData(firesRef.current as GeoJSON.FeatureCollection)
+        if (src) {
+          const filtered = {
+            ...firesRef.current,
+            features: firesRef.current.features.filter((f: any) => {
+              const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
+              return isInsidePakistan(lng, lat)
+            }),
+          }
+          src.setData(filtered as GeoJSON.FeatureCollection)
+        }
       }
 
       // ── District hover tracking ──
@@ -840,7 +849,15 @@ export function ForecastMap({
     const src = map.current.getSource('fires') as mapboxgl.GeoJSONSource | undefined
     if (!src) return
     if (firesGeoJSON) {
-      src.setData(firesGeoJSON as GeoJSON.FeatureCollection)
+      // Filter to Pakistan only
+      const filtered = {
+        ...firesGeoJSON,
+        features: firesGeoJSON.features.filter((f: any) => {
+          const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
+          return isInsidePakistan(lng, lat)
+        }),
+      }
+      src.setData(filtered as GeoJSON.FeatureCollection)
     } else {
       src.setData({ type: 'FeatureCollection', features: [] })
     }
