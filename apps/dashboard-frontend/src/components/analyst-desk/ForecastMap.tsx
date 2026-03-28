@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import type { ForecastEntry, CurrentStation, CopilotAction, StationMention } from './types'
@@ -213,6 +213,12 @@ export function ForecastMap({
   const [windMetadata, setWindMetadata] = useState<WindMetadata | null>(null)
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
 
+  // Hover readout for PM2.5 value under cursor
+  const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number } | null>(null)
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const hoverAbortRef = useRef<AbortController | null>(null)
+  const predDateRef = useRef<string>('')
+
   // Ref to latest fire data for use in map load callback
   const firesRef = useRef(firesGeoJSON)
   firesRef.current = firesGeoJSON
@@ -322,6 +328,7 @@ export function ForecastMap({
       } catch {
         predDate = new Date().toISOString().slice(0, 10)
       }
+      predDateRef.current = predDate
 
       map.current.addSource('satpm25', {
         type: 'raster',
@@ -636,6 +643,37 @@ export function ForecastMap({
 
       mapLoaded.current = true
       renderMarkers()
+
+      // ── Hover readout: query PM2.5 under cursor (debounced) ──
+      map.current.on('mousemove', (e) => {
+        if (!map.current || map.current.getZoom() < 9) {
+          setHoverPM25(null)
+          return
+        }
+        const { lng, lat } = e.lngLat
+        if (!isInsidePakistan(lng, lat)) { setHoverPM25(null); return }
+
+        if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
+        if (hoverAbortRef.current) hoverAbortRef.current.abort()
+
+        hoverTimerRef.current = setTimeout(async () => {
+          const ac = new AbortController()
+          hoverAbortRef.current = ac
+          try {
+            const res = await fetch(
+              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`,
+              { signal: ac.signal, headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
+            )
+            if (!res.ok || ac.signal.aborted) return
+            const data = await res.json()
+            if (data.pm25 != null && !ac.signal.aborted) {
+              setHoverPM25({ pm25: data.pm25, lat, lon: lng })
+            }
+          } catch { /* aborted or failed */ }
+        }, 150)
+      })
+
+      map.current.on('mouseout', () => setHoverPM25(null))
 
       // Expose resize to parent for panel animation
       if (externalMapRef) {
@@ -1024,6 +1062,29 @@ export function ForecastMap({
 
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
+
+      {/* PM2.5 hover readout — upper left */}
+      {hoverPM25 && (
+        <div className="absolute top-3 left-3 z-10 pointer-events-none">
+          <div className="flex items-center gap-3 px-3 py-2 rounded-xl bg-slate-800/90 backdrop-blur-sm shadow-lg ring-1 ring-white/10">
+            <div className="text-center">
+              <div className={`text-2xl font-bold tabular-nums ${
+                hoverPM25.pm25 <= 35 ? 'text-emerald-400' :
+                hoverPM25.pm25 <= 75 ? 'text-amber-400' :
+                hoverPM25.pm25 <= 150 ? 'text-orange-400' :
+                'text-red-400'
+              }`}>
+                {Math.round(hoverPM25.pm25)}
+              </div>
+              <div className="text-[9px] text-slate-400 font-medium">µg/m³</div>
+            </div>
+            <div className="text-[10px] text-slate-400 leading-tight">
+              <div className="font-medium text-slate-300">PM2.5 Estimate</div>
+              <div>{hoverPM25.lat.toFixed(3)}°N, {hoverPM25.lon.toFixed(3)}°E</div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Layer indicators + fire badge — bottom right */}
       <div className="absolute right-3 bottom-8 z-10 flex flex-col items-end gap-1.5">
