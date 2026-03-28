@@ -609,6 +609,8 @@ export function ForecastMap({
       // ── District click → zoom to bounds + mention in chat ──
       map.current.on('click', 'districts-fill', (e) => {
         if (!map.current || !e.features?.[0]) return
+        // Don't zoom out when already zoomed into a city
+        if (map.current.getZoom() >= 9) return
         const districtName = (e.features[0].properties?.shapeName || e.features[0].id || '') as string
         if (districtName) {
           dataRef.current.onDistrictClick?.(districtName)
