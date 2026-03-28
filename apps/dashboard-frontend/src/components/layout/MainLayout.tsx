@@ -106,7 +106,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content - no padding for dashboard (full-bleed map) */}
       <main className={cn(
         'flex-1',
-        isFullBleed ? '-mt-px' : 'p-4 lg:p-6'
+        isFullBleed ? '' : 'p-4 lg:p-6'
       )}>
         {children}
       </main>
