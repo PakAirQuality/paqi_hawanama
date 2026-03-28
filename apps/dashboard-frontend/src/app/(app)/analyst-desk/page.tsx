@@ -113,7 +113,6 @@ export default function AnalystDeskPage() {
 
   const handleDistrictClick = useCallback((cityName: string) => {
     setCityMention(cityName)
-    setRailTab('chat')
   }, [])
 
   const handleCopilotAction = useCallback((action: CopilotAction) => {
