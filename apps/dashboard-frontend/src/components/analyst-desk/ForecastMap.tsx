@@ -863,7 +863,7 @@ export function ForecastMap({
 
       {/* Fire count badge (compact, shown even without layer panel) */}
       {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
-        <div className="absolute right-3 top-[70px] z-10">
+        <div className="absolute right-3 top-[120px] z-10">
           <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 backdrop-blur-sm shadow-sm text-[10px] font-medium text-orange-600">
             <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
