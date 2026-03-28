@@ -153,7 +153,7 @@ export default function AnalystDeskPage() {
       })
   }, [forecast, currentStations, selectedHorizon])
 
-  const hasMapData = forecast || currentStations
+  const isLoading = !forecast && !currentStations
 
   return (
     <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -210,36 +210,36 @@ export default function AnalystDeskPage() {
         </div>
       </div>
 
-      {/* Map */}
+      {/* Map — always rendered, data loads on top */}
       <div className="flex-1 relative">
-        {hasMapData ? (
-          <ForecastMap
-            forecasts={forecast?.forecasts ?? []}
-            currentStations={currentStations?.stations ?? []}
-            selectedHorizon={selectedHorizon}
-            onHorizonChange={setSelectedHorizon}
-            onStationClick={handleStationClick}
-            onDistrictClick={handleDistrictClick}
-            pendingAction={pendingAction}
-            onActionProcessed={handleActionProcessed}
-            networkFilter={networkFilter}
-            onClearNetworkFilter={() => setNetworkFilter(null)}
-            firesGeoJSON={firesGeoJSON ?? null}
-            showStations={showStations}
-            showSatellite={showSatellite}
-            showFires={showFires}
-            showWind={showWind}
-            onToggleStations={() => setShowStations(v => !v)}
-            onToggleSatellite={() => setShowSatellite(v => !v)}
-            onToggleFires={() => setShowFires(v => !v)}
-            onToggleWind={() => setShowWind(v => !v)}
-            mapRef={mapRef}
-          />
-        ) : forecastLoading ? (
-          <div className="w-full h-full bg-slate-100 animate-pulse" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center bg-slate-50 text-slate-400 text-sm">
-            No forecast data available.
+        <ForecastMap
+          forecasts={forecast?.forecasts ?? []}
+          currentStations={currentStations?.stations ?? []}
+          selectedHorizon={selectedHorizon}
+          onHorizonChange={setSelectedHorizon}
+          onStationClick={handleStationClick}
+          onDistrictClick={handleDistrictClick}
+          pendingAction={pendingAction}
+          onActionProcessed={handleActionProcessed}
+          networkFilter={networkFilter}
+          onClearNetworkFilter={() => setNetworkFilter(null)}
+          firesGeoJSON={firesGeoJSON ?? null}
+          showStations={showStations}
+          showSatellite={showSatellite}
+          showFires={showFires}
+          showWind={showWind}
+          onToggleStations={() => setShowStations(v => !v)}
+          onToggleSatellite={() => setShowSatellite(v => !v)}
+          onToggleFires={() => setShowFires(v => !v)}
+          onToggleWind={() => setShowWind(v => !v)}
+          mapRef={mapRef}
+        />
+        {isLoading && (
+          <div className="absolute inset-0 z-20 flex items-center justify-center bg-white/60 backdrop-blur-[2px]">
+            <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-slate-800/90 text-white text-sm font-medium shadow-lg">
+              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              Loading station data...
+            </div>
           </div>
         )}
       </div>
