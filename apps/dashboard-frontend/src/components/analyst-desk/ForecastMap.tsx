@@ -894,48 +894,48 @@ export function ForecastMap({
         {/* Layer toggle buttons */}
         <div className="flex items-center gap-1">
           <button
-            onClick={onToggleStations}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-colors cursor-pointer ${
-              showStations ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5'
+            onPointerDown={(e) => { e.stopPropagation(); onToggleStations?.(); if (!onToggleStations) setShowStationsLocal(v => !v) }}
+            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+              showStations ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
             }`}
             title={showStations ? 'Hide stations' : 'Show stations'}
           >
-            <svg className={`w-3.5 h-3.5 transition-colors ${showStations ? 'text-amber-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-3.5 h-3.5 ${showStations ? 'text-amber-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
             </svg>
           </button>
           <button
-            onClick={onToggleSatellite}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-colors cursor-pointer ${
-              showSatellite ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5'
+            onPointerDown={(e) => { e.stopPropagation(); onToggleSatellite?.(); if (!onToggleSatellite) setShowSatelliteLocal(v => !v) }}
+            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+              showSatellite ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
             }`}
-            title={showSatellite ? 'Hide PM2.5 estimation' : 'Show PM2.5 estimation'}
+            title={showSatellite ? 'Hide PM2.5' : 'Show PM2.5'}
           >
-            <svg className={`w-3.5 h-3.5 transition-colors ${showSatellite ? 'text-indigo-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-3.5 h-3.5 ${showSatellite ? 'text-indigo-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
           <button
-            onClick={onToggleWind}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-colors cursor-pointer ${
-              showWind ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5'
+            onPointerDown={(e) => { e.stopPropagation(); onToggleWind?.(); if (!onToggleWind) setShowWindLocal(v => !v) }}
+            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+              showWind ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
             }`}
             title={showWind ? 'Hide wind' : 'Show wind'}
           >
-            <svg className={`w-3.5 h-3.5 transition-colors ${showWind ? 'text-sky-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-3.5 h-3.5 ${showWind ? 'text-sky-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2" />
             </svg>
           </button>
           <button
-            onClick={onToggleFires}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-colors cursor-pointer ${
-              showFires ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5'
+            onPointerDown={(e) => { e.stopPropagation(); onToggleFires?.(); if (!onToggleFires) setShowFiresLocal(v => !v) }}
+            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+              showFires ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
             }`}
             title={showFires ? 'Hide fires' : 'Show fires'}
           >
-            <svg className={`w-3.5 h-3.5 transition-colors ${showFires ? 'text-orange-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-3.5 h-3.5 ${showFires ? 'text-orange-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
             </svg>
           </button>
