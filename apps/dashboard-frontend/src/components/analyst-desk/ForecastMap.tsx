@@ -116,14 +116,25 @@ const AQI_CATEGORY_LABELS: Record<string, string> = {
 function createMarkerEl(value: number | null | undefined, colorClass: string): HTMLDivElement {
   const container = document.createElement('div')
   container.className = 'aqi-marker-container point'
-  container.style.width = '28px'
-  container.style.height = '28px'
+  container.style.cssText = 'width:28px;display:flex;flex-direction:column;align-items:center;'
 
   const marker = document.createElement('div')
   marker.className = `aqi-marker ${colorClass}`
   marker.textContent = value != null ? `${Math.round(value)}` : '-'
 
+  // Vertical stem (visible at closer zoom via CSS)
+  const stem = document.createElement('div')
+  stem.className = 'aqi-stem'
+  stem.style.cssText = 'width:1.5px;height:0px;background:rgba(0,0,0,0.25);transition:height 0.3s;'
+
+  // Ground dot
+  const dot = document.createElement('div')
+  dot.className = 'aqi-ground-dot'
+  dot.style.cssText = 'width:4px;height:2px;border-radius:50%;background:rgba(0,0,0,0.15);transition:opacity 0.3s;opacity:0;'
+
   container.appendChild(marker)
+  container.appendChild(stem)
+  container.appendChild(dot)
   return container
 }
 
@@ -601,9 +612,16 @@ export function ForecastMap({
     if (!map.current) return
     const zoom = map.current.getZoom()
     const visible = zoom >= MARKER_MIN_ZOOM
+    const close = zoom >= 10  // stems appear at city zoom
     for (const marker of markersRef.current) {
       if (visible) {
         marker.addTo(map.current!)
+        // Animate stems at close zoom
+        const el = marker.getElement()
+        const stem = el.querySelector('.aqi-stem') as HTMLElement
+        const dot = el.querySelector('.aqi-ground-dot') as HTMLElement
+        if (stem) stem.style.height = close ? '18px' : '0px'
+        if (dot) dot.style.opacity = close ? '1' : '0'
       } else {
         marker.remove()
       }
@@ -1043,6 +1061,18 @@ export function ForecastMap({
         }
         .mapboxgl-ctrl-attrib {
           display: none !important;
+        }
+        /* 3D marker floating effect */
+        .aqi-marker-container {
+          filter: drop-shadow(0 3px 4px rgba(0,0,0,0.2));
+          transition: filter 0.3s;
+        }
+        .aqi-marker-container:hover {
+          filter: drop-shadow(0 6px 8px rgba(0,0,0,0.3));
+          transform: translateY(-2px);
+        }
+        .aqi-marker-container:hover .aqi-stem {
+          height: 22px !important;
         }
       `}</style>
     </div>
