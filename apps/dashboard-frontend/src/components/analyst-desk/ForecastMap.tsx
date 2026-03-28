@@ -147,6 +147,12 @@ interface ForecastMapProps {
   networkFilter?: string | null
   onClearNetworkFilter?: () => void
   firesGeoJSON?: FiresGeoJSON | null
+  // Layer toggles (lifted to parent for icon rail control)
+  showStations?: boolean
+  showSatellite?: boolean
+  showFires?: boolean
+  showWind?: boolean
+  mapRef?: React.MutableRefObject<{ resize: () => void } | null>
 }
 
 export function ForecastMap({
@@ -161,6 +167,11 @@ export function ForecastMap({
   networkFilter,
   onClearNetworkFilter,
   firesGeoJSON,
+  showStations: showStationsProp,
+  showSatellite: showSatelliteProp,
+  showFires: showFiresProp,
+  showWind: showWindProp,
+  mapRef: externalMapRef,
 }: ForecastMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
@@ -169,10 +180,16 @@ export function ForecastMap({
   const providerMapRef = useRef<ProviderMap | null>(null)
   const fireSourceAdded = useRef(false)
 
-  const [showFires, setShowFires] = useState(true)
-  const [showStations, setShowStations] = useState(true)
-  const [showSatellite, setShowSatellite] = useState(true)
-  const [showWind, setShowWind] = useState(true)
+  const [showFiresLocal, setShowFiresLocal] = useState(true)
+  const [showStationsLocal, setShowStationsLocal] = useState(true)
+  const [showSatelliteLocal, setShowSatelliteLocal] = useState(true)
+  const [showWindLocal, setShowWindLocal] = useState(true)
+
+  // Use prop if provided, else fall back to local state
+  const showFires = showFiresProp ?? showFiresLocal
+  const showStations = showStationsProp ?? showStationsLocal
+  const showSatellite = showSatelliteProp ?? showSatelliteLocal
+  const showWind = showWindProp ?? showWindLocal
   const [windImage, setWindImage] = useState<HTMLImageElement | null>(null)
   const [windMetadata, setWindMetadata] = useState<WindMetadata | null>(null)
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
@@ -247,30 +264,36 @@ export function ForecastMap({
       ]
 
       for (const city of cities) {
-        map.current.addSource(`urban-${city.key}`, {
-          type: 'raster',
-          tiles: [
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true&model=urban/${city.key}`,
-          ],
-          tileSize: 256,
-          minzoom: 9,
-          maxzoom: 15,
-          bounds: city.bounds,
-        })
-        map.current.addLayer({
-          id: `urban-${city.key}-layer`,
-          type: 'raster',
-          source: `urban-${city.key}`,
-          minzoom: 9,
-          paint: {
-            'raster-opacity': [
-              'interpolate', ['linear'], ['zoom'],
-              9, 0,
-              10, 0.85,
+        const srcId = `urban-${city.key}`
+        const layerId = `urban-${city.key}-layer`
+        try {
+          map.current!.addSource(srcId, {
+            type: 'raster',
+            tiles: [
+              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true&model=urban/${city.key}`,
             ],
-          },
-          slot: 'middle',
-        })
+            tileSize: 256,
+            minzoom: 9,
+            maxzoom: 15,
+            bounds: city.bounds,
+          })
+          map.current!.addLayer({
+            id: layerId,
+            type: 'raster',
+            source: srcId,
+            minzoom: 9,
+            paint: {
+              'raster-opacity': [
+                'interpolate', ['linear'], ['zoom'],
+                9, 0,
+                10, 0.9,
+              ],
+            },
+          })
+          console.log(`[Urban] Added ${layerId} for date=${predDate}`)
+        } catch (e) {
+          console.warn(`[Urban] Failed to add ${layerId}:`, e)
+        }
       }
 
       // ── District boundaries (ADM2) — clickable ──
@@ -461,6 +484,11 @@ export function ForecastMap({
 
       mapLoaded.current = true
       renderMarkers()
+
+      // Expose resize to parent for panel animation
+      if (externalMapRef) {
+        externalMapRef.current = { resize: () => map.current?.resize() }
+      }
     })
 
     return () => {
@@ -689,6 +717,12 @@ export function ForecastMap({
     if (map.current.getLayer('satpm25-layer')) {
       map.current.setLayoutProperty('satpm25-layer', 'visibility', vis)
     }
+    for (const c of ['lahore', 'isb_rwp', 'peshawar', 'karachi']) {
+      const id = `urban-${c}-layer`
+      if (map.current.getLayer(id)) {
+        map.current.setLayoutProperty(id, 'visibility', vis)
+      }
+    }
   }, [showSatellite])
 
   // Fetch wind texture + metadata when wind is enabled (lazy)
@@ -827,68 +861,17 @@ export function ForecastMap({
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* ── Layer toggle buttons (upper right, below zoom controls) ── */}
-      <div className="absolute right-3 top-[70px] z-10 flex flex-col gap-1.5">
-        {/* Stations */}
-        <button
-          onClick={() => setShowStations(v => !v)}
-          className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
-            showStations ? 'bg-white/95 text-slate-700' : 'bg-white/60 text-slate-400'
-          }`}
-          title={showStations ? 'Hide stations' : 'Show stations'}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
-          </svg>
-        </button>
-
-        {/* Satellite */}
-        <button
-          onClick={() => setShowSatellite(v => !v)}
-          className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
-            showSatellite ? 'bg-white/95 text-slate-700' : 'bg-white/60 text-slate-400'
-          }`}
-          title={showSatellite ? 'Hide PM2.5 estimation' : 'Show PM2.5 estimation'}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5" />
-            <circle cx="12" cy="12" r="3" />
-          </svg>
-        </button>
-
-        {/* Wind */}
-        <button
-          onClick={() => setShowWind(v => !v)}
-          className={`w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
-            showWind ? 'bg-white/95 text-sky-600' : 'bg-white/60 text-slate-400'
-          }`}
-          title={showWind ? 'Hide wind' : 'Show wind'}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2" />
-          </svg>
-        </button>
-
-        {/* Fires */}
-        <button
-          onClick={() => setShowFires(v => !v)}
-          className={`relative w-8 h-8 rounded-lg flex items-center justify-center shadow-sm backdrop-blur-sm transition-colors ${
-            showFires ? 'bg-white/95 text-orange-600' : 'bg-white/60 text-slate-400'
-          }`}
-          title={showFires ? 'Hide fires' : 'Show fires'}
-        >
-          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
-            <path strokeLinecap="round" strokeLinejoin="round" d="M12 18a3.75 3.75 0 00.495-7.468 5.99 5.99 0 00-1.925 3.547 5.975 5.975 0 01-2.133-1.001A3.75 3.75 0 0012 18z" />
-          </svg>
-          {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
-            <span className="absolute -top-1 -right-1 min-w-[16px] h-4 flex items-center justify-center text-[9px] font-bold bg-orange-500 text-white rounded-full px-1">
-              {firesGeoJSON.features.length}
-            </span>
-          )}
-        </button>
-      </div>
+      {/* Fire count badge (compact, shown even without layer panel) */}
+      {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
+        <div className="absolute right-3 top-[70px] z-10">
+          <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 backdrop-blur-sm shadow-sm text-[10px] font-medium text-orange-600">
+            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+            </svg>
+            {firesGeoJSON.features.length}
+          </span>
+        </div>
+      )}
 
       {/* Popup styling */}
       <style jsx global>{`

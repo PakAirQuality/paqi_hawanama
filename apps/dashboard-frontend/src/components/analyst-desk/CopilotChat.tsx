@@ -32,10 +32,14 @@ interface CopilotChatProps {
   cityMention?: string | null
   onMentionConsumed?: () => void
   stations?: TrayStation[]
+  onStreamingChange?: (streaming: boolean) => void
+  activeTab?: 'chat' | 'analytics'
 }
 
-export function CopilotChat({ selectedDate, onAction, stationMention, cityMention, onMentionConsumed, stations }: CopilotChatProps) {
-  const [activeTab, setActiveTab] = useState<'chat' | 'analytics'>('chat')
+export function CopilotChat({ selectedDate, onAction, stationMention, cityMention, onMentionConsumed, stations, onStreamingChange, activeTab: externalTab }: CopilotChatProps) {
+  const [internalTab, setInternalTab] = useState<'chat' | 'analytics'>('chat')
+  const activeTab = externalTab ?? internalTab
+  const setActiveTab = setInternalTab
   const [messages, setMessages] = useState<ChatMessageType[]>(() => {
     // Restore cached briefing from today if available
     if (typeof window !== 'undefined') {
@@ -126,6 +130,7 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     assistantId: string,
   ) => {
     setIsStreaming(true)
+    onStreamingChange?.(true)
 
     try {
       const res = await fetch(`${DESK_PREFIX}${endpoint}`, {
@@ -233,8 +238,9 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
       )
     } finally {
       setIsStreaming(false)
+      onStreamingChange?.(false)
     }
-  }, [extractActions, onAction])
+  }, [extractActions, onAction, onStreamingChange])
 
   // Cache briefing messages whenever they change (after streaming ends)
   useEffect(() => {
@@ -317,41 +323,43 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Tab header */}
-      <div className="flex border-b border-slate-100">
-        <button
-          onClick={() => setActiveTab('chat')}
-          className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === 'chat'
-              ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
-              : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-          Chat
-        </button>
-        <button
-          onClick={() => setActiveTab('analytics')}
-          className={`relative flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-            activeTab === 'analytics'
-              ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
-              : trendStation && activeTab !== 'analytics'
-                ? 'text-blue-600 border-b-2 border-blue-400 animate-pulse'
+      {/* Tab header — only shown when not externally controlled */}
+      {!externalTab && (
+        <div className="flex border-b border-slate-100">
+          <button
+            onClick={() => setActiveTab('chat')}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+              activeTab === 'chat'
+                ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
                 : 'text-slate-400 hover:text-slate-600'
-          }`}
-        >
-          <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-            <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" />
-          </svg>
-          Analytics
-          {trendStation && activeTab !== 'analytics' && (
-            <span className="absolute top-1.5 right-4 flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
-            </span>
-          )}
-        </button>
-      </div>
+            }`}
+          >
+            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
+            Chat
+          </button>
+          <button
+            onClick={() => setActiveTab('analytics')}
+            className={`relative flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
+              activeTab === 'analytics'
+                ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
+                : trendStation && activeTab !== 'analytics'
+                  ? 'text-blue-600 border-b-2 border-blue-400 animate-pulse'
+                  : 'text-slate-400 hover:text-slate-600'
+            }`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M3 13h4v8H3zM10 9h4v12h-4zM17 5h4v16h-4z" />
+            </svg>
+            Analytics
+            {trendStation && activeTab !== 'analytics' && (
+              <span className="absolute top-1.5 right-4 flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500" />
+              </span>
+            )}
+          </button>
+        </div>
+      )}
 
       {/* Content area */}
       {activeTab === 'chat' ? (
