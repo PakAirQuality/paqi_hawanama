@@ -353,7 +353,14 @@ export function ForecastMap({
         id: 'satpm25-layer',
         type: 'raster',
         source: 'satpm25',
-        paint: { 'raster-opacity': 0.75 },
+        paint: {
+          'raster-opacity': [
+            'interpolate', ['linear'], ['zoom'],
+            3, 0.6,
+            7, 0.5,
+            10, 0.35,
+          ],
+        },
         slot: 'middle',
       })
 
@@ -388,7 +395,9 @@ export function ForecastMap({
               'raster-opacity': [
                 'interpolate', ['linear'], ['zoom'],
                 9, 0,
-                10, 0.9,
+                10, 0.45,
+                13, 0.35,
+                16, 0.25,
               ],
             },
           })
@@ -397,6 +406,46 @@ export function ForecastMap({
           console.warn(`[Urban] Failed to add ${layerId}:`, e)
         }
       }
+
+      // ── PM2.5 click-to-query (interactive raster) ──
+      const pm25Popup = new mapboxgl.Popup({ closeButton: true, closeOnClick: true, maxWidth: '200px' })
+      map.current.on('click', async (e) => {
+        if (!map.current) return
+        const z = map.current.getZoom()
+        if (z < 5) return  // too zoomed out
+        // Skip if clicked on a station marker or district
+        const features = map.current.queryRenderedFeatures(e.point, { layers: ['districts-fill'] })
+        if (features.length > 0) return
+
+        const { lng, lat } = e.lngLat
+        if (!isInsidePakistan(lng, lat)) return
+
+        try {
+          const res = await fetch(
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`,
+            { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
+          )
+          if (!res.ok) return
+          const data = await res.json()
+          const pm25 = data.pm25
+          if (pm25 == null) return
+
+          const band = pm25 <= 35 ? 'Good' : pm25 <= 75 ? 'Moderate' : pm25 <= 150 ? 'Unhealthy' : pm25 <= 250 ? 'Very Unhealthy' : 'Severe'
+          const color = pm25 <= 35 ? '#6ecc39' : pm25 <= 75 ? '#f0c20c' : pm25 <= 150 ? '#f18017' : pm25 <= 250 ? '#a070b5' : '#991b1b'
+          const textColor = pm25 <= 75 ? '#333' : '#fff'
+
+          pm25Popup.setLngLat(e.lngLat).setHTML(`
+            <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5;text-align:center">
+              <div style="font-size:10px;color:#94a3b8;margin-bottom:4px">${lat.toFixed(3)}°N, ${lng.toFixed(3)}°E</div>
+              <div style="background:${color};color:${textColor};border-radius:8px;padding:8px 14px">
+                <div style="font-size:20px;font-weight:700">${Math.round(pm25)}</div>
+                <div style="font-size:10px;opacity:0.85">µg/m³ PM2.5</div>
+              </div>
+              <div style="font-size:10px;color:#64748b;margin-top:4px">${band}</div>
+            </div>
+          `).addTo(map.current)
+        } catch { /* ignore query errors */ }
+      })
 
       // ── District boundaries (ADM2) — clickable ──
       map.current.addSource('pakistan-districts', {
