@@ -20,20 +20,17 @@ function cn(...classes: (string | false | undefined)[]) {
 export function MainLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
 
-  const getCurrentModuleFromPath = () => {
-    const module = modules.find(m =>
-      m.href === pathname || (m.href !== '/' && pathname.startsWith(m.href))
-    )
-    return module?.id || 'aqi-dashboard'
-  }
+  const normalizedPath = pathname !== '/' ? pathname.replace(/\/+$/, '') : pathname
 
-  const currentModule = getCurrentModuleFromPath()
-  const isDashboard = pathname === '/'
-  const isFullBleed = isDashboard || pathname === '/analyst-desk'
+  const currentModule = modules.find(m =>
+    m.href === normalizedPath || (m.href !== '/' && normalizedPath.startsWith(m.href))
+  )?.id || 'aqi-dashboard'
+
+  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk'
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Header container — shrink-0 keeps it fixed height, no sticky needed */}
-      <div className="shrink-0 z-50 border-0">
+      <div className="shrink-0 z-50">
         {/* Row 1: Top bar */}
         <header className="bg-white border-b border-slate-200">
           <div className="px-4 lg:px-8">
@@ -74,7 +71,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Row 2: Navigation strip */}
-        <nav className="bg-gradient-to-r from-slate-800 to-slate-900 border-0 pb-px">
+        <nav className="bg-gradient-to-r from-slate-800 to-slate-900">
           <div className="px-4 lg:px-8">
             <div className="flex items-center h-11 -mb-px overflow-x-auto scrollbar-hide">
               {modules.map((module) => {
@@ -106,7 +103,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       {/* Main Content - no padding for dashboard (full-bleed map) */}
       <main className={cn(
         'flex-1 min-h-0 flex flex-col',
-        isFullBleed ? '[border:none]' : 'p-4 lg:p-6 overflow-y-auto bg-slate-50'
+        isFullBleed ? '' : 'p-4 lg:p-6 overflow-y-auto bg-slate-50'
       )}>
         {children}
       </main>
