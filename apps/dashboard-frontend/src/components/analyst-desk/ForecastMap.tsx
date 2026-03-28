@@ -220,7 +220,7 @@ export function ForecastMap({
       minZoom: 2,
     })
 
-    map.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right')
+    // Zoom controls removed — scroll/pinch to zoom
 
     map.current.on('load', async () => {
       if (!map.current) return
@@ -803,7 +803,7 @@ export function ForecastMap({
   return (
     <div className="relative w-full h-full">
       {/* ── Unified top bar: network filter + timeline + analytics toggle ── */}
-      <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
+      <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
         {/* Network filter badge (conditional) */}
         {networkFilter && (
           <div className="flex items-center gap-1.5 bg-slate-800/85 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-lg ring-1 ring-white/10 text-[11px] font-medium text-slate-200">
