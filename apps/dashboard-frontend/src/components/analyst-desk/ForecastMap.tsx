@@ -222,7 +222,10 @@ export function ForecastMap({
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
 
   // Hover readout — local grid lookup (no network on mousemove)
-  const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number; label: string } | null>(null)
+  const [hoverPM25, setHoverPM25] = useState<{
+    pm25: number; lat: number; lon: number; label: string;
+    population?: number; popWeightedPM25?: number
+  } | null>(null)
   const predDateRef = useRef<string>('')
 
   // Urban grid cache: city_key → { grid, lookup function }
@@ -231,6 +234,8 @@ export function ForecastMap({
     bounds: { west: number; east: number; south: number; north: number }
     shape: [number, number]  // [rows, cols]
     pm25: (number | null)[]
+    population: number[]
+    stats: { pop_weighted_pm25?: number; population_total?: number }
   }
   const urbanGridsRef = useRef<Map<string, UrbanGrid>>(new Map())
   const urbanGridLoadingRef = useRef<Set<string>>(new Set())
@@ -710,6 +715,8 @@ export function ForecastMap({
               bounds: data.grid?.bounds || {},
               shape: data.grid?.shape || [0, 0],
               pm25: data.pm25 || [],
+              population: data.population || [],
+              stats: data.stats || {},
             })
           })
           .catch(() => {})
@@ -717,7 +724,9 @@ export function ForecastMap({
       }
 
       // Local grid lookup: O(1) from preloaded data
-      const lookupUrbanPM25 = (cityKey: string, lat: number, lng: number): number | null => {
+      const lookupUrbanCell = (cityKey: string, lat: number, lng: number): {
+        pm25: number | null; population: number; popWeightedPM25: number
+      } | null => {
         const grid = urbanGridsRef.current.get(cityKey)
         if (!grid || !grid.pm25.length) return null
         const { bounds, shape, resolution } = grid
@@ -725,7 +734,11 @@ export function ForecastMap({
         const col = Math.floor((lng - bounds.west) / resolution)
         if (row < 0 || row >= shape[0] || col < 0 || col >= shape[1]) return null
         const idx = row * shape[1] + col
-        return grid.pm25[idx]
+        return {
+          pm25: grid.pm25[idx],
+          population: grid.population[idx] || 0,
+          popWeightedPM25: grid.stats?.pop_weighted_pm25 || 0,
+        }
       }
 
       map.current.on('mousemove', (e) => {
@@ -744,11 +757,13 @@ export function ForecastMap({
           ensureUrbanGrid(city.key)
 
           // Instant local lookup
-          const val = lookupUrbanPM25(city.key, lat, lng)
-          if (val != null) {
-            setHoverPM25({ pm25: val, lat, lon: lng, label: '1km Downscaler' })
+          const cell = lookupUrbanCell(city.key, lat, lng)
+          if (cell?.pm25 != null) {
+            setHoverPM25({
+              pm25: cell.pm25, lat, lon: lng, label: '1km Downscaler',
+              population: cell.population, popWeightedPM25: cell.popWeightedPM25,
+            })
           } else {
-            // Grid still loading — show placeholder
             setHoverPM25(null)
           }
         } else {
@@ -1179,16 +1194,28 @@ export function ForecastMap({
                   </div>
                   <div className="text-[9px] text-slate-400 font-medium mt-0.5">µg/m³</div>
                 </div>
-                <div className="text-[10px] leading-tight">
+                <div className="text-[10px] leading-tight border-l border-white/10 pl-3">
                   <div className="font-semibold text-white">{hoverPM25.label || 'PM2.5'}</div>
-                  <div className="text-slate-400">{hoverPM25.lat.toFixed(3)}°N, {hoverPM25.lon.toFixed(3)}°E</div>
-                  <div className="text-slate-500 mt-0.5">{
+                  <div className="text-slate-500">{
                     hoverPM25.pm25 <= 35 ? 'Good' :
                     hoverPM25.pm25 <= 75 ? 'Moderate' :
                     hoverPM25.pm25 <= 150 ? 'Unhealthy' :
                     hoverPM25.pm25 <= 250 ? 'Very Unhealthy' : 'Severe'
                   }</div>
+                  {hoverPM25.population != null && hoverPM25.population > 0 && (
+                    <div className="text-slate-400 mt-0.5">
+                      Pop: <span className="text-purple-300 font-medium">{hoverPM25.population >= 1000 ? `${(hoverPM25.population / 1000).toFixed(1)}k` : Math.round(hoverPM25.population)}</span>
+                    </div>
+                  )}
                 </div>
+                {hoverPM25.popWeightedPM25 != null && hoverPM25.popWeightedPM25 > 0 && (
+                  <div className="text-center border-l border-white/10 pl-3 min-w-[44px]">
+                    <div className="text-lg font-bold tabular-nums leading-none text-purple-300">
+                      {Math.round(hoverPM25.popWeightedPM25)}
+                    </div>
+                    <div className="text-[8px] text-slate-500 font-medium mt-0.5">pop-wtd</div>
+                  </div>
+                )}
               </>
             ) : (
               <div className="text-[11px] text-slate-400">

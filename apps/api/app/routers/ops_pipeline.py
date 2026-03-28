@@ -1117,7 +1117,7 @@ async def get_urban_grid_json(
         import os
         os.unlink(tmp.name)
 
-        # Return slim version for hover: just grid info + values
+        # Return grid info + values + population
         return {
             "city": city_key,
             "date": pred_date,
@@ -1126,6 +1126,7 @@ async def get_urban_grid_json(
             "lats": data.get("lats", []),
             "lons": data.get("lons", []),
             "pm25": data.get("pm25", []),
+            "population": data.get("population", []),
         }
     except HTTPException:
         raise
