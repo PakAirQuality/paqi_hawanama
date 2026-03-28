@@ -86,23 +86,27 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     inputRef.current?.focus()
   }, [])
 
-  // Pre-fill input when a station is mentioned (map click)
+  // Pre-fill input when a station is mentioned (only if chat panel is open)
   useEffect(() => {
     if (!stationMention) return
-    setInput(`@${stationMention.stationName} `)
-    setShowStationChips(true)
-    inputRef.current?.focus()
+    if (externalTab === 'chat') {
+      setInput(`@${stationMention.stationName} `)
+      setShowStationChips(true)
+      inputRef.current?.focus()
+    }
     onMentionConsumed?.()
-  }, [stationMention, onMentionConsumed])
+  }, [stationMention, onMentionConsumed, externalTab])
 
   // Pre-fill input when a district/city is clicked on the map
   useEffect(() => {
     if (!cityMention) return
-    setInput(`@${cityMention} `)
-    setShowStationChips(true)
-    inputRef.current?.focus()
+    if (externalTab === 'chat') {
+      setInput(`@${cityMention} `)
+      setShowStationChips(true)
+      inputRef.current?.focus()
+    }
     onMentionConsumed?.()
-  }, [cityMention, onMentionConsumed])
+  }, [cityMention, onMentionConsumed, externalTab])
 
   // Auto-scroll to bottom
   useEffect(() => {
