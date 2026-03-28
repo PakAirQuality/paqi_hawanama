@@ -202,6 +202,10 @@ export function ForecastMap({
   const [windMetadata, setWindMetadata] = useState<WindMetadata | null>(null)
   const windRendererRef = useRef<WindParticleRenderer | null>(null)
 
+  // Ref to latest fire data for use in map load callback
+  const firesRef = useRef(firesGeoJSON)
+  firesRef.current = firesGeoJSON
+
   // Keep refs to latest data to avoid stale closures in map callbacks
   const dataRef = useRef({ forecasts, currentStations, selectedHorizon, onStationClick, onDistrictClick })
   dataRef.current = { forecasts, currentStations, selectedHorizon, onStationClick, onDistrictClick }
@@ -463,6 +467,12 @@ export function ForecastMap({
       })
 
       fireSourceAdded.current = true
+
+      // Sync fire data if it arrived before map loaded
+      if (firesRef.current) {
+        const src = map.current.getSource('fires') as mapboxgl.GeoJSONSource | undefined
+        if (src) src.setData(firesRef.current as GeoJSON.FeatureCollection)
+      }
 
       // ── District hover tracking ──
       let hoveredId: string | null = null
