@@ -10,3 +10,5 @@
 !apps/web-next/
 !apps/web-next/**
 !cloudbuild.yaml
+!Dockerfile
+!Dockerfile.*
