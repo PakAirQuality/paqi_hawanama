@@ -25,7 +25,7 @@ export default function AnalystDeskPage() {
   const [networkFilter, setNetworkFilter] = useState<string | null>(null)
 
   // Sidebar state
-  const [railTab, setRailTab] = useState<RailTab | null>('chat')
+  const [railTab, setRailTab] = useState<RailTab | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
 
   // Layer toggles (lifted from ForecastMap so LayersPanel can control them)

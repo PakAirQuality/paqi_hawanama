@@ -803,14 +803,14 @@ export function ForecastMap({
   return (
     <div className="relative w-full h-full">
       {/* ── Unified top bar: network filter + timeline + analytics toggle ── */}
-      <div className="absolute top-3 left-3 right-3 z-10 flex items-center gap-3">
+      <div className="absolute top-3 left-3 z-10 flex items-center gap-2">
         {/* Network filter badge (conditional) */}
         {networkFilter && (
-          <div className="shrink-0 flex items-center gap-1.5 bg-white/95 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm text-sm font-medium text-slate-700">
+          <div className="flex items-center gap-1.5 bg-slate-800/85 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-lg ring-1 ring-white/10 text-[11px] font-medium text-slate-200">
             <span>{networkFilter}</span>
             <button
               onClick={onClearNetworkFilter}
-              className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-slate-200 hover:bg-slate-300 text-slate-500 text-xs leading-none"
+              className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/25 text-white/70 text-xs leading-none"
             >
               &times;
             </button>
@@ -818,41 +818,38 @@ export function ForecastMap({
         )}
 
         {/* Timeline pill */}
-        <div className="flex-1 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1.5 shadow-sm">
+        <div className="flex items-center gap-1.5 bg-slate-800/85 backdrop-blur-sm rounded-lg px-2 py-1.5 shadow-lg ring-1 ring-white/10">
           <button
             onClick={() => { if (selectedHorizon > 0) onHorizonChange(selectedHorizon - 1) }}
             disabled={selectedHorizon <= 0}
-            className="p-1 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors shrink-0"
+            className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30 transition-colors shrink-0"
           >
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            <svg className="w-3.5 h-3.5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </button>
 
-          <div className="text-center min-w-[120px] text-sm font-semibold text-slate-800 shrink-0">
+          <div className="text-center min-w-[110px] text-[12px] font-semibold text-white shrink-0">
             {steps[selectedHorizon].label}
           </div>
 
           <button
             onClick={() => { if (selectedHorizon < 3) onHorizonChange(selectedHorizon + 1) }}
             disabled={selectedHorizon >= 3}
-            className="p-1 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors shrink-0"
+            className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30 transition-colors shrink-0"
           >
-            <svg className="w-3.5 h-3.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+            <svg className="w-3.5 h-3.5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
           </button>
 
-          <div className="flex-1 relative flex items-center h-5">
-            <div className="absolute left-0 right-0 h-[4px] rounded-full bg-slate-300/60" />
-            <div
-              className="absolute left-0 h-[4px] rounded-full bg-slate-700"
-              style={{ width: `${(selectedHorizon / 3) * 100}%` }}
-            />
-            <input
-              type="range"
-              min={0}
-              max={3}
-              value={selectedHorizon}
-              onChange={(e) => onHorizonChange(parseInt(e.target.value, 10))}
-              className="horizon-slider relative z-10 w-full h-[4px] appearance-none cursor-pointer bg-transparent"
-            />
+          {/* Dot indicators instead of slider */}
+          <div className="flex items-center gap-1 ml-1">
+            {steps.map((s, i) => (
+              <button
+                key={i}
+                onClick={() => onHorizonChange(i)}
+                className={`w-1.5 h-1.5 rounded-full transition-colors ${
+                  i === selectedHorizon ? 'bg-amber-400' : 'bg-white/25 hover:bg-white/40'
+                }`}
+              />
+            ))}
           </div>
         </div>
 
