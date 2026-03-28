@@ -103,7 +103,7 @@ export default function AnalystDeskPage() {
 
   const handleStationClick = useCallback((mention: StationMention) => {
     setStationMention(mention)
-    setRailTab('chat') // open chat when station clicked
+    // Don't force open — just notify the analytics tab
   }, [])
 
   const handleMentionConsumed = useCallback(() => {

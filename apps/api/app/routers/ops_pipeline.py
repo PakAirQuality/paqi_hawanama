@@ -841,6 +841,41 @@ async def get_prediction_tile(
             # Clip to Pakistan boundary at tile resolution
             rgba = _clip_tile_alpha(rgba, x, y, z)
 
+            # Draw 1km grid cell outlines for urban tiles at high zoom
+            if model.startswith("urban/") and z >= 12:
+                import math
+                n = 2 ** z
+                lon_min = x / n * 360.0 - 180.0
+                lon_max = (x + 1) / n * 360.0 - 180.0
+                lat_max = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
+                lat_min = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
+                cell = 0.01  # ~1km grid resolution
+                ga = 50 if z < 14 else 80  # grid line alpha
+
+                # Vertical lines at longitude cell boundaries
+                lon = math.ceil(lon_min / cell) * cell
+                while lon < lon_max:
+                    px = int((lon - lon_min) / (lon_max - lon_min) * w)
+                    if 0 <= px < w:
+                        m = rgba[:, px, 3] > 0
+                        rgba[m, px, 0] = 255
+                        rgba[m, px, 1] = 255
+                        rgba[m, px, 2] = 255
+                        rgba[m, px, 3] = ga
+                    lon += cell
+
+                # Horizontal lines at latitude cell boundaries
+                lat = math.ceil(lat_min / cell) * cell
+                while lat < lat_max:
+                    py = int((lat_max - lat) / (lat_max - lat_min) * h)
+                    if 0 <= py < h:
+                        m = rgba[py, :, 3] > 0
+                        rgba[py, m, 0] = 255
+                        rgba[py, m, 1] = 255
+                        rgba[py, m, 2] = 255
+                        rgba[py, m, 3] = ga
+                    lat += cell
+
             # Convert to PNG
             img = Image.fromarray(rgba, mode='RGBA')
             buffer = io.BytesIO()
