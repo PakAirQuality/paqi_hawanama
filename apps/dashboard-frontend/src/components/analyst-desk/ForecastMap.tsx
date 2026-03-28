@@ -230,7 +230,8 @@ export function ForecastMap({
       projection: 'globe',
       maxZoom: 18,
       minZoom: 2,
-      pitch: 0,
+      pitch: 45,
+      bearing: -10,
       maxPitch: 85,
       antialias: true,
     })
@@ -295,20 +296,22 @@ export function ForecastMap({
         },
       }, labelLayerId)
 
-      // ── Zoom-based 3D pitch transition ──
+      // ── Zoom-based pitch deepening ──
+      // Starts at 45° (set in init). Steepens as user zooms into cities.
       let pitchLocked = false
       map.current.on('zoom', () => {
         if (!map.current || pitchLocked) return
         const z = map.current.getZoom()
-        const currentPitch = map.current.getPitch()
+        // Gradually increase pitch: 45° at z5 → 60° at z12 → 65° at z15+
+        let targetPitch: number
+        if (z < 6) targetPitch = 45
+        else if (z < 12) targetPitch = 45 + (z - 6) * 2.5  // 45→60
+        else targetPitch = Math.min(65, 60 + (z - 12) * 1.5)
 
-        if (z >= 11 && currentPitch < 30) {
+        const currentPitch = map.current.getPitch()
+        if (Math.abs(currentPitch - targetPitch) > 3) {
           pitchLocked = true
-          map.current.easeTo({ pitch: 55, bearing: -15, duration: 1200 })
-          map.current.once('moveend', () => { pitchLocked = false })
-        } else if (z < 9 && currentPitch > 10) {
-          pitchLocked = true
-          map.current.easeTo({ pitch: 0, bearing: 0, duration: 1000 })
+          map.current.easeTo({ pitch: targetPitch, duration: 600 })
           map.current.once('moveend', () => { pitchLocked = false })
         }
       })
