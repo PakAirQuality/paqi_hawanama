@@ -196,6 +196,7 @@ export function ForecastMap({
   const map = useRef<mapboxgl.Map | null>(null)
   const markersRef = useRef<mapboxgl.Marker[]>([])
   const mapLoaded = useRef(false)
+  const [zoomLevel, setZoomLevel] = useState(4.2)
   const providerMapRef = useRef<ProviderMap | null>(null)
   const fireSourceAdded = useRef(false)
 
@@ -641,7 +642,10 @@ export function ForecastMap({
       })
 
       // ── Zoom-based marker visibility ──
-      map.current.on('zoom', updateMarkerVisibility)
+      map.current.on('zoom', () => {
+        updateMarkerVisibility()
+        if (map.current) setZoomLevel(map.current.getZoom())
+      })
 
       mapLoaded.current = true
       renderMarkers()
@@ -1083,6 +1087,11 @@ export function ForecastMap({
               />
             ))}
           </div>
+        </div>
+
+        {/* Zoom level indicator */}
+        <div className="px-2 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg ring-1 ring-white/10 text-[11px] font-mono text-white/70 tabular-nums">
+          z{zoomLevel.toFixed(1)}
         </div>
 
       </div>
