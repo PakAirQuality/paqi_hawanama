@@ -32,8 +32,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const isFullBleed = isDashboard || pathname === '/analyst-desk'
   return (
     <div className="h-screen bg-slate-50 flex flex-col overflow-hidden">
-      {/* Sticky header container */}
-      <div className="sticky top-0 z-50">
+      {/* Sticky header container — bg matches nav to prevent seam */}
+      <div className="sticky top-0 z-50 bg-slate-900">
         {/* Row 1: Top bar */}
         <header className="bg-white border-b border-slate-200">
           <div className="px-4 lg:px-8">
