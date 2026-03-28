@@ -25,10 +25,9 @@ export function IconRail({ activeTab, onTabChange, isStreaming }: IconRailProps)
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        paddingTop: 8,
+        paddingTop: 6,
         gap: 2,
-        background: 'rgba(30, 41, 59, 0.97)',
-        borderRight: '1px solid rgba(30, 41, 59, 0.3)',
+        background: '#1e293b',
         zIndex: 100,
       }}
     >
@@ -51,13 +50,13 @@ export function IconRail({ activeTab, onTabChange, isStreaming }: IconRailProps)
               border: 'none',
               borderRadius: 8,
               cursor: 'pointer',
-              background: isActive ? 'rgba(255,255,255,0.15)' : 'transparent',
-              color: isActive ? '#fff' : 'rgba(255,255,255,0.5)',
+              background: isActive ? 'rgba(245, 158, 11, 0.18)' : 'transparent',
+              color: isActive ? '#fbbf24' : 'rgba(255,255,255,0.45)',
               transition: 'all 0.15s',
               position: 'relative',
             }}
             onMouseEnter={(e) => {
-              if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'
+              if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.06)'
             }}
             onMouseLeave={(e) => {
               if (!isActive) e.currentTarget.style.background = 'transparent'
@@ -67,7 +66,6 @@ export function IconRail({ activeTab, onTabChange, isStreaming }: IconRailProps)
             <span style={{ fontSize: 7, fontWeight: 600, letterSpacing: '0.3px' }}>
               {tab.label}
             </span>
-            {/* Streaming indicator on Chat tab */}
             {tab.id === 'chat' && isStreaming && (
               <span
                 style={{
@@ -78,8 +76,7 @@ export function IconRail({ activeTab, onTabChange, isStreaming }: IconRailProps)
                   height: 7,
                   borderRadius: '50%',
                   background: '#f59e0b',
-                  border: '1.5px solid rgba(30, 41, 59, 0.95)',
-                  animation: 'pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite',
+                  border: '1.5px solid #1e293b',
                 }}
               />
             )}
