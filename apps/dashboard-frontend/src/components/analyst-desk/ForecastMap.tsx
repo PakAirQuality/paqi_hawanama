@@ -215,7 +215,8 @@ export function ForecastMap({
       try {
         const datesRes = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/dates`)
         const datesData = await datesRes.json()
-        predDate = datesData.dates?.[0] || new Date().toISOString().slice(0, 10)
+        const d = datesData.dates ?? []
+        predDate = d[d.length - 1] || new Date().toISOString().slice(0, 10)
       } catch {
         predDate = new Date().toISOString().slice(0, 10)
       }
