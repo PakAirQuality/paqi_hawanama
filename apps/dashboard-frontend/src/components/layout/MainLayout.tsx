@@ -74,7 +74,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         </header>
 
         {/* Row 2: Navigation strip */}
-        <nav className="bg-gradient-to-r from-slate-800 to-slate-900 border-0">
+        <nav className="bg-gradient-to-r from-slate-800 to-slate-900 border-0 pb-px">
           <div className="px-4 lg:px-8">
             <div className="flex items-center h-11 -mb-px overflow-x-auto scrollbar-hide">
               {modules.map((module) => {
@@ -105,8 +105,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content - no padding for dashboard (full-bleed map) */}
       <main className={cn(
-        'flex-1 min-h-0 border-0 flex flex-col',
-        isFullBleed ? '' : 'p-4 lg:p-6 overflow-y-auto bg-slate-50'
+        'flex-1 min-h-0 flex flex-col',
+        isFullBleed ? '[border:none]' : 'p-4 lg:p-6 overflow-y-auto bg-slate-50'
       )}>
         {children}
       </main>
