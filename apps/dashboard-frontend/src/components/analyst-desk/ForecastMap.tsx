@@ -230,7 +230,7 @@ export function ForecastMap({
       projection: 'globe',
       maxZoom: 18,
       minZoom: 2,
-      pitch: 45,
+      pitch: 30,
       bearing: -10,
       maxPitch: 85,
       antialias: true,
@@ -302,16 +302,17 @@ export function ForecastMap({
       map.current.on('zoom', () => {
         if (!map.current || pitchLocked) return
         const z = map.current.getZoom()
-        // Gradually increase pitch: 45° at z5 → 60° at z12 → 65° at z15+
+        // Gradually increase pitch: 30° at z4 → 50° at z10 → 60° at z13 → 65° at z16+
         let targetPitch: number
-        if (z < 6) targetPitch = 45
-        else if (z < 12) targetPitch = 45 + (z - 6) * 2.5  // 45→60
-        else targetPitch = Math.min(65, 60 + (z - 12) * 1.5)
+        if (z < 5) targetPitch = 30
+        else if (z < 10) targetPitch = 30 + (z - 5) * 4       // 30→50
+        else if (z < 14) targetPitch = 50 + (z - 10) * 2.5    // 50→60
+        else targetPitch = Math.min(65, 60 + (z - 14) * 2.5)  // 60→65
 
         const currentPitch = map.current.getPitch()
-        if (Math.abs(currentPitch - targetPitch) > 3) {
+        if (Math.abs(currentPitch - targetPitch) > 2) {
           pitchLocked = true
-          map.current.easeTo({ pitch: targetPitch, duration: 600 })
+          map.current.easeTo({ pitch: targetPitch, duration: 800, easing: (t) => t * (2 - t) })
           map.current.once('moveend', () => { pitchLocked = false })
         }
       })
