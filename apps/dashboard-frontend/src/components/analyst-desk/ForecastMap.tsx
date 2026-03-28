@@ -261,6 +261,58 @@ export function ForecastMap({
         'star-intensity': 0.0,
       })
 
+      // ── 3D Buildings (city-level detail) ──
+      const layers = map.current.getStyle().layers || []
+      const labelLayerId = layers.find(
+        (layer: any) => layer.type === 'symbol' && layer.layout?.['text-field']
+      )?.id
+
+      map.current.addLayer({
+        id: '3d-buildings',
+        source: 'composite',
+        'source-layer': 'building',
+        filter: ['==', 'extrude', 'true'],
+        type: 'fill-extrusion',
+        minzoom: 14,
+        paint: {
+          'fill-extrusion-color': [
+            'interpolate', ['linear'], ['get', 'height'],
+            0, '#cbd5e1',
+            30, '#94a3b8',
+            80, '#64748b',
+          ],
+          'fill-extrusion-height': [
+            'interpolate', ['linear'], ['zoom'],
+            14, 0,
+            14.5, ['get', 'height'],
+          ],
+          'fill-extrusion-base': [
+            'interpolate', ['linear'], ['zoom'],
+            14, 0,
+            14.5, ['get', 'min_height'],
+          ],
+          'fill-extrusion-opacity': 0.7,
+        },
+      }, labelLayerId)
+
+      // ── Zoom-based 3D pitch transition ──
+      let pitchLocked = false
+      map.current.on('zoom', () => {
+        if (!map.current || pitchLocked) return
+        const z = map.current.getZoom()
+        const currentPitch = map.current.getPitch()
+
+        if (z >= 11 && currentPitch < 30) {
+          pitchLocked = true
+          map.current.easeTo({ pitch: 55, bearing: -15, duration: 1200 })
+          map.current.once('moveend', () => { pitchLocked = false })
+        } else if (z < 9 && currentPitch > 10) {
+          pitchLocked = true
+          map.current.easeTo({ pitch: 0, bearing: 0, duration: 1000 })
+          map.current.once('moveend', () => { pitchLocked = false })
+        }
+      })
+
       // ── PM2.5 estimation raster (daily NRT/Final predictions) ──
       // Fetch the latest available prediction date from the pipeline
       let predDate: string
