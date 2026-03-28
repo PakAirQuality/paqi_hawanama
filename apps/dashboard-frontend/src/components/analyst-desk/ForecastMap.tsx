@@ -217,6 +217,7 @@ export function ForecastMap({
   const [hoverPM25, setHoverPM25] = useState<{ pm25: number; lat: number; lon: number; label?: string } | null>(null)
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hoverAbortRef = useRef<AbortController | null>(null)
+  const hoverCacheRef = useRef<Map<string, number>>(new Map())
   const predDateRef = useRef<string>('')
 
   // Ref to latest fire data for use in map load callback
@@ -348,8 +349,9 @@ export function ForecastMap({
             'interpolate', ['linear'], ['zoom'],
             3, 0.8,
             7, 0.65,
-            10, 0.45,
-            14, 0.3,
+            10, 0.4,
+            12, 0.15,
+            14, 0,
           ],
         },
         slot: 'middle',
@@ -387,8 +389,8 @@ export function ForecastMap({
                 'interpolate', ['linear'], ['zoom'],
                 9, 0,
                 10, 0.45,
-                13, 0.35,
-                16, 0.25,
+                12, 0.5,
+                15, 0.4,
               ],
             },
           })
@@ -664,26 +666,38 @@ export function ForecastMap({
         if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current)
         if (hoverAbortRef.current) hoverAbortRef.current.abort()
 
+        // Snap to grid cell (0.01° for urban, 0.1° for national)
+        const city = urbanCities.find(c => lng >= c.w && lng <= c.e && lat >= c.s && lat <= c.n)
+        const grid = city ? 0.01 : 0.1
+        const snapLat = (Math.floor(lat / grid) * grid + grid / 2)
+        const snapLon = (Math.floor(lng / grid) * grid + grid / 2)
+        const modelParam = city ? `&model=urban/${city.key}` : ''
+        const label = city ? '1km Downscaler' : 'National Estimate'
+        const cacheKey = `${snapLat.toFixed(4)},${snapLon.toFixed(4)},${city?.key || 'nat'}`
+
+        // Check cache first (instant)
+        const cached = hoverCacheRef.current.get(cacheKey)
+        if (cached !== undefined) {
+          setHoverPM25({ pm25: cached, lat: snapLat, lon: snapLon, label })
+          return
+        }
+
         hoverTimerRef.current = setTimeout(async () => {
           const ac = new AbortController()
           hoverAbortRef.current = ac
           try {
-            // Use urban model if cursor is inside a city with 1km coverage
-            const city = urbanCities.find(c => lng >= c.w && lng <= c.e && lat >= c.s && lat <= c.n)
-            const modelParam = city ? `&model=urban/${city.key}` : ''
-            const label = city ? '1km Downscaler' : 'National Estimate'
-
             const res = await fetch(
-              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true${modelParam}`,
+              `${API_BASE}/api/v1/ops/pipeline/tiles/${predDateRef.current}/point?lat=${snapLat.toFixed(4)}&lon=${snapLon.toFixed(4)}&smoothed=true${modelParam}`,
               { signal: ac.signal, headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
             )
             if (!res.ok || ac.signal.aborted) return
             const data = await res.json()
             if (data.pm25 != null && !ac.signal.aborted) {
-              setHoverPM25({ pm25: data.pm25, lat, lon: lng, label })
+              hoverCacheRef.current.set(cacheKey, data.pm25)
+              setHoverPM25({ pm25: data.pm25, lat: snapLat, lon: snapLon, label })
             }
           } catch { /* aborted or failed */ }
-        }, 120)
+        }, 80)
       })
 
       map.current.on('mouseout', () => setHoverPM25(null))
