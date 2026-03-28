@@ -31,7 +31,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
   const isDashboard = pathname === '/'
   const isFullBleed = isDashboard || pathname === '/analyst-desk'
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
+    <div className="h-screen bg-slate-50 flex flex-col overflow-hidden">
       {/* Sticky header container */}
       <div className="sticky top-0 z-50">
         {/* Row 1: Top bar */}
@@ -105,8 +105,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content - no padding for dashboard (full-bleed map) */}
       <main className={cn(
-        'flex-1',
-        isFullBleed ? '' : 'p-4 lg:p-6'
+        'flex-1 min-h-0',
+        isFullBleed ? '' : 'p-4 lg:p-6 overflow-y-auto'
       )}>
         {children}
       </main>

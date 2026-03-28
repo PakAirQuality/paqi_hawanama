@@ -156,7 +156,7 @@ export default function AnalystDeskPage() {
   const hasMapData = forecast || currentStations
 
   return (
-    <div className="flex h-[calc(100vh-108px)] -mt-px overflow-hidden">
+    <div className="flex h-full overflow-hidden">
       {/* Icon rail */}
       <IconRail
         activeTab={railTab}
