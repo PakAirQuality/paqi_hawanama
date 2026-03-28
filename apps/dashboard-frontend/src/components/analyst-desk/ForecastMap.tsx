@@ -861,15 +861,16 @@ export function ForecastMap({
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* Fire count badge (compact, shown even without layer panel) */}
+      {/* Fire count badge */}
       {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
-        <div className="absolute right-3 top-[120px] z-10">
-          <span className="flex items-center gap-1 px-2 py-1 rounded-lg bg-white/90 backdrop-blur-sm shadow-sm text-[10px] font-medium text-orange-600">
-            <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+        <div className="absolute right-3 bottom-8 z-10">
+          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg text-[11px] font-medium text-amber-400 ring-1 ring-white/10">
+            <svg className="w-3.5 h-3.5 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
+              <path d="M12 23c-3.6 0-8-3.2-8-9.1C4 7.4 11.3 1.3 11.6 1.1a.7.7 0 01.9 0c.2.2 7.5 6.3 7.5 12.8 0 5.9-4.4 9.1-8 9.1zm0-19.6C10 5.5 6 10.2 6 13.9 6 18.5 9.3 21 12 21s6-2.5 6-7.1c0-3.7-4-8.4-6-10.5z"/>
+              <path d="M12 21c-2 0-4-1.6-4-4.6 0-2.4 3.3-5.5 3.5-5.6a.7.7 0 01.9 0c.2.1 3.6 3.2 3.6 5.6 0 3-2 4.6-4 4.6zm0-8c-1.2 1.3-2 3-2 3.4 0 2 1.2 3 2 3s2-1 2-3c0-.5-.8-2.1-2-3.4z"/>
             </svg>
-            {firesGeoJSON.features.length}
-          </span>
+            <span>{firesGeoJSON.features.length} active</span>
+          </div>
         </div>
       )}
 
