@@ -216,15 +216,38 @@ export function ForecastMap({
       center: [69.3459, 30.3],
       zoom: 4.2,
       projection: 'globe',
-      maxZoom: 14,
+      maxZoom: 18,
       minZoom: 2,
+      pitch: 0,
+      maxPitch: 85,
+      antialias: true,
     })
-
-    // Zoom controls removed — scroll/pinch to zoom
 
     map.current.on('load', async () => {
       if (!map.current) return
       await loadPakBoundary()
+
+      // ── 3D Terrain ──
+      map.current.addSource('mapbox-dem', {
+        type: 'raster-dem',
+        url: 'mapbox://mapbox.mapbox-terrain-dem-v1',
+        tileSize: 512,
+        maxzoom: 14,
+      })
+      map.current.setTerrain({
+        source: 'mapbox-dem',
+        exaggeration: ['interpolate', ['linear'], ['zoom'], 0, 1.5, 15, 1.0],
+      })
+
+      // ── Atmosphere ──
+      map.current.setFog({
+        range: [0.5, 10],
+        color: '#ffffff',
+        'high-color': '#b8d4e8',
+        'space-color': '#d8f2ff',
+        'horizon-blend': 0.08,
+        'star-intensity': 0.0,
+      })
 
       // ── PM2.5 estimation raster (daily NRT/Final predictions) ──
       // Fetch the latest available prediction date from the pipeline
@@ -858,9 +881,44 @@ export function ForecastMap({
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
 
-      {/* Fire count badge */}
-      {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
-        <div className="absolute right-3 bottom-8 z-10">
+      {/* Layer indicators + fire badge — bottom right */}
+      <div className="absolute right-3 bottom-8 z-10 flex flex-col items-end gap-1.5">
+        {/* Active layer symbols */}
+        <div className="flex items-center gap-1">
+          {showStations && (
+            <div className="w-7 h-7 rounded-lg bg-slate-800/85 backdrop-blur-sm ring-1 ring-white/10 flex items-center justify-center" title="Stations">
+              <svg className="w-3.5 h-3.5 text-amber-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
+                <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
+              </svg>
+            </div>
+          )}
+          {showSatellite && (
+            <div className="w-7 h-7 rounded-lg bg-slate-800/85 backdrop-blur-sm ring-1 ring-white/10 flex items-center justify-center" title="PM2.5 Estimation">
+              <svg className="w-3.5 h-3.5 text-indigo-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+            </div>
+          )}
+          {showWind && (
+            <div className="w-7 h-7 rounded-lg bg-slate-800/85 backdrop-blur-sm ring-1 ring-white/10 flex items-center justify-center" title="Wind">
+              <svg className="w-3.5 h-3.5 text-sky-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2" />
+              </svg>
+            </div>
+          )}
+          {showFires && (
+            <div className="w-7 h-7 rounded-lg bg-slate-800/85 backdrop-blur-sm ring-1 ring-white/10 flex items-center justify-center" title="Fires">
+              <svg className="w-3.5 h-3.5 text-orange-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
+              </svg>
+            </div>
+          )}
+        </div>
+
+        {/* Fire count */}
+        {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg text-[11px] font-medium text-amber-400 ring-1 ring-white/10">
             <svg className="w-3.5 h-3.5 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 23c-3.6 0-8-3.2-8-9.1C4 7.4 11.3 1.3 11.6 1.1a.7.7 0 01.9 0c.2.2 7.5 6.3 7.5 12.8 0 5.9-4.4 9.1-8 9.1zm0-19.6C10 5.5 6 10.2 6 13.9 6 18.5 9.3 21 12 21s6-2.5 6-7.1c0-3.7-4-8.4-6-10.5z"/>
@@ -868,8 +926,8 @@ export function ForecastMap({
             </svg>
             <span>{firesGeoJSON.features.length} active</span>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Popup styling */}
       <style jsx global>{`
