@@ -229,6 +229,10 @@ export default function AnalystDeskPage() {
             showSatellite={showSatellite}
             showFires={showFires}
             showWind={showWind}
+            onToggleStations={() => setShowStations(v => !v)}
+            onToggleSatellite={() => setShowSatellite(v => !v)}
+            onToggleFires={() => setShowFires(v => !v)}
+            onToggleWind={() => setShowWind(v => !v)}
             mapRef={mapRef}
           />
         ) : forecastLoading ? (
