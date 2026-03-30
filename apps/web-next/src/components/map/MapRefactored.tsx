@@ -146,25 +146,7 @@ export default function MapRefactored({
         transitionDuration={300}
         pitchWithRotate={false}
       >
-        {/* PM2.5 Prediction Tile Layer */}
-        <Source
-          id="pm25-predictions"
-          type="raster"
-          tiles={[tileUrl]}
-          tileSize={256}
-          minzoom={0}
-          maxzoom={12}
-        >
-          <Layer
-            id="pm25-predictions-layer"
-            type="raster"
-            paint={{
-              'raster-opacity': 0.6,
-              'raster-fade-duration': 300,
-            }}
-            beforeId={undefined}
-          />
-        </Source>
+        {/* PM2.5 prediction layer removed from public site */}
 
         {features.map(feature => {
           const key = `marker-${feature.properties.id}`;
