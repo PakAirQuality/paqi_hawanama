@@ -2,7 +2,10 @@
 Ops Downscaler API endpoints — 1 km urban PM2.5 predictions.
 
 Serves tile imagery, grid JSON, date listings, and model metadata
-for the Downscaler (LightGBM v8, 168 features incl. 38 urban morphology).
+for the estimation-context downscaler (trained on ERA5+OFFL features).
+
+Data path: predictions/estimation_urban/  (with fallback to predictions/urban/)
+Model: estimation_v1 (LightGBM, ~300 features incl. 38 urban morphology)
 
 Separate from the national estimation pipeline (ops_pipeline.py).
 """
@@ -113,6 +116,25 @@ def _download_to_temp(bucket_name: str, blob_path: str, suffix: str = ".tif") ->
     return tmp.name
 
 
+def _resolve_urban_blob(bucket_name: str, pred_date: str, filename: str) -> str:
+    """Resolve blob path: try estimation_urban first, fall back to urban (NRT)."""
+    client = _gcs_client()
+    bucket = client.bucket(bucket_name)
+
+    # Primary: estimation-context outputs
+    est_path = f"predictions/estimation_urban/date={pred_date}/{filename}"
+    if bucket.blob(est_path).exists(client):
+        return est_path
+
+    # Fallback: NRT outputs (during transition)
+    nrt_path = f"predictions/urban/date={pred_date}/{filename}"
+    if bucket.blob(nrt_path).exists(client):
+        logger.debug(f"Falling back to NRT path for {filename} on {pred_date}")
+        return nrt_path
+
+    raise HTTPException(status_code=404, detail=f"No urban data for {filename} on {pred_date}")
+
+
 def _empty_tile_png() -> bytes:
     from PIL import Image
     import io
@@ -151,10 +173,19 @@ async def list_dates(
     try:
         client = _gcs_client()
         bucket = client.bucket(bucket_name)
-        blobs = bucket.list_blobs(prefix="predictions/urban/date=")
-
         dates = set()
-        for blob in blobs:
+
+        # Primary: estimation_urban outputs
+        for blob in bucket.list_blobs(prefix="predictions/estimation_urban/date="):
+            if blob.name.endswith(f"{city}.tif") or blob.name.endswith(f"{city}_smoothed.tif"):
+                try:
+                    d = blob.name.split("date=")[1].split("/")[0]
+                    dates.add(d)
+                except Exception:
+                    continue
+
+        # Fallback: also include NRT urban dates (during transition)
+        for blob in bucket.list_blobs(prefix="predictions/urban/date="):
             if blob.name.endswith(f"{city}.tif") or blob.name.endswith(f"{city}_smoothed.tif"):
                 try:
                     d = blob.name.split("date=")[1].split("/")[0]
@@ -195,7 +226,8 @@ async def get_downscaler_tile(
     bucket = _get_outputs_bucket()
 
     suffix = "_smoothed" if smoothed else ""
-    blob_path = f"predictions/urban/date={pred_date}/{city}{suffix}.tif"
+    filename = f"{city}{suffix}.tif"
+    blob_path = _resolve_urban_blob(bucket, pred_date, filename)
     tmp_path = _download_to_temp(bucket, blob_path)
 
     try:
@@ -299,7 +331,7 @@ async def get_grid_json(
 
     _validate_city(city)
     bucket_name = _get_outputs_bucket()
-    blob_path = f"predictions/urban/date={pred_date}/{city}.json"
+    blob_path = _resolve_urban_blob(bucket_name, pred_date, f"{city}.json")
     tmp_path = _download_to_temp(bucket_name, blob_path, suffix=".json")
 
     try:
@@ -333,29 +365,36 @@ async def get_summary(
 ) -> Dict[str, Any]:
     """Model metadata: version, MAE, feature count, cities covered."""
     bucket_name = _get_models_bucket()
-    try:
-        client = _gcs_client()
-        blob = client.bucket(bucket_name).blob("downscaler/v8/latest.json")
-        if blob.exists(client):
-            import json as _json
-            tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-            blob.download_to_filename(tmp.name)
-            with open(tmp.name) as f:
-                pointer = _json.load(f)
-            os.unlink(tmp.name)
-        else:
-            pointer = None
-    except Exception as e:
-        logger.warning(f"Failed to load downscaler model pointer: {e}")
-        pointer = None
+
+    # Try estimation_v1 model pointer first, fall back to v8
+    pointer = None
+    model_version = "estimation_v1"
+    n_features = 320  # approx, varies with feature audit
+
+    for model_path in ["downscaler/estimation_v1/latest.json", "downscaler/v8/latest.json"]:
+        try:
+            client = _gcs_client()
+            blob = client.bucket(bucket_name).blob(model_path)
+            if blob.exists(client):
+                import json as _json
+                tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
+                blob.download_to_filename(tmp.name)
+                with open(tmp.name) as f:
+                    pointer = _json.load(f)
+                os.unlink(tmp.name)
+                model_version = pointer.get("version", model_path.split("/")[1])
+                n_features = pointer.get("n_features", n_features)
+                break
+        except Exception as e:
+            logger.warning(f"Failed to load {model_path}: {e}")
 
     return {
-        "model": "downscaler_v8",
-        "version": "v8",
+        "model": f"downscaler_{model_version}",
+        "version": model_version,
         "algorithm": "LightGBM (Huber)",
         "resolution_deg": GRID_RES,
         "resolution_approx": "~1 km",
-        "n_features": 168,
+        "n_features": n_features,
         "colorscale": {"vmin": URBAN_VMIN, "vmax": URBAN_VMAX, "unit": "µg/m³"},
         "cities": {k: v["name"] for k, v in CITIES.items()},
         "pointer": pointer,

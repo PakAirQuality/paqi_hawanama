@@ -4,15 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
 import MapWrapper from '@/components/map/MapWrapper'
 import { StationCard } from '@/components/station/StationCard'
 import { CitySearch } from '@/components/ui/CitySearch'
-import { ModelToggle } from '@/components/map/ModelToggle'
+// import { ModelToggle } from '@/components/map/ModelToggle'
 
 export default function Home() {
   const [showCitySearch, setShowCitySearch] = useState(false)
-  const [modelVariant, setModelVariant] = useState<'backbone' | 'support_aware'>('backbone')
-
-  const handleModelToggle = useCallback((supportAware: boolean) => {
-    setModelVariant(supportAware ? 'support_aware' : 'backbone')
-  }, [])
+  const modelVariant = 'backbone' as const
 
   // Prevent body scrolling on map page only
   useEffect(() => {
@@ -40,7 +36,6 @@ export default function Home() {
           <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50"></div>
           <span className="text-xs font-medium text-white/90 tracking-wide">LIVE</span>
         </div>
-        <ModelToggle onToggle={handleModelToggle} />
       </div>
 
       {/* Logo - Lower Left (Floating) - Mobile Safe with safe area */}
