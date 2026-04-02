@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useEffect } from 'react'
 import type { CurrentStation, ForecastEntry } from './types'
 import type { FiresGeoJSON } from './api'
+import { loadPakBoundary, isInsidePakistan, isPakBoundaryLoaded } from './pakistan'
 
 interface ContextPanelProps {
   currentStations: CurrentStation[]
@@ -36,14 +37,16 @@ const BAND_LABELS: Record<string, string> = {
 }
 
 export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selectedHorizon }: ContextPanelProps) {
-  const stats = useMemo(() => {
-    // Pakistan bounding box filter
-    const isPak = (s: CurrentStation) =>
-      s.latitude != null && s.longitude != null &&
-      s.latitude >= 23.5 && s.latitude <= 37.1 &&
-      s.longitude >= 60.8 && s.longitude <= 77.8
+  // Load Pakistan boundary on mount
+  useEffect(() => { loadPakBoundary() }, [])
 
-    const stations = currentStations.filter(s => s.pm25 != null && isPak(s))
+  const stats = useMemo(() => {
+    if (!isPakBoundaryLoaded()) return null
+
+    const stations = currentStations.filter(s =>
+      s.pm25 != null && s.latitude != null && s.longitude != null &&
+      isInsidePakistan(s.longitude!, s.latitude!)
+    )
     if (!stations.length) return null
 
     const pm25Values = stations.map(s => s.pm25!)
