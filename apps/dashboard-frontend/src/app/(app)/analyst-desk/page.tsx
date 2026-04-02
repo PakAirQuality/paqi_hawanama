@@ -14,6 +14,7 @@ import { ForecastMap } from '@/components/analyst-desk/ForecastMap'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
 import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { LayersPanel } from '@/components/analyst-desk/LayersPanel'
+import { ContextPanel } from '@/components/analyst-desk/ContextPanel'
 import type { CopilotAction, StationMention } from '@/components/analyst-desk/types'
 
 export default function AnalystDeskPage() {
@@ -246,6 +247,16 @@ export default function AnalystDeskPage() {
             </div>
           </div>
         )}
+      </div>
+
+      {/* Right context panel — persistent daily brief */}
+      <div className="w-[260px] shrink-0 bg-white border-l border-slate-100 overflow-hidden">
+        <ContextPanel
+          currentStations={currentStations?.stations ?? []}
+          forecasts={forecast?.forecasts ?? []}
+          firesGeoJSON={firesGeoJSON ?? null}
+          selectedHorizon={selectedHorizon}
+        />
       </div>
     </div>
   )
