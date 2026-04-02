@@ -37,7 +37,13 @@ const BAND_LABELS: Record<string, string> = {
 
 export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selectedHorizon }: ContextPanelProps) {
   const stats = useMemo(() => {
-    const stations = currentStations.filter(s => s.pm25 != null)
+    // Pakistan bounding box filter
+    const isPak = (s: CurrentStation) =>
+      s.latitude != null && s.longitude != null &&
+      s.latitude >= 23.5 && s.latitude <= 37.1 &&
+      s.longitude >= 60.8 && s.longitude <= 77.8
+
+    const stations = currentStations.filter(s => s.pm25 != null && isPak(s))
     if (!stations.length) return null
 
     const pm25Values = stations.map(s => s.pm25!)
@@ -90,7 +96,7 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
     <div className="flex flex-col h-full overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Daily Brief</div>
+        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Pakistan Daily Brief</div>
         <div className="text-sm font-semibold text-slate-800 mt-0.5">{today}</div>
       </div>
 
@@ -98,7 +104,7 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       <div className="px-4 py-3 border-b border-slate-100">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">National Average</div>
+            <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Pakistan Average</div>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-3xl font-bold tabular-nums" style={{ color: BAND_COLORS[stats.band] }}>
                 {stats.mean}
