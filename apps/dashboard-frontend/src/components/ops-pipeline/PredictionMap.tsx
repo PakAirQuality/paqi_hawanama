@@ -27,6 +27,18 @@ interface UrbanGrid {
   pm25: (number | null)[]
 }
 
+interface StationReading {
+  name: string
+  city: string
+  pm25: number
+  lat: number
+  lon: number
+  latitude?: number
+  longitude?: number
+  valid_hours?: number | null
+  complete?: boolean
+}
+
 interface PredictionMapProps {
   selectedDate: string
   smoothed?: boolean
@@ -45,6 +57,15 @@ interface HoverPM25 {
   label: string
 }
 
+// AQI band colors matching the analyst desk
+function pm25ToBandColor(pm25: number): string {
+  if (pm25 <= 35) return '#22c55e'   // good — green
+  if (pm25 <= 75) return '#eab308'   // moderate — yellow
+  if (pm25 <= 150) return '#f97316'  // unhealthy — orange
+  if (pm25 <= 250) return '#ef4444'  // very unhealthy — red
+  return '#7c3aed'                    // severe — purple
+}
+
 export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone' }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
@@ -53,6 +74,11 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   const [selectedDistrict, setSelectedDistrict] = useState<SelectedDistrict | null>(null)
   const [hoverPM25, setHoverPM25] = useState<HoverPM25 | null>(null)
 
+  // Station markers
+  const markersRef = useRef<mapboxgl.Marker[]>([])
+  const [stations, setStations] = useState<StationReading[]>([])
+  const [hoveredStation, setHoveredStation] = useState<StationReading | null>(null)
+
   // Refs for urban grid hover (same pattern as ForecastMap)
   const urbanGridsRef = useRef<Map<string, UrbanGrid>>(new Map())
   const urbanGridLoadingRef = useRef<Set<string>>(new Set())
@@ -60,6 +86,27 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
   useEffect(() => {
     selectedDateRef.current = selectedDate
+  }, [selectedDate])
+
+  // Fetch QA-filtered station daily means for the selected date (same labels as model training)
+  useEffect(() => {
+    const fetchStations = async () => {
+      try {
+        const res = await fetch(
+          `${API_BASE}/api/v1/ops/pipeline/stations/daily/${selectedDate}?min_hours=6`,
+          { headers: { Authorization: `Bearer ${API_TOKEN}` } }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          setStations(data?.stations ?? [])
+        } else {
+          setStations([])
+        }
+      } catch {
+        setStations([])
+      }
+    }
+    fetchStations()
   }, [selectedDate])
 
   // Initialize map once
@@ -368,6 +415,41 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     }
   }, [])
 
+  // Render station markers
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded) return
+
+    // Remove old markers
+    markersRef.current.forEach(m => m.remove())
+    markersRef.current = []
+
+    for (const stn of stations) {
+      const lat = stn.lat ?? stn.latitude
+      const lon = stn.lon ?? stn.longitude
+      if (lat == null || lon == null || stn.pm25 == null) continue
+
+      const color = pm25ToBandColor(stn.pm25)
+
+      const el = document.createElement('div')
+      el.style.width = '14px'
+      el.style.height = '14px'
+      el.style.borderRadius = '50%'
+      el.style.backgroundColor = color
+      el.style.border = '2px solid white'
+      el.style.boxShadow = '0 1px 4px rgba(0,0,0,0.3)'
+      el.style.cursor = 'pointer'
+
+      el.addEventListener('mouseenter', () => setHoveredStation(stn))
+      el.addEventListener('mouseleave', () => setHoveredStation(null))
+
+      const marker = new mapboxgl.Marker({ element: el })
+        .setLngLat([lon, lat])
+        .addTo(mapRef.current!)
+
+      markersRef.current.push(marker)
+    }
+  }, [stations, mapLoaded])
+
   // Update tile sources when date/smoothed/model changes
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return
@@ -453,8 +535,24 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
 
+      {/* Station hover tooltip */}
+      {hoveredStation && (
+        <div className="absolute top-6 right-6 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 px-3 py-2.5 min-w-[160px]">
+          <div className="text-xs font-semibold text-slate-800">{hoveredStation.name}</div>
+          <div className="text-[10px] text-slate-500 mt-0.5">{hoveredStation.city}</div>
+          <div className="flex items-baseline gap-1 mt-1.5">
+            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: pm25ToBandColor(hoveredStation.pm25) }} />
+            <span className="text-lg font-bold text-slate-900">{hoveredStation.pm25.toFixed(1)}</span>
+            <span className="text-xs text-slate-500">µg/m³</span>
+          </div>
+          <div className="text-[10px] text-slate-400 mt-1">
+            Daily Mean (QA){hoveredStation.valid_hours != null ? ` · ${hoveredStation.valid_hours}h` : ''}
+          </div>
+        </div>
+      )}
+
       {/* Urban grid hover readout */}
-      {hoverPM25 && !selectedDistrict && (
+      {hoverPM25 && !selectedDistrict && !hoveredStation && (
         <div className="absolute bottom-16 left-4 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 px-3 py-2">
           <div className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide">{hoverPM25.label}</div>
           <div className="flex items-baseline gap-1 mt-0.5">

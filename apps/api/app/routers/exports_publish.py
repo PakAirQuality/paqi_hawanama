@@ -703,6 +703,45 @@ def upload_daily_partition_to_gcs(
             content_type="application/json"
         )
 
+        # Write lightweight stations.json for fast API serving (same data as training labels)
+        try:
+            df = daily_table.to_pandas()
+            pm25_col = "pm25_ugm3_mean" if "pm25_ugm3_mean" in df.columns else None
+            lat_col = next((c for c in ["latitude", "lat"] if c in df.columns), None)
+            lon_col = next((c for c in ["longitude", "lon"] if c in df.columns), None)
+            hours_col = "pm25_ugm3_valid_hours" if "pm25_ugm3_valid_hours" in df.columns else None
+
+            if pm25_col and lat_col and lon_col:
+                valid = df.dropna(subset=[pm25_col, lat_col, lon_col])
+                if hours_col:
+                    valid = valid[valid[hours_col] >= DEFAULT_MIN_PUBLISH_HOURS]
+
+                station_records = []
+                for _, row in valid.iterrows():
+                    station_records.append({
+                        "name": str(row.get("station_name", "")),
+                        "city": str(row.get("city_name", "")),
+                        "lat": round(float(row[lat_col]), 5),
+                        "lon": round(float(row[lon_col]), 5),
+                        "pm25": round(float(row[pm25_col]), 1),
+                        "valid_hours": int(row[hours_col]) if hours_col and not pd.isna(row.get(hours_col)) else None,
+                        "complete": bool(row.get("pm25_ugm3_complete", 0)),
+                    })
+
+                stations_json = {
+                    "date": target_date.isoformat(),
+                    "stations": station_records,
+                    "count": len(station_records),
+                }
+                stations_blob = bucket.blob(f"{partition_dir}/stations.json")
+                stations_blob.upload_from_string(
+                    json.dumps(stations_json),
+                    content_type="application/json"
+                )
+                logger.info(f"Wrote stations.json: {len(station_records)} stations")
+        except Exception as e:
+            logger.warning(f"Failed to write stations.json for {target_date}: {e}")
+
         logger.info(f"Uploaded daily partition: {parquet_file}")
 
         return {

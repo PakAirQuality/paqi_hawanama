@@ -81,7 +81,10 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       bands,
       worstCities,
       rampCount: ramps.length,
-      fireCount: firesGeoJSON?.features?.length || 0,
+      fireCount: firesGeoJSON?.features?.filter((f: any) => {
+        const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
+        return isInsidePakistan(lng, lat)
+      }).length || 0,
     }
   }, [currentStations, forecasts, firesGeoJSON])
 
