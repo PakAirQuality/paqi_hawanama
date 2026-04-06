@@ -1,5 +1,22 @@
 // Types for Ops Pipeline components
 
+export interface StationReading {
+  name: string
+  city: string
+  pm25: number
+  lat: number
+  lon: number
+  latitude?: number
+  longitude?: number
+  valid_hours?: number | null
+  complete?: boolean
+}
+
+export interface StationDailyResponse {
+  date: string
+  stations: StationReading[]
+}
+
 export interface ModelPointer {
   model_uri: string
   waterline: string

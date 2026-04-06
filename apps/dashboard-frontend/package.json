@@ -8,7 +8,7 @@
   "scripts": {
     "dev": "next dev --port 3001",
     "clean": "rm -rf .next out",
-    "prebuild": "npm run clean",
+    "prebuild": "npm run clean && node scripts/fetch-station-ids.mjs",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",

@@ -11,6 +11,7 @@ const modules = [
   { id: 'reports', name: 'Reports', href: '/reports' },
   { id: 'analyst-desk', name: 'Analyst Desk', href: '/analyst-desk' },
   { id: 'ml-ops', name: 'ML Ops', href: '/ops/pipeline' },
+  { id: 'kilns', name: 'Kilns', href: '/kilns' },
 ]
 
 function cn(...classes: (string | false | undefined)[]) {
@@ -26,7 +27,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
     m.href === normalizedPath || (m.href !== '/' && normalizedPath.startsWith(m.href))
   )?.id || 'aqi-dashboard'
 
-  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk' || currentModule === 'ml-ops'
+  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk' || currentModule === 'ml-ops' || currentModule === 'kilns'
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Header container — shrink-0 keeps it fixed height, no sticky needed */}

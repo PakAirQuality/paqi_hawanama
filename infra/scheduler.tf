@@ -271,6 +271,34 @@ resource "google_cloud_scheduler_job" "parquet_export_daily" {
   }
 }
 
+# 6. Daily Station Aggregation - 4:00 AM UTC daily (1 hour after hourly parquet export)
+resource "google_cloud_scheduler_job" "station_daily_aggregation" {
+  name        = "station-daily-aggregation"
+  description = "Daily aggregation of hourly station readings to daily statistics at 4:00 AM UTC"
+  schedule    = "0 4 * * *"  # 4:00 AM UTC daily (9:00 AM PKT)
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-daily/parquet?start_date=2024-01-01&end_date=2026-12-31&only_missing=true&apply_qc=true"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "3600s"  # 1 hour max retry duration
+    min_backoff_duration = "120s"
+    max_backoff_duration = "600s"
+  }
+}
+
 # Optional: Emergency full pipeline job (manual trigger via gcloud)
 resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
   name        = "full-pipeline-emergency"

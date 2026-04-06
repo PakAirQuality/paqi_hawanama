@@ -65,10 +65,14 @@ function getFirebase() {
   return { auth, db, storage, provider };
 }
 
+const ALLOWED_EMAILS = new Set([
+  "redacted@example.org",
+]);
+
 export function isValidUser(user: User | null): boolean {
   if (!user || !user.email) return false;
   const email = user.email.toLowerCase();
-  return user.emailVerified && email.endsWith("@pakairquality.com");
+  return user.emailVerified && (email.endsWith("@pakairquality.com") || ALLOWED_EMAILS.has(email));
 }
 
 export async function signInWithGoogle(): Promise<User> {

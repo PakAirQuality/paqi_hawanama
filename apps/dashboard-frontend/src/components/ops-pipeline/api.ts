@@ -13,6 +13,7 @@ import type {
   ModelHistoryEntry,
   FeaturesListResponse,
   FeatureDatesResponse,
+  StationDailyResponse,
 } from './types'
 
 export const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
@@ -157,4 +158,57 @@ export function getFeatureTileUrl(feature: string, date: string, z: number, x: n
 
 export function getFeaturePointQueryUrl(feature: string, date: string, lat: number, lon: number): string {
   return `${API_BASE}/api/v1/ops/pipeline/tiles/features/${feature}/${date}/point?lat=${lat}&lon=${lon}`
+}
+
+export async function fetchStationDaily(date: string, country?: string): Promise<StationDailyResponse> {
+  const params = country ? `?country=${encodeURIComponent(country)}` : ''
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/stations/daily/${date}${params}`, { headers })
+  if (!res.ok) throw new Error(`Failed to load station data for ${date}`)
+  return res.json()
+}
+
+export interface DailyBrief {
+  date: string
+  narrative: string
+  station_count: number
+  obs_mean: number | null
+  data_sources: {
+    stations: boolean
+    predictions: boolean
+    watchlist: boolean
+    fires: boolean
+  }
+}
+
+export interface StationDirectoryItem {
+  station_id: string
+  name: string
+  country: string
+  state: string
+  city: string
+  lat: number
+  lon: number
+}
+
+export async function fetchStationDirectory(country?: string): Promise<StationDirectoryItem[]> {
+  const params = country ? `?country=${encodeURIComponent(country)}` : ''
+  const res = await fetch(`${API_BASE}/api/v1/stations${params}`, { headers })
+  if (!res.ok) throw new Error('Failed to load station directory')
+  const data = await res.json()
+  const stations = data.stations || data
+  return stations.map((s: any) => ({
+    station_id: s.id || s.station_id,
+    name: s.name,
+    country: s.country || '',
+    state: s.state || '',
+    city: s.city || '',
+    lat: s.latitude ?? s.lat,
+    lon: s.longitude ?? s.lon,
+  }))
+}
+
+export async function fetchDailyBrief(date: string): Promise<DailyBrief> {
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/briefs/${date}`, { headers })
+  if (!res.ok) throw new Error(`Failed to load brief for ${date}`)
+  return res.json()
 }

@@ -1691,11 +1691,13 @@ async def get_execution_details(
 async def get_station_daily_observations(
     obs_date: str,
     min_hours: int = Query(6, ge=1, le=24, description="Minimum valid hours to include a station"),
+    country: Optional[str] = Query(None, description="Filter to a country (e.g. 'Pakistan') using exact boundary polygon"),
 ) -> Any:
     """Serve QA-filtered station daily means. Uses pre-computed JSON (fast) with parquet fallback."""
     from fastapi.responses import JSONResponse
 
     bucket_name = "paqi-raw-hawanama-data"
+    filter_pakistan = country and country.lower() == "pakistan"
 
     try:
         client = _gcs_client()
@@ -1712,7 +1714,13 @@ async def get_station_daily_observations(
                     s for s in data["stations"]
                     if (s.get("valid_hours") or 0) >= min_hours
                 ]
-                data["count"] = len(data["stations"])
+            # Apply country filter
+            if filter_pakistan:
+                data["stations"] = [
+                    s for s in data["stations"]
+                    if _point_in_pakistan(s.get("lat") or 0, s.get("lon") or 0)
+                ]
+            data["count"] = len(data["stations"])
             return JSONResponse(
                 content=data,
                 headers={"Cache-Control": "public, max-age=86400"},
@@ -1740,6 +1748,20 @@ async def get_station_daily_observations(
                 dfs.append(pd.read_parquet(tmp_path))
 
             df = pd.concat(dfs, ignore_index=True)
+
+            # Apply country filter (parquets have country_name column)
+            if filter_pakistan:
+                if "country_name" in df.columns:
+                    df = df[df["country_name"].str.lower() == "pakistan"]
+                else:
+                    # Fallback to boundary polygon if no country column
+                    df = df[df.apply(
+                        lambda r: _point_in_pakistan(
+                            float(r.get("latitude") or r.get("lat") or 0),
+                            float(r.get("longitude") or r.get("lon") or 0),
+                        ), axis=1
+                    )]
+
             hours_col = "pm25_ugm3_valid_hours" if "pm25_ugm3_valid_hours" in df.columns else None
             if hours_col:
                 df = df[df[hours_col] >= min_hours]
@@ -1778,3 +1800,432 @@ async def get_station_daily_observations(
     except Exception as e:
         logger.error(f"Failed to load station daily for {obs_date}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# =============================================================================
+# DAILY BRIEF GENERATION (LLM-powered, GCS-cached)
+# =============================================================================
+
+FORECASTS_BUCKET = settings.OPS_FORECASTS_BUCKET or "paqi-forecasts-hawanama-data"
+RAW_DATA_BUCKET = "paqi-raw-hawanama-data"
+
+_BRIEF_PROMPT_TEMPLATE = """\
+You are an air quality analyst writing the daily operational brief for Pakistan on {date}.
+
+## DATA
+
+### Station Observations
+- {station_count} stations reporting
+- National mean PM2.5: {obs_mean} µg/m³
+- National max PM2.5: {obs_max} µg/m³
+- Band breakdown: {band_breakdown}
+- Stations exceeding unhealthy thresholds (>75 µg/m³): {unhealthy_count} ({unhealthy_pct}%)
+
+### Most Polluted Cities (by daily mean)
+{worst_cities}
+
+### Satellite Model (backbone — AOD + meteorology only)
+- Data track: {data_track}
+- Predicted national mean: {pred_mean}
+- Grid coverage: {coverage}
+- Model bias (predicted − observed): {bias}
+
+### Enhanced Model (support-aware — incorporates station PM2.5 lags)
+- Predicted national mean: {enhanced_mean}
+- Model bias (predicted − observed): {enhanced_bias}
+
+### Fire Activity
+{fires_text}
+
+## INSTRUCTIONS
+
+Write a 3–4 sentence narrative brief covering:
+1. Overall conditions and national average, how many stations reported
+2. How many stations exceeded unhealthy thresholds and which city was worst
+3. Fire activity if present and noteworthy
+4. Model performance: compare both satellite and enhanced model bias if available
+
+Be precise with numbers. Use µg/m³ units. Do not hedge when data is present. \
+If a data section says "unavailable", skip it — do not mention its absence. \
+Keep the tone professional and concise, like an analyst shift handoff note.\
+"""
+
+
+def _date_to_compact(date_str: str) -> str:
+    """Convert YYYY-MM-DD to YYYYMMDD."""
+    return date_str.replace("-", "")
+
+
+# ── Pakistan boundary for point-in-polygon filtering ──
+import os as _os
+
+_PAKISTAN_POLYGON = None
+
+
+def _load_pakistan_polygon():
+    """Load and cache the Pakistan country boundary as a shapely geometry."""
+    global _PAKISTAN_POLYGON
+    if _PAKISTAN_POLYGON is not None:
+        return _PAKISTAN_POLYGON
+    try:
+        from shapely.geometry import shape
+        data_dir = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), "..", "..", "data"))
+        boundary_path = _os.path.join(data_dir, "pakistan_country.geojson")
+        with open(boundary_path) as f:
+            geojson = json.load(f)
+        geom = geojson["features"][0]["geometry"]
+        _PAKISTAN_POLYGON = shape(geom)
+        logger.info("Loaded Pakistan boundary for brief filtering")
+    except Exception as e:
+        logger.warning(f"Failed to load Pakistan boundary: {e}")
+        _PAKISTAN_POLYGON = None
+    return _PAKISTAN_POLYGON
+
+
+def _point_in_pakistan(lat: float, lon: float) -> bool:
+    """Check if a lat/lon point falls within Pakistan's boundary."""
+    poly = _load_pakistan_polygon()
+    if poly is None:
+        # Fallback to bbox if boundary unavailable
+        return 23.5 <= lat <= 37.5 and 60 <= lon <= 78
+    from shapely.geometry import Point
+    return poly.contains(Point(lon, lat))
+
+
+def _compute_tif_stats(bucket_name: str, blob_path: str) -> Optional[Dict[str, float]]:
+    """Download a COG and compute basic stats (mean, n_valid). Returns None on failure."""
+    import tempfile
+    try:
+        client = _gcs_client()
+        blob = client.bucket(bucket_name).blob(blob_path)
+        if not blob.exists(client):
+            return None
+        tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
+        blob.download_to_filename(tmp.name)
+        try:
+            import numpy as np
+            import rasterio
+            with rasterio.open(tmp.name) as ds:
+                data = ds.read(1)
+                nodata = ds.nodata
+                if nodata is not None:
+                    valid = data[(data != nodata) & np.isfinite(data)]
+                else:
+                    valid = data[np.isfinite(data)]
+                if len(valid) == 0:
+                    return None
+                return {
+                    "mean": float(np.mean(valid)),
+                    "n_valid": int(len(valid)),
+                    "n_total": int(data.size),
+                }
+        finally:
+            _os.unlink(tmp.name)
+    except Exception as e:
+        logger.warning(f"Failed to compute TIF stats for {blob_path}: {e}")
+        return None
+
+
+def _load_forecasts_json_safe(blob_path: str) -> Optional[Dict[str, Any]]:
+    """Load JSON from the forecasts bucket, returning None on failure."""
+    try:
+        client = _gcs_client()
+        blob = client.bucket(FORECASTS_BUCKET).blob(blob_path)
+        if not blob.exists(client):
+            return None
+        return json.loads(blob.download_as_text())
+    except Exception:
+        return None
+
+
+def _load_forecasts_text_safe(blob_path: str) -> Optional[str]:
+    """Load raw text from the forecasts bucket, returning None on failure."""
+    try:
+        client = _gcs_client()
+        blob = client.bucket(FORECASTS_BUCKET).blob(blob_path)
+        if not blob.exists(client):
+            return None
+        return blob.download_as_text()
+    except Exception:
+        return None
+
+
+def _get_band(pm25: float) -> str:
+    if pm25 <= 35:
+        return "good"
+    if pm25 <= 75:
+        return "moderate"
+    if pm25 <= 150:
+        return "unhealthy"
+    if pm25 <= 250:
+        return "very_unhealthy"
+    return "severe"
+
+
+def _build_brief_context(
+    stations: List[Dict],
+    pred_stats: Optional[Dict],
+    enhanced_stats: Optional[Dict],
+    fires_csv: Optional[str],
+) -> Dict[str, str]:
+    """Build template variables from raw data sources."""
+
+    # ── Station observations ──
+    valid = [s for s in stations if s.get("pm25") is not None]
+    station_count = len(valid)
+    if valid:
+        values = [s["pm25"] for s in valid]
+        obs_mean = round(sum(values) / len(values), 1)
+        obs_max = round(max(values), 1)
+        bands = {"good": 0, "moderate": 0, "unhealthy": 0, "very_unhealthy": 0, "severe": 0}
+        for v in values:
+            bands[_get_band(v)] += 1
+        band_breakdown = ", ".join(f"{cnt} {band.replace('_', ' ')}" for band, cnt in bands.items() if cnt)
+        unhealthy_count = bands["unhealthy"] + bands["very_unhealthy"] + bands["severe"]
+        unhealthy_pct = round(unhealthy_count / station_count * 100)
+
+        # Worst cities
+        city_map: Dict[str, List[float]] = {}
+        for s in valid:
+            city = s.get("city")
+            if city:
+                city_map.setdefault(city, []).append(s["pm25"])
+        worst = sorted(
+            [{"city": c, "avg": round(sum(v) / len(v), 1), "n": len(v)} for c, v in city_map.items()],
+            key=lambda x: -x["avg"],
+        )[:5]
+        worst_cities = "\n".join(f"- {w['city']}: {w['avg']} µg/m³ ({w['n']} stations)" for w in worst) or "No city data"
+    else:
+        obs_mean = obs_max = "unavailable"
+        band_breakdown = "unavailable"
+        unhealthy_count = unhealthy_pct = 0
+        worst_cities = "No station observations available"
+
+    # ── Prediction stats ──
+    if pred_stats and pred_stats.get("mean") is not None:
+        track = pred_stats.get("data_track", "unknown")
+        data_track = "NRT (near-real-time)" if track == "nrt" else "Final (reanalysis)" if track == "final" else track
+        pred_mean = f"{round(pred_stats['mean'], 1)} µg/m³"
+        n_valid = pred_stats.get("n_valid", 0)
+        n_total = pred_stats.get("n_total", 0)
+        coverage = f"{round(n_valid / n_total * 100)}%" if n_total else "unavailable"
+        if isinstance(obs_mean, (int, float)):
+            bias_val = round(pred_stats["mean"] - obs_mean, 1)
+            bias = f"{'+' if bias_val > 0 else ''}{bias_val} µg/m³"
+        else:
+            bias = "unavailable (no observations)"
+    else:
+        pred_mean = coverage = bias = "unavailable"
+        data_track = "unavailable"
+
+    # ── Enhanced (support_aware) model stats ──
+    if enhanced_stats and enhanced_stats.get("mean") is not None:
+        enhanced_mean = f"{round(enhanced_stats['mean'], 1)} µg/m³"
+        if isinstance(obs_mean, (int, float)):
+            e_bias_val = round(enhanced_stats["mean"] - obs_mean, 1)
+            enhanced_bias = f"{'+' if e_bias_val > 0 else ''}{e_bias_val} µg/m³"
+        else:
+            enhanced_bias = "unavailable (no observations)"
+    else:
+        enhanced_mean = enhanced_bias = "unavailable"
+
+    # ── FIRMS fires (Pakistan only — exact boundary) ──
+    if fires_csv and fires_csv.strip():
+        import csv
+        import io
+        reader = csv.DictReader(io.StringIO(fires_csv))
+        fire_rows = [
+            r for r in reader
+            if _point_in_pakistan(float(r.get("latitude", 0)), float(r.get("longitude", 0)))
+        ]
+        fire_count = len(fire_rows)
+        if fire_count > 0:
+            high_conf = sum(1 for r in fire_rows if r.get("confidence", "").lower() in ("high", "h"))
+            fires_text = f"{fire_count} VIIRS fire detections in Pakistan ({high_conf} high-confidence)."
+        else:
+            fires_text = "No fire detections in Pakistan."
+    else:
+        fires_text = "FIRMS fire data unavailable for this date."
+
+    return {
+        "station_count": str(station_count),
+        "obs_mean": str(obs_mean),
+        "obs_max": str(obs_max),
+        "band_breakdown": band_breakdown if isinstance(band_breakdown, str) else "unavailable",
+        "unhealthy_count": str(unhealthy_count),
+        "unhealthy_pct": str(unhealthy_pct),
+        "worst_cities": worst_cities,
+        "data_track": data_track,
+        "pred_mean": str(pred_mean),
+        "coverage": str(coverage),
+        "bias": str(bias),
+        "enhanced_mean": str(enhanced_mean),
+        "enhanced_bias": str(enhanced_bias),
+        "fires_text": fires_text,
+    }
+
+
+async def _generate_brief_llm(date: str, context: Dict[str, str]) -> str:
+    """Call Gemini to generate the narrative brief."""
+    import google.generativeai as genai
+
+    if not settings.GEMINI_API_KEY:
+        raise HTTPException(status_code=501, detail="GEMINI_API_KEY not configured")
+
+    genai.configure(api_key=settings.GEMINI_API_KEY)
+    model = genai.GenerativeModel("gemini-2.5-flash")
+
+    prompt = _BRIEF_PROMPT_TEMPLATE.format(date=date, **context)
+
+    response = model.generate_content(prompt)
+    if not response.text:
+        raise HTTPException(status_code=502, detail="Empty response from Gemini")
+
+    return response.text.strip()
+
+
+@router.get(
+    "/briefs/{date}",
+    summary="Get daily operational brief for a date",
+    description=(
+        "Returns an LLM-generated narrative brief for a given prediction date. "
+        "Briefs are cached in GCS after first generation."
+    ),
+)
+async def get_daily_brief(
+    date: str,
+    regenerate: bool = Query(False, description="Force regeneration even if cached"),
+    _: bool = Depends(verify_tasks_token),
+) -> Dict[str, Any]:
+    """
+    Get or generate the daily operational brief.
+
+    1. Check GCS cache (outputs bucket → briefs/ops_{date}.json)
+    2. If cached and not regenerating, return immediately
+    3. Otherwise gather station, prediction, watchlist, fires data
+    4. Generate narrative via Gemini, cache, return
+    """
+    outputs_bucket = _get_outputs_bucket()
+    cache_path = f"briefs/ops_{date}.json"
+
+    # ── 1. Check cache ──
+    if not regenerate:
+        try:
+            cached = _gcs_read_json(outputs_bucket, cache_path)
+            return cached
+        except HTTPException as e:
+            if e.status_code != 404:
+                raise
+            # Not cached yet — generate below
+
+    # ── 2. Gather data ──
+    # Station daily observations (JSON fast-path, then parquet fallback)
+    stations: List[Dict] = []
+    try:
+        client = _gcs_client()
+        bucket = client.bucket(RAW_DATA_BUCKET)
+
+        # Fast path: pre-computed stations.json
+        json_path = f"raw/station_daily/date={date}/stations.json"
+        json_blob = bucket.blob(json_path)
+        if json_blob.exists(client):
+            data = json.loads(json_blob.download_as_text())
+            all_stations = data.get("stations", [])
+            # Filter to Pakistan using country boundary
+            stations = [s for s in all_stations
+                        if _point_in_pakistan(s.get("lat") or 0, s.get("lon") or 0)]
+        else:
+            # Slow fallback: parse parquets (has country_name column)
+            prefix = f"raw/station_daily/date={date}"
+            blobs = list(bucket.list_blobs(prefix=prefix))
+            parquet_blobs = [b for b in blobs if b.name.endswith(".parquet")]
+            if parquet_blobs:
+                import tempfile, os, shutil
+                import pandas as pd
+                tmp_dir = tempfile.mkdtemp()
+                try:
+                    dfs = []
+                    for blob in parquet_blobs:
+                        tmp_path = os.path.join(tmp_dir, os.path.basename(blob.name))
+                        blob.download_to_filename(tmp_path)
+                        dfs.append(pd.read_parquet(tmp_path))
+                    df = pd.concat(dfs, ignore_index=True)
+                    # Filter to Pakistan
+                    if "country_name" in df.columns:
+                        df = df[df["country_name"].str.lower() == "pakistan"]
+                    pm25_col = "pm25_ugm3_mean" if "pm25_ugm3_mean" in df.columns else "pm25_daily_mean"
+                    lat_col = next((c for c in ["latitude", "lat"] if c in df.columns), None)
+                    lon_col = next((c for c in ["longitude", "lon"] if c in df.columns), None)
+                    if pm25_col in df.columns and lat_col and lon_col:
+                        df = df.dropna(subset=[pm25_col, lat_col, lon_col])
+                        for _, row in df.iterrows():
+                            stations.append({
+                                "name": str(row.get("station_name", "")),
+                                "city": str(row.get("city_name", "")),
+                                "pm25": round(float(row[pm25_col]), 1),
+                                "lat": round(float(row[lat_col]), 5),
+                                "lon": round(float(row[lon_col]), 5),
+                            })
+                finally:
+                    shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception as e:
+        logger.warning(f"Brief: failed to load stations for {date}: {e}")
+
+    # Prediction stats (backbone)
+    pred_stats: Optional[Dict] = None
+    try:
+        pred_data = _gcs_read_json(outputs_bucket, f"predictions/date={date}/pm25_{date}.json")
+        pred_stats = pred_data.get("stats")
+        if pred_stats is not None and pred_data.get("data_track"):
+            pred_stats["data_track"] = pred_data["data_track"]
+    except Exception:
+        pass
+
+    # Enhanced (support_aware) model stats — computed from TIF
+    enhanced_stats: Optional[Dict] = None
+    enhanced_stats = _compute_tif_stats(
+        outputs_bucket,
+        f"predictions/support_aware/date={date}/pm25_{date}.tif",
+    )
+
+    # FIRMS fire detections
+    fires_csv: Optional[str] = None
+    for offset in range(3):
+        from datetime import datetime, timedelta
+        d = datetime.strptime(date, "%Y-%m-%d") - timedelta(days=offset)
+        trial_ds = d.strftime("%Y%m%d")
+        fires_csv = _load_forecasts_text_safe(f"hindcast/firms/firms_{trial_ds}.csv")
+        if fires_csv and fires_csv.strip():
+            break
+
+    # ── 3. Build context and generate ──
+    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv)
+
+    narrative = await _generate_brief_llm(date, context)
+
+    # ── 4. Build response and cache to GCS ──
+    result = {
+        "date": date,
+        "narrative": narrative,
+        "station_count": int(context["station_count"]),
+        "obs_mean": float(context["obs_mean"]) if context["obs_mean"] != "unavailable" else None,
+        "data_sources": {
+            "stations": len(stations) > 0,
+            "predictions": pred_stats is not None,
+            "fires": fires_csv is not None and bool(fires_csv.strip()),
+        },
+    }
+
+    # Cache to GCS
+    try:
+        client = _gcs_client()
+        blob = client.bucket(outputs_bucket).blob(cache_path)
+        blob.upload_from_string(
+            json.dumps(result, ensure_ascii=False),
+            content_type="application/json",
+        )
+        logger.info(f"Cached brief for {date} at gs://{outputs_bucket}/{cache_path}")
+    except Exception as e:
+        logger.warning(f"Failed to cache brief for {date}: {e}")
+
+    return result
