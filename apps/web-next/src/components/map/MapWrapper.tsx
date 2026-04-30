@@ -21,9 +21,12 @@ interface MapWrapperProps {
   heatmapVisible?: boolean
   windVisible?: boolean
   modelVariant?: 'backbone' | 'support_aware'
+  viewMode?: 'live' | 'estimated'
+  selectedDate?: string | null
+  availableDates?: string[]
 }
 
-export default function MapWrapper({ className, heatmapVisible = true, windVisible = false, modelVariant = 'backbone' }: MapWrapperProps) {
+export default function MapWrapper({ className, heatmapVisible = true, windVisible = false, modelVariant = 'backbone', viewMode = 'live', selectedDate = null, availableDates = [] }: MapWrapperProps) {
   return (
     <div className={`${className}`} style={{
       width: '100%',
@@ -38,6 +41,9 @@ export default function MapWrapper({ className, heatmapVisible = true, windVisib
         heatmapVisible={heatmapVisible}
         windVisible={windVisible}
         modelVariant={modelVariant}
+        viewMode={viewMode}
+        selectedDate={selectedDate}
+        availableDates={availableDates}
       />
     </div>
   )

@@ -10,6 +10,16 @@ import { useStationsData } from './hooks/useStationsData';
 import { useWindData } from './hooks/useWindData';
 import { useWindLayer } from './hooks/useWindLayer';
 import AqiMarker from './components/AqiMarker';
+import { fetchDailyStations, type DailyStation } from '@/lib/api';
+
+// PM2.5 µg/m³ thresholds → synthetic AQI class for AqiMarker coloring
+function pm25ToSyntheticAqi(pm25: number): number {
+  if (pm25 <= 35) return 30    // → bg-good
+  if (pm25 <= 75) return 80    // → bg-moderate
+  if (pm25 <= 150) return 160  // → bg-unhealthy
+  if (pm25 <= 250) return 250  // → bg-very-unhealthy
+  return 400                   // → bg-hazardous
+}
 
 interface MapProps {
   center?: [number, number];
@@ -18,6 +28,9 @@ interface MapProps {
   heatmapVisible?: boolean;
   windVisible?: boolean;
   modelVariant?: 'backbone' | 'support_aware';
+  viewMode?: 'live' | 'estimated';
+  selectedDate?: string | null;
+  availableDates?: string[];
 }
 
 export default function MapRefactored({
@@ -27,9 +40,12 @@ export default function MapRefactored({
   heatmapVisible = true,
   windVisible = true,
   modelVariant = 'backbone',
+  viewMode = 'live',
+  selectedDate = null,
+  availableDates = [],
 }: MapProps) {
   const { openStation } = useStationSidebar();
-  const { stations, loading, error } = useStationsData();
+  const { stations, error } = useStationsData();
 
   const [viewport, setViewport] = useState({
     longitude: center?.[0] || 78,
@@ -39,19 +55,56 @@ export default function MapRefactored({
 
   const [bounds, setBounds] = useState<[number, number, number, number] | undefined>();
   const [map, setMap] = useState<any>(null);
+  const [dailyStations, setDailyStations] = useState<DailyStation[]>([]);
 
-  // Prediction tile URL — uses the latest available date
-  const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-152782825429.asia-south1.run.app/api';
-  const predDate = '2026-03-14'; // TODO: fetch latest from API
-  const modelParam = modelVariant === 'support_aware' ? '&model=support_aware' : '';
-  const tileUrl = `${API_BASE}/v1/ops/pipeline/tiles/${predDate}/{z}/{x}/{y}.png?smoothed=true${modelParam}`;
+  // Same-origin URL so Firebase Hosting CDN (Fastly) caches tiles for all users.
+  // firebase.json rewrites /api/** → Cloud Run; in dev, next.config.ts mirrors this.
+  const tileUrl = selectedDate
+    ? `/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png?smoothed=true&model=support_aware`
+    : null;
+
+  // Fetch daily station observations when in estimated mode
+  useEffect(() => {
+    if (viewMode !== 'estimated' || !selectedDate) {
+      setDailyStations([])
+      return
+    }
+    fetchDailyStations(selectedDate)
+      .then(setDailyStations)
+      .catch(() => setDailyStations([]))
+  }, [viewMode, selectedDate]);
+
+  // Fly to Pakistan when switching to estimated mode
+  useEffect(() => {
+    if (viewMode === 'estimated' && map) {
+      map.flyTo({ center: [69.35, 30.0], zoom: 5, duration: 1200, essential: true })
+    }
+  }, [viewMode, map]);
+
+  // Prefetch center tile for adjacent dates so going back is instant.
+  // Uses same-origin /api/... path so the browser HTTP cache absorbs repeats.
+  useEffect(() => {
+    if (viewMode !== 'estimated' || !selectedDate || !map || availableDates.length === 0) return;
+    const idx = availableDates.indexOf(selectedDate);
+    const neighbors = [availableDates[idx - 1], availableDates[idx + 1]].filter(Boolean);
+    if (neighbors.length === 0) return;
+    const center = map.getCenter();
+    const z = Math.min(Math.floor(map.getZoom()), 7);
+    const n = Math.pow(2, z);
+    const tx = Math.floor((center.lng + 180) / 360 * n);
+    const lat = center.lat * Math.PI / 180;
+    const ty = Math.floor((1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2 * n);
+    for (const d of neighbors) {
+      fetch(`/api/v1/ops/pipeline/tiles/${d}/${z}/${tx}/${ty}.png?smoothed=true&model=support_aware`, { cache: 'force-cache' }).catch(() => {});
+    }
+  }, [selectedDate, viewMode, map, availableDates]);
 
   // Wind layer (lazy — only fetches data when toggled on)
   const { windImage, windMetadata } = useWindData(windVisible);
   useWindLayer(map, windImage, windMetadata, windVisible);
 
-  const features = useMemo(() => {
-    // Return all individual stations
+  // Live station features (LIVE mode)
+  const liveFeatures = useMemo(() => {
     return stations.map(station => ({
       type: 'Feature' as const,
       geometry: {
@@ -69,9 +122,31 @@ export default function MapRefactored({
     }));
   }, [stations]);
 
+  // Daily station features for ESTIMATED mode (PM2.5-band coloring via synthetic AQI)
+  const estimatedFeatures = useMemo(() => {
+    return dailyStations.map((stn, i) => ({
+      type: 'Feature' as const,
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [stn.lon, stn.lat]
+      },
+      properties: {
+        id: `daily-${i}`,
+        name: stn.name,
+        city: stn.city,
+        aqi: pm25ToSyntheticAqi(stn.pm25),
+        pm25: stn.pm25,
+        cluster: false
+      }
+    }));
+  }, [dailyStations]);
+
+  const features = viewMode === 'estimated' ? estimatedFeatures : liveFeatures;
+
   const handleMarkerClick = (feature: any) => {
     const { properties } = feature;
-    // Open the station sidebar for all markers (individual stations only)
+    // Only open sidebar for live station markers (estimated markers use surrogate IDs)
+    if (viewMode === 'estimated') return;
     openStation(String(properties.id));
   };
 
@@ -85,18 +160,6 @@ export default function MapRefactored({
     setMap(mapInstance);
     handleMapChange(evt);
   };
-
-  // Loading state
-  if (loading) {
-    return (
-      <div className={`flex items-center justify-center bg-gray-100 ${className}`}>
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-2"></div>
-          <p className="text-gray-600">Loading stations...</p>
-        </div>
-      </div>
-    );
-  }
 
   // Error state
   if (error) {
@@ -138,7 +201,8 @@ export default function MapRefactored({
         doubleClickZoom={true}
         keyboard={false}
         // Performance optimizations
-        maxTileCacheSize={200}
+        maxTileCacheSize={500}
+        fadeDuration={100}
         renderWorldCopies={false}
         optimizeForTerrain={false}
         antialias={false}
@@ -146,7 +210,35 @@ export default function MapRefactored({
         transitionDuration={300}
         pitchWithRotate={false}
       >
-        {/* PM2.5 prediction layer removed from public site */}
+        {/* PM2.5 estimation raster — Source stays mounted to preserve Mapbox's tile cache
+            across LIVE/ESTIMATED mode switches. Layer opacity goes to 0 in LIVE mode. */}
+        {tileUrl && (
+          <Source
+            id="pm25-tiles"
+            type="raster"
+            tiles={[tileUrl]}
+            tileSize={256}
+            bounds={[60.45, 23.25, 77.95, 37.35]}
+            maxzoom={12}
+          >
+            <Layer
+              id="pm25-raster"
+              type="raster"
+              paint={{
+                'raster-resampling': 'linear',
+                'raster-opacity': viewMode === 'estimated'
+                  ? [
+                      'interpolate', ['linear'], ['zoom'],
+                      3, 0.7,
+                      7, 0.65,
+                      9, 0.4,
+                      12, 0.2,
+                    ] as any
+                  : 0,
+              }}
+            />
+          </Source>
+        )}
 
         {features.map(feature => {
           const key = `marker-${feature.properties.id}`;

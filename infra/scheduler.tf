@@ -236,6 +236,34 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
   }
 }
 
+# 4b. FIRMS Fire Data Ingestion - 2:00 AM UTC daily
+resource "google_cloud_scheduler_job" "firms_fire_ingest" {
+  name        = "firms-fire-ingest"
+  description = "Daily FIRMS VIIRS fire data fetch from NASA API at 2:00 AM UTC"
+  schedule    = "0 2 * * *"  # 2:00 AM UTC daily (7:00 AM PKT)
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/ops/analyst-desk/fires/ingest?days_back=3"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "600s"
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
 # 5. Daily Parquet Export to GCS - 3:00 AM UTC daily
 resource "google_cloud_scheduler_job" "parquet_export_daily" {
   name        = "parquet-export-daily"
@@ -271,6 +299,34 @@ resource "google_cloud_scheduler_job" "parquet_export_daily" {
   }
 }
 
+# 5b. Hourly Partitioned Export - 3:30 AM UTC daily (writes per-date partitions needed by daily aggregation)
+resource "google_cloud_scheduler_job" "hourly_partitioned_export" {
+  name        = "hourly-partitioned-export"
+  description = "Daily partitioned hourly export to GCS (last 3 days) at 3:30 AM UTC"
+  schedule    = "30 3 * * *"  # 3:30 AM UTC daily (8:30 AM PKT)
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-readings-hourly-parquet-partitioned?days_back=3"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count = 2
+    max_retry_duration = "1800s"
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}
+
 # 6. Daily Station Aggregation - 4:00 AM UTC daily (1 hour after hourly parquet export)
 resource "google_cloud_scheduler_job" "station_daily_aggregation" {
   name        = "station-daily-aggregation"
@@ -294,6 +350,36 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
   retry_config {
     retry_count = 2
     max_retry_duration = "3600s"  # 1 hour max retry duration
+    min_backoff_duration = "120s"
+    max_backoff_duration = "600s"
+  }
+}
+
+# 7. Daily Brief Generation - 10:00 AM UTC (3:00 PM PKT)
+# Runs after daily prediction pipeline has typically completed.
+# days_back=7 catches any missed dates; already-cached briefs are skipped instantly.
+resource "google_cloud_scheduler_job" "daily_brief_generation" {
+  name        = "daily-brief-generation"
+  description = "Generate daily AQ briefs for recent prediction dates (skips already-cached)"
+  schedule    = "0 10 * * *"  # 10:00 AM UTC (3:00 PM PKT)
+  time_zone   = "UTC"
+
+  http_target {
+    http_method = "POST"
+    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/ops/pipeline/generate-briefs?days_back=7"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count          = 2
+    max_retry_duration   = "3600s"
     min_backoff_duration = "120s"
     max_backoff_duration = "600s"
   }

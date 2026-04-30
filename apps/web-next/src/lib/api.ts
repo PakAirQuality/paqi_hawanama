@@ -117,7 +117,7 @@ export const api = {
     if (params?.source) query.append('source', params.source)
     if (params?.bbox) query.append('bbox', params.bbox)
     
-    const url = `${API_BASE_URL}/v1/dashboard/stations${query.toString() ? '?' + query.toString() : ''}`
+    const url = `/api/v1/dashboard/stations${query.toString() ? '?' + query.toString() : ''}`
     const response = await fetch(url)
     const data = await response.json()
     
@@ -227,15 +227,56 @@ export const api = {
     if (params?.from_time) query.append('from_time', params.from_time)
     if (params?.to_time) query.append('to_time', params.to_time)
     if (params?.limit) query.append('limit', params.limit.toString())
-    
+
     const url = `${API_BASE_URL}/v1/readings/combined${query.toString() ? '?' + query.toString() : ''}`
     const response = await fetch(url)
     const data = await response.json()
-    
+
     // Transform response to match expected format
     return {
       readings: data.combined_data || [],
       count: data.count || 0
     }
   }
+}
+
+// --- Estimation layer helpers ---
+
+export async function fetchTileDates(limit = 365): Promise<string[]> {
+  const res = await fetch(`${API_BASE_URL}/v1/ops/pipeline/tiles/dates?limit=${limit}`)
+  if (!res.ok) throw new Error('Failed to fetch tile dates')
+  const data = await res.json()
+  return (data.dates ?? []) as string[]
+}
+
+export interface DailyStation {
+  name: string
+  city: string
+  pm25: number
+  lat: number
+  lon: number
+  valid_hours?: number | null
+  complete?: boolean
+}
+
+export async function fetchDailyStations(date: string): Promise<DailyStation[]> {
+  const res = await fetch(`${API_BASE_URL}/v1/ops/pipeline/stations/daily/${date}?country=Pakistan&min_hours=6`)
+  if (!res.ok) throw new Error('Failed to fetch daily stations')
+  const data = await res.json()
+  return (data.stations ?? []) as DailyStation[]
+}
+
+export interface DailyBrief {
+  date: string
+  narrative: string
+  station_count: number
+  obs_mean: number | null
+  data_sources: { stations: boolean; predictions: boolean; fires: boolean }
+}
+
+export async function fetchDailyBrief(date: string): Promise<DailyBrief | null> {
+  const res = await fetch(`/api/v1/ops/pipeline/briefs/${date}`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`Failed to load brief for ${date}`)
+  return res.json()
 }

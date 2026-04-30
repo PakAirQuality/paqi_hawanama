@@ -5,6 +5,7 @@ Dashboard API Router - provides dashboard endpoints for frontend
 import logging
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
@@ -194,8 +195,11 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
             }
             stations_list.append(station_data)
         
-        return {"stations": stations_list}
-        
+        return JSONResponse(
+            {"stations": stations_list},
+            headers={"Cache-Control": "public, max-age=60, s-maxage=120, stale-while-revalidate=300"},
+        )
+
     except Exception as e:
         logger.error(f"Error getting stations: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -332,43 +336,61 @@ async def get_station_history_data(
 async def get_station_history_pm25_data(
     station_id: str,
     hours: int = 24,
+    date: str = None,
+    all_providers: bool = False,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical PM2.5 concentration data for a specific station using hash station_id"""
+    """Get historical PM2.5 concentration data for a specific station using hash station_id.
+
+    If `date` is provided (YYYY-MM-DD), returns hourly data for that specific day (00:00-23:59 UTC).
+    Otherwise returns the last `hours` hours from now.
+    If `all_providers` is true, includes all providers (including Punjab EPA).
+    """
     try:
         # Verify station exists / is allowed
-        station_result = await db.execute(text("""
+        provider_filter = "" if all_providers else "AND COALESCE(p.code, '') != 'punjab'"
+        station_result = await db.execute(text(f"""
             SELECT s.station_id, s.name
             FROM stations s
             LEFT JOIN providers p ON s.provider_id = p.id
             WHERE s.station_id = :station_id
               AND s.active = true
-              AND COALESCE(p.code, '') != 'punjab'
+              {provider_filter}
         """), {"station_id": station_id})
-        
+
         target_station = station_result.fetchone()
         if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
-        
-        # Validate hours parameter
-        if not isinstance(hours, int) or hours < 1 or hours > 168:
-            raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
-            
+
         from datetime import datetime, timedelta
-        start_time = datetime.now() - timedelta(hours=hours)
-        
+
+        if date:
+            # Date-specific query: full day in UTC
+            try:
+                day = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+            start_time = day
+            end_time = day + timedelta(days=1)
+        else:
+            # Validate hours parameter
+            if not isinstance(hours, int) or hours < 1 or hours > 168:
+                raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
+            start_time = datetime.now() - timedelta(hours=hours)
+            end_time = datetime.now()
+
         history_result = await db.execute(text("""
-            SELECT 
+            SELECT
                 date_trunc('hour', r.ts_utc) AS hour_utc,
                 date_trunc('hour', r.ts_utc) + INTERVAL '5 hours' AS hour_pk,
                 r.pm25
-            FROM readings r 
-            WHERE r.scope_key = :station_id 
+            FROM readings r
+            WHERE r.scope_key = :station_id
                 AND r.scope_type = 'station'
                 AND r.ts_utc >= :start_time
-                AND r.ts_utc <= NOW()
+                AND r.ts_utc <= :end_time
             ORDER BY r.ts_utc ASC
-        """), {"station_id": station_id, "start_time": start_time})
+        """), {"station_id": station_id, "start_time": start_time, "end_time": end_time})
         
         history_rows = history_result.fetchall()
         history_data = [

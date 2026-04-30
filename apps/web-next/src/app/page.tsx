@@ -1,42 +1,74 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect } from 'react'
 import MapWrapper from '@/components/map/MapWrapper'
 import { StationCard } from '@/components/station/StationCard'
 import { CitySearch } from '@/components/ui/CitySearch'
-// import { ModelToggle } from '@/components/map/ModelToggle'
+import ViewModeToggle from '@/components/map/ViewModeToggle'
+import EstimatedDateRail from '@/components/map/EstimatedDateRail'
+import EstimatedContextPanel from '@/components/map/EstimatedContextPanel'
+import { fetchTileDates } from '@/lib/api'
 
 export default function Home() {
   const [showCitySearch, setShowCitySearch] = useState(false)
-  const modelVariant = 'backbone' as const
+  const [viewMode, setViewMode] = useState<'live' | 'estimated'>('live')
+  const [availableDates, setAvailableDates] = useState<string[]>([])
+  const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
   // Prevent body scrolling on map page only
   useEffect(() => {
     const originalStyle = window.getComputedStyle(document.body).overflow
     document.body.style.overflow = 'hidden'
-
     return () => {
       document.body.style.overflow = originalStyle
     }
   }, [])
 
+  // Fetch available prediction dates on mount
+  useEffect(() => {
+    fetchTileDates()
+      .then((dates) => {
+        const today = new Date().toISOString().slice(0, 10)
+        const filtered = dates.filter((d) => d < today)
+        setAvailableDates(filtered)
+        if (filtered.length > 0) setSelectedDate(filtered[filtered.length - 1])
+      })
+      .catch(() => {}) // silent — ESTIMATED mode just won't show dates
+  }, [])
+
   return (
     <div className="map-page relative w-full h-full overflow-hidden" style={{
       height: '100vh',
-      height: '100dvh',
       width: '100vw',
       maxWidth: '100vw'
     }}>
       {/* Full Screen Map */}
-      <MapWrapper className="absolute inset-0 w-full h-full" windVisible={true} modelVariant={modelVariant} />
+      <MapWrapper
+        className="absolute inset-0 w-full h-full"
+        windVisible={true}
+        viewMode={viewMode}
+        selectedDate={selectedDate}
+        availableDates={availableDates}
+      />
 
-      {/* Live Data + Model Toggle - Upper Left with safe area */}
-      <div className="absolute top-safe-or-4 left-4 sm:top-8 sm:left-8 z-50 flex flex-col gap-2" style={{ top: 'max(env(safe-area-inset-top), 1rem)' }}>
-        <div className="flex items-center space-x-2 bg-black/20 backdrop-blur-md rounded-full px-4 py-2 border border-white/10 shadow-2xl">
-          <div className="w-2 h-2 bg-green-400 rounded-full animate-pulse shadow-lg shadow-green-400/50"></div>
-          <span className="text-xs font-medium text-white/90 tracking-wide">LIVE</span>
-        </div>
+      {/* LIVE / ESTIMATED toggle — Upper Left */}
+      <div className="absolute left-4 sm:left-8 z-50" style={{ top: 'max(env(safe-area-inset-top), 1rem)' }}>
+        <ViewModeToggle mode={viewMode} onChange={setViewMode} />
       </div>
+
+      {/* Date rail — bottom-center, visible only in ESTIMATED mode */}
+      {viewMode === 'estimated' && availableDates.length > 0 && (
+        <div
+          className="absolute left-1/2 -translate-x-1/2 z-50"
+          style={{ bottom: 'max(env(safe-area-inset-bottom, 1.5rem), 1.5rem)' }}
+        >
+          <EstimatedDateRail
+            dates={availableDates}
+            selectedDate={selectedDate}
+            onChange={setSelectedDate}
+          />
+        </div>
+      )}
 
       {/* Logo - Lower Left (Floating) - Mobile Safe with safe area */}
       <div className="absolute left-4 sm:left-8 z-50" style={{ bottom: 'max(env(safe-area-inset-bottom, 1rem), 1rem)' }}>
@@ -60,6 +92,16 @@ export default function Home() {
           </button>
         </div>
       </div>
+
+      {/* Context Panel - ESTIMATED mode only, desktop only */}
+      {viewMode === 'estimated' && selectedDate && (
+        <div
+          className="absolute right-4 sm:right-20 z-40 hidden md:block"
+          style={{ top: 'max(env(safe-area-inset-top), 5rem)' }}
+        >
+          <EstimatedContextPanel selectedDate={selectedDate} />
+        </div>
+      )}
 
       {/* Cities Button - Mobile: Same level as logo, Desktop: Top Right */}
       <div className="absolute right-4 sm:right-8 sm:top-8 z-50" style={{ bottom: 'max(env(safe-area-inset-bottom, 1rem), 1rem)' }}>

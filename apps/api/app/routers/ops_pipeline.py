@@ -10,6 +10,8 @@ Provides:
 
 import json
 import logging
+import secrets
+import threading
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -727,6 +729,37 @@ def _download_cog_to_temp(bucket_name: str, blob_path: str) -> str:
         )
 
 
+# In-process cache for COG temp files. Keyed by "bucket/blob_path".
+# Avoids re-downloading the same COG on every tile request within a container lifetime.
+_COG_FILE_CACHE: Dict[str, str] = {}
+_COG_FILE_CACHE_LOCK = threading.Lock()
+_COG_ABSENT: set = set()  # blob paths known to not exist — skips repeated GCS checks
+
+
+def _get_or_download_cog(bucket_name: str, blob_path: str) -> str:
+    """Return cached temp file path for COG, downloading once per process if needed.
+    Raises HTTPException(404) for missing blobs and caches that result too."""
+    cache_key = f"{bucket_name}/{blob_path}"
+    if cache_key in _COG_ABSENT:
+        raise HTTPException(status_code=404, detail=f"COG not found: gs://{cache_key}")
+    if cache_key in _COG_FILE_CACHE:
+        return _COG_FILE_CACHE[cache_key]
+    with _COG_FILE_CACHE_LOCK:
+        if cache_key in _COG_ABSENT:
+            raise HTTPException(status_code=404, detail=f"COG not found: gs://{cache_key}")
+        if cache_key in _COG_FILE_CACHE:
+            return _COG_FILE_CACHE[cache_key]
+        try:
+            path = _download_cog_to_temp(bucket_name, blob_path)
+            _COG_FILE_CACHE[cache_key] = path
+            logger.info(f"COG cached: gs://{bucket_name}/{blob_path} → {path}")
+            return path
+        except HTTPException as e:
+            if e.status_code == 404:
+                _COG_ABSENT.add(cache_key)
+            raise
+
+
 @router.get(
     "/tiles/{pred_date}/{z}/{x}/{y}.png",
     summary="Get PM2.5 prediction tile",
@@ -757,69 +790,80 @@ async def get_prediction_tile(
         model: 'backbone' (default) or 'support_aware'
     """
     from fastapi.responses import Response
-    import os
+    from starlette.concurrency import run_in_threadpool
 
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
-    # Download COG to temp file (GCS client uses Application Default Credentials)
+    # Resolve blob path (and optional backbone fallback for support_aware dates)
     suffix = "_smoothed" if smoothed else ""
+    fallback_blob_path = None
     if model == "population":
         blob_path = "static/pak_pop_2025_100m.tif"
     elif model.startswith("urban/"):
         city_key = model.split("/", 1)[1]
         blob_path = f"predictions/urban/date={pred_date}/{city_key}{suffix}.tif"
     elif model == "support_aware":
-        prefix = "predictions/support_aware"
-        suffix = "_gaussian_smoothed" if smoothed else ""
-        blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}{suffix}.tif"
+        gs_suffix = "_gaussian_smoothed" if smoothed else ""
+        blob_path = f"predictions/support_aware/date={pred_date}/pm25_{pred_date}{gs_suffix}.tif"
+        # Fallback: if support_aware COG absent for this date, serve backbone instead.
+        # Older dates only have backbone; support_aware was introduced later.
+        fallback_blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{gs_suffix}.tif"
     else:
-        suffix = "_gaussian_smoothed" if smoothed else ""
-        blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
-    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
+        gs_suffix = "_gaussian_smoothed" if smoothed else ""
+        blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{gs_suffix}.tif"
 
+    # Use cached temp file; download only once per container lifetime per COG.
+    # If support_aware COG is absent, fall back to backbone automatically.
     try:
-        import numpy as np
-        from PIL import Image
-        import io
-        from rio_tiler.errors import TileOutsideBounds
+        tmp_path = await run_in_threadpool(_get_or_download_cog, outputs_bucket, blob_path)
+    except HTTPException as e:
+        if e.status_code == 404 and fallback_blob_path:
+            tmp_path = await run_in_threadpool(_get_or_download_cog, outputs_bucket, fallback_blob_path)
+        else:
+            raise
 
-        # Helper to create empty transparent tile
-        def empty_tile_png():
-            img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
-            buf = io.BytesIO()
-            img.save(buf, format="PNG")
-            return buf.getvalue()
+    import numpy as np
+    from PIL import Image
+    import io
+    from rio_tiler.errors import TileOutsideBounds
 
-        def tile_response(png_bytes):
-            return Response(
-                content=png_bytes,
-                media_type="image/png",
-                headers={
-                    "Cache-Control": "public, max-age=86400",
-                    "X-Tile-Date": pred_date,
-                }
-            )
+    # Helper to create empty transparent tile
+    def empty_tile_png():
+        img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
+        buf = io.BytesIO()
+        img.save(buf, format="PNG")
+        return buf.getvalue()
 
+    etag = f'"{pred_date}-{model}-{"s" if smoothed else "n"}-{z}-{x}-{y}"'
+    cache_headers = {
+        "Cache-Control": "public, max-age=86400, s-maxage=604800, stale-while-revalidate=86400, immutable",
+        "ETag": etag,
+        "X-Tile-Date": pred_date,
+    }
+
+    def tile_response(png_bytes):
+        return Response(
+            content=png_bytes,
+            media_type="image/png",
+            headers=cache_headers,
+        )
+
+    def _render_tile_to_png() -> bytes:
+        """Render COG tile to PNG bytes. Runs in threadpool (blocking I/O + CPU)."""
         with Reader(tmp_path) as src:
-            # Try to read tile - may be outside bounds
             try:
                 tile = src.tile(x, y, z, indexes=1, resampling_method="cubic")
             except TileOutsideBounds:
-                # Tile outside raster coverage - return transparent tile
-                return tile_response(empty_tile_png())
+                return empty_tile_png()
 
-            # Get data and mask
             data = tile.data[0].astype(np.float32)
             mask = tile.mask
 
-            # If entire tile is nodata, return empty tile
             if mask is None or np.max(mask) == 0:
-                return tile_response(empty_tile_png())
+                return empty_tile_png()
 
-            # Rescale data to 0-255 for colormap lookup
             if model == "population":
-                # Population: log scale, 0-500 people per 100m cell
                 pop_data = np.where(data > 0, np.log1p(data), 0)
                 vmin_pop, vmax_pop = 0, np.log1p(500)
                 rescaled = np.clip(
@@ -827,7 +871,6 @@ async def get_prediction_tile(
                     0, 255
                 ).astype(np.uint8)
             else:
-                # Urban tiles use tighter range for more color contrast
                 vmin = 5.0 if model.startswith("urban/") else PM25_VMIN
                 vmax = 80.0 if model.startswith("urban/") else PM25_VMAX
                 rescaled = np.clip(
@@ -835,14 +878,11 @@ async def get_prediction_tile(
                     0, 255
                 ).astype(np.uint8)
 
-            # Create RGBA image with proper transparency
             h, w = rescaled.shape
             rgba = np.zeros((h, w, 4), dtype=np.uint8)
 
-            # Apply colormap to get RGB values
             cmap = TURBO_CMAP
             if model == "population":
-                # Inferno colormap for population density (dark → yellow)
                 try:
                     import matplotlib.cm as mplcm
                     inferno = mplcm.get_cmap('inferno')
@@ -851,23 +891,18 @@ async def get_prediction_tile(
                         r, g, b, _ = inferno(i / 255.0)
                         cmap[i] = (int(r * 255), int(g * 255), int(b * 255))
                 except ImportError:
-                    pass  # fallback to turbo
+                    pass
 
             for idx, color in cmap.items():
                 color_mask = (rescaled == idx)
-                rgba[color_mask, 0] = color[0]  # R
-                rgba[color_mask, 1] = color[1]  # G
-                rgba[color_mask, 2] = color[2]  # B
+                rgba[color_mask, 0] = color[0]
+                rgba[color_mask, 1] = color[1]
+                rgba[color_mask, 2] = color[2]
 
-            # Set alpha from mask (0 = transparent, 255 = opaque)
-            # Use robust alpha: any mask > 0 becomes fully opaque
             alpha = (mask > 0).astype(np.uint8) * 255
             rgba[:, :, 3] = alpha
-
-            # Clip to Pakistan boundary at tile resolution
             rgba = _clip_tile_alpha(rgba, x, y, z)
 
-            # Draw 1km grid cell outlines for urban tiles at high zoom
             if model.startswith("urban/") and z >= 12:
                 import math
                 n = 2 ** z
@@ -875,10 +910,9 @@ async def get_prediction_tile(
                 lon_max = (x + 1) / n * 360.0 - 180.0
                 lat_max = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
                 lat_min = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * (y + 1) / n))))
-                cell = 0.01  # ~1km grid resolution
-                ga = 50 if z < 14 else 80  # grid line alpha
+                cell = 0.01
+                ga = 50 if z < 14 else 80
 
-                # Vertical lines at longitude cell boundaries
                 lon = math.ceil(lon_min / cell) * cell
                 while lon < lon_max:
                     px = int((lon - lon_min) / (lon_max - lon_min) * w)
@@ -890,7 +924,6 @@ async def get_prediction_tile(
                         rgba[m, px, 3] = ga
                     lon += cell
 
-                # Horizontal lines at latitude cell boundaries
                 lat = math.ceil(lat_min / cell) * cell
                 while lat < lat_max:
                     py = int((lat_max - lat) / (lat_max - lat_min) * h)
@@ -902,37 +935,29 @@ async def get_prediction_tile(
                         rgba[py, m, 3] = ga
                     lat += cell
 
-            # Convert to PNG
             img = Image.fromarray(rgba, mode='RGBA')
             buffer = io.BytesIO()
             img.save(buffer, format='PNG')
-            return tile_response(buffer.getvalue())
+            return buffer.getvalue()
 
+    try:
+        png_bytes = await run_in_threadpool(_render_tile_to_png)
+        return tile_response(png_bytes)
     except HTTPException:
         raise
     except Exception as e:
-        # For tile errors, return empty tile instead of 500
-        # This prevents MapLibre from breaking on tiles outside coverage
         logger.warning(f"Tile error for {pred_date}/{z}/{x}/{y}: {e}")
         try:
-            from PIL import Image
-            import io
             img = Image.new("RGBA", (256, 256), (0, 0, 0, 0))
             buf = io.BytesIO()
             img.save(buf, format="PNG")
             return Response(
                 content=buf.getvalue(),
                 media_type="image/png",
-                headers={"Cache-Control": "public, max-age=86400"}
+                headers={"Cache-Control": "public, max-age=86400, s-maxage=604800, immutable"},
             )
-        except:
-            raise HTTPException(status_code=500, detail="Tile generation failed")
-    finally:
-        # Clean up temp file
-        try:
-            os.unlink(tmp_path)
         except Exception:
-            pass
+            raise HTTPException(status_code=500, detail="Tile generation failed")
 
 
 @router.get(
@@ -1778,6 +1803,7 @@ async def get_station_daily_observations(
             stations = []
             for _, row in df.iterrows():
                 stations.append({
+                    "station_id": str(row.get("station_id", "")).strip(),
                     "name": str(row.get("station_name", "")),
                     "city": str(row.get("city_name", "")),
                     "lat": round(float(row[lat_col]), 5),
@@ -1856,40 +1882,8 @@ def _date_to_compact(date_str: str) -> str:
     return date_str.replace("-", "")
 
 
-# ── Pakistan boundary for point-in-polygon filtering ──
-import os as _os
-
-_PAKISTAN_POLYGON = None
-
-
-def _load_pakistan_polygon():
-    """Load and cache the Pakistan country boundary as a shapely geometry."""
-    global _PAKISTAN_POLYGON
-    if _PAKISTAN_POLYGON is not None:
-        return _PAKISTAN_POLYGON
-    try:
-        from shapely.geometry import shape
-        data_dir = _os.path.normpath(_os.path.join(_os.path.dirname(__file__), "..", "..", "data"))
-        boundary_path = _os.path.join(data_dir, "pakistan_country.geojson")
-        with open(boundary_path) as f:
-            geojson = json.load(f)
-        geom = geojson["features"][0]["geometry"]
-        _PAKISTAN_POLYGON = shape(geom)
-        logger.info("Loaded Pakistan boundary for brief filtering")
-    except Exception as e:
-        logger.warning(f"Failed to load Pakistan boundary: {e}")
-        _PAKISTAN_POLYGON = None
-    return _PAKISTAN_POLYGON
-
-
-def _point_in_pakistan(lat: float, lon: float) -> bool:
-    """Check if a lat/lon point falls within Pakistan's boundary."""
-    poly = _load_pakistan_polygon()
-    if poly is None:
-        # Fallback to bbox if boundary unavailable
-        return 23.5 <= lat <= 37.5 and 60 <= lon <= 78
-    from shapely.geometry import Point
-    return poly.contains(Point(lon, lat))
+# ── Pakistan boundary — shared utility ──
+from app.services.geo_utils import point_in_pakistan as _point_in_pakistan
 
 
 def _compute_tif_stats(bucket_name: str, blob_path: str) -> Optional[Dict[str, float]]:
@@ -2084,27 +2078,40 @@ async def _generate_brief_llm(date: str, context: Dict[str, str]) -> str:
     return response.text.strip()
 
 
+def _has_valid_tasks_token(authorization: str) -> bool:
+    """Check bearer token without raising — used for optional auth inside handlers."""
+    if not authorization.lower().startswith("bearer "):
+        return False
+    token = authorization[7:]
+    if not settings.TASKS_API_SECRET:
+        return False
+    return secrets.compare_digest(token, settings.TASKS_API_SECRET)
+
+
 @router.get(
     "/briefs/{date}",
     summary="Get daily operational brief for a date",
     description=(
         "Returns an LLM-generated narrative brief for a given prediction date. "
-        "Briefs are cached in GCS after first generation."
+        "Cached briefs are publicly readable. Generation requires authorization."
     ),
 )
 async def get_daily_brief(
     date: str,
+    request: Request,
     regenerate: bool = Query(False, description="Force regeneration even if cached"),
-    _: bool = Depends(verify_tasks_token),
 ) -> Dict[str, Any]:
     """
     Get or generate the daily operational brief.
 
+    Public: returns cached brief (or 404 if not yet generated).
+    Authorized: can also trigger regeneration via ?regenerate=true.
+
     1. Check GCS cache (outputs bucket → briefs/ops_{date}.json)
-    2. If cached and not regenerating, return immediately
-    3. Otherwise gather station, prediction, watchlist, fires data
-    4. Generate narrative via Gemini, cache, return
+    2. If cached and not regenerating, return immediately (publicly)
+    3. Otherwise require auth — gather data, call Gemini, cache, return
     """
+    from fastapi.responses import JSONResponse as _JSONResponse
     outputs_bucket = _get_outputs_bucket()
     cache_path = f"briefs/ops_{date}.json"
 
@@ -2112,30 +2119,41 @@ async def get_daily_brief(
     if not regenerate:
         try:
             cached = _gcs_read_json(outputs_bucket, cache_path)
-            return cached
+            return _JSONResponse(
+                content=cached,
+                headers={"Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400"},
+            )
         except HTTPException as e:
             if e.status_code != 404:
                 raise
-            # Not cached yet — generate below
+            # Not cached yet — fall through to generation
 
-    # ── 2. Gather data ──
-    # Station daily observations (JSON fast-path, then parquet fallback)
+    # Cache miss or forced regen — require auth to invoke LLM
+    auth_header = request.headers.get("authorization", "")
+    if not _has_valid_tasks_token(auth_header):
+        raise HTTPException(status_code=404, detail="Brief not yet generated for this date")
+
+    return await _generate_and_cache_brief(date, outputs_bucket)
+
+
+async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str, Any]:
+    """Gather data, call Gemini, write to GCS, and return the brief dict."""
+    from datetime import datetime, timedelta
+
+    # ── Gather station observations ──
     stations: List[Dict] = []
     try:
         client = _gcs_client()
         bucket = client.bucket(RAW_DATA_BUCKET)
 
-        # Fast path: pre-computed stations.json
         json_path = f"raw/station_daily/date={date}/stations.json"
         json_blob = bucket.blob(json_path)
         if json_blob.exists(client):
             data = json.loads(json_blob.download_as_text())
             all_stations = data.get("stations", [])
-            # Filter to Pakistan using country boundary
             stations = [s for s in all_stations
                         if _point_in_pakistan(s.get("lat") or 0, s.get("lon") or 0)]
         else:
-            # Slow fallback: parse parquets (has country_name column)
             prefix = f"raw/station_daily/date={date}"
             blobs = list(bucket.list_blobs(prefix=prefix))
             parquet_blobs = [b for b in blobs if b.name.endswith(".parquet")]
@@ -2150,7 +2168,6 @@ async def get_daily_brief(
                         blob.download_to_filename(tmp_path)
                         dfs.append(pd.read_parquet(tmp_path))
                     df = pd.concat(dfs, ignore_index=True)
-                    # Filter to Pakistan
                     if "country_name" in df.columns:
                         df = df[df["country_name"].str.lower() == "pakistan"]
                     pm25_col = "pm25_ugm3_mean" if "pm25_ugm3_mean" in df.columns else "pm25_daily_mean"
@@ -2171,7 +2188,7 @@ async def get_daily_brief(
     except Exception as e:
         logger.warning(f"Brief: failed to load stations for {date}: {e}")
 
-    # Prediction stats (backbone)
+    # ── Prediction stats (backbone) ──
     pred_stats: Optional[Dict] = None
     try:
         pred_data = _gcs_read_json(outputs_bucket, f"predictions/date={date}/pm25_{date}.json")
@@ -2181,29 +2198,25 @@ async def get_daily_brief(
     except Exception:
         pass
 
-    # Enhanced (support_aware) model stats — computed from TIF
-    enhanced_stats: Optional[Dict] = None
-    enhanced_stats = _compute_tif_stats(
+    # ── Enhanced (support_aware) model stats ──
+    enhanced_stats: Optional[Dict] = _compute_tif_stats(
         outputs_bucket,
         f"predictions/support_aware/date={date}/pm25_{date}.tif",
     )
 
-    # FIRMS fire detections
+    # ── FIRMS fire detections ──
     fires_csv: Optional[str] = None
     for offset in range(3):
-        from datetime import datetime, timedelta
         d = datetime.strptime(date, "%Y-%m-%d") - timedelta(days=offset)
         trial_ds = d.strftime("%Y%m%d")
         fires_csv = _load_forecasts_text_safe(f"hindcast/firms/firms_{trial_ds}.csv")
         if fires_csv and fires_csv.strip():
             break
 
-    # ── 3. Build context and generate ──
+    # ── Generate ──
     context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv)
-
     narrative = await _generate_brief_llm(date, context)
 
-    # ── 4. Build response and cache to GCS ──
     result = {
         "date": date,
         "narrative": narrative,
@@ -2216,7 +2229,8 @@ async def get_daily_brief(
         },
     }
 
-    # Cache to GCS
+    # ── Cache to GCS ──
+    cache_path = f"briefs/ops_{date}.json"
     try:
         client = _gcs_client()
         blob = client.bucket(outputs_bucket).blob(cache_path)
@@ -2229,3 +2243,66 @@ async def get_daily_brief(
         logger.warning(f"Failed to cache brief for {date}: {e}")
 
     return result
+
+
+@router.post(
+    "/generate-briefs",
+    summary="Generate daily briefs for recent dates",
+    description=(
+        "Scans the last `days_back` prediction dates, generates a brief for any that "
+        "are missing a cached GCS entry, and returns a summary. Called nightly by Cloud "
+        "Scheduler and can be used for historical backfill with a larger days_back value."
+    ),
+)
+async def generate_briefs_batch(
+    days_back: int = Query(7, ge=1, le=730, description="Number of recent dates to check"),
+    _: bool = Depends(verify_tasks_token),
+) -> Dict[str, Any]:
+    """Generate missing briefs for the most recent `days_back` prediction dates."""
+    outputs_bucket = _get_outputs_bucket()
+
+    all_dates = _gcs_list_cog_dates(limit=days_back + 10)
+    target_dates = all_dates[-days_back:]
+
+    generated: List[str] = []
+    skipped: List[str] = []
+    errors: List[Dict[str, str]] = []
+
+    for date in target_dates:
+        cache_path = f"briefs/ops_{date}.json"
+        # Skip dates that already have a cached brief
+        try:
+            _gcs_read_json(outputs_bucket, cache_path)
+            skipped.append(date)
+            continue
+        except HTTPException as e:
+            if e.status_code != 404:
+                errors.append({"date": date, "error": f"Cache read failed: {e.detail}"})
+                continue
+        except Exception as e:
+            errors.append({"date": date, "error": f"Cache check error: {e}"})
+            continue
+
+        # Generate
+        try:
+            await _generate_and_cache_brief(date, outputs_bucket)
+            generated.append(date)
+            logger.info(f"Batch brief generation: generated {date}")
+        except Exception as e:
+            logger.warning(f"Batch brief generation: failed for {date}: {e}")
+            errors.append({"date": date, "error": str(e)})
+
+    logger.info(
+        f"Batch brief generation complete: {len(generated)} generated, "
+        f"{len(skipped)} skipped, {len(errors)} errors"
+    )
+    return {
+        "generated": generated,
+        "skipped": skipped,
+        "errors": errors,
+        "summary": {
+            "generated_count": len(generated),
+            "skipped_count": len(skipped),
+            "error_count": len(errors),
+        },
+    }
