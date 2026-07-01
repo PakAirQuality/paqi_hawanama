@@ -42,6 +42,11 @@ class Settings(BaseSettings):
     TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
     PUBLIC_API_SECRET: Optional[str] = None  # Secret for public API endpoints
     NASA_API_KEY: Optional[str] = None  # API key for NASA Database endpoints
+
+    # BAM push-ingest (SFL / external MQTT bridge → HTTPS)
+    BAM_INGEST_TOKEN: Optional[str] = None   # Bearer token SFL uses to push BAM readings
+    BAM_ALLOWED_IPS: Optional[str] = None    # optional comma-separated source IP allowlist
+    BAM_RATE_LIMIT_PER_MIN: int = 120        # best-effort per-instance rate limit
     
     # LLM/AI Services
     GEMINI_API_KEY: Optional[str] = None

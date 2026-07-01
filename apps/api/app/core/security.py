@@ -56,6 +56,41 @@ async def verify_tasks_token(
     return True
 
 
+async def verify_bam_token(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security)
+):
+    """
+    Verify the bearer token used by SFL's central system to push BAM readings.
+
+    Unlike verify_tasks_token there is no Cloud Scheduler / OIDC branch: this
+    endpoint is reached by an external third party over public HTTPS and is
+    guarded solely by the shared BAM_INGEST_TOKEN.
+    """
+    if not credentials:
+        raise HTTPException(
+            status_code=401,
+            detail="Authorization token required",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not settings.BAM_INGEST_TOKEN:
+        raise HTTPException(
+            status_code=503,
+            detail="BAM ingest authentication not configured",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    if not secrets.compare_digest(credentials.credentials, settings.BAM_INGEST_TOKEN):
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid authorization token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return True
+
+
 async def verify_cloud_scheduler_request(request: Request):
     """
     Verify Cloud Scheduler requests.

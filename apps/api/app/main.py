@@ -1,8 +1,14 @@
+import os
+
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from app.core.config import settings
 from app.core.database import get_database
-from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics
+from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest
+
+# True only on the dedicated public BAM push-ingest service (hawanama-bam).
+# Not mounted on the main public app, so BAM POST is isolated to its own service.
+BAM_ROLE = os.environ.get("BAM_ROLE", "").lower() == "true"
 
 app = FastAPI(
     title="Hawanama API",
@@ -32,6 +38,8 @@ app.include_router(cities.router, prefix=f"{settings.API_V1_STR}", tags=["cities
 app.include_router(exports.router, prefix=f"{settings.API_V1_STR}/exports", tags=["exports"])
 app.include_router(exports_publish.router, prefix=f"{settings.API_V1_STR}/exports/publish", tags=["publish"])
 app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}", tags=["tasks"])
+if BAM_ROLE:
+    app.include_router(bam_ingest.router, prefix=f"{settings.API_V1_STR}/bam", tags=["bam-ingest"])
 app.include_router(bot.router, prefix=f"{settings.API_V1_STR}", tags=["bot"])
 app.include_router(punjab_epa.router, prefix=f"{settings.API_V1_STR}/punjab", tags=["punjab-epa"])
 app.include_router(openaq_network.router, prefix=f"{settings.API_V1_STR}")
