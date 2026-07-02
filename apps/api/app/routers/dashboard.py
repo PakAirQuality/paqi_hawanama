@@ -136,13 +136,17 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
             WITH latest_readings AS (
                 SELECT DISTINCT ON (scope_key) 
                     scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa,
-                    wind_speed_ms, wind_dir_deg, ts_utc
+                    wind_speed_ms, wind_dir_deg, ts_utc, qc_state
                 FROM readings
                 WHERE scope_type = 'station'
                   AND ts_utc > NOW() - INTERVAL '48 hours'
+                  -- QC gate: hide only readings we explicitly flagged bad (BAM). Legacy
+                  -- providers use other qc_state values ('raw', 'OK', NULL) and must all
+                  -- pass — so we EXCLUDE the bad states rather than allow-list 'OK'.
+                  AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
                 ORDER BY scope_key, ts_utc DESC
             )
-            SELECT 
+            SELECT
                 s.station_id,
                 s.name,
                 s.lat AS latitude,
@@ -156,7 +160,7 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
                 lr.wind_speed_ms,
                 lr.wind_dir_deg,
                 lr.ts_utc AS last_reading,
-                'OK' AS qc_state,
+                COALESCE(lr.qc_state, 'OK') AS qc_state,
                 CASE 
                     WHEN lr.aqi_us <= 50 THEN 'good'
                     WHEN lr.aqi_us <= 100 THEN 'moderate'
@@ -236,6 +240,8 @@ async def get_station_current_data(
                 WHERE scope_type = 'station'
                   AND scope_key = :station_id
                   AND ts_utc > NOW() - INTERVAL '48 hours'
+                  -- QC gate: hide implausible readings from the public current view.
+                  AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
                 ORDER BY scope_key, ts_utc DESC
             )
             SELECT * FROM latest_readings

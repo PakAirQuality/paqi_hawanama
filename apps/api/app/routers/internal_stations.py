@@ -31,6 +31,11 @@ from app.schemas.internal_station import (
     EpisodeHour,
 )
 from app.core.database import get_database
+from app.services.ingestion.bam_service import (
+    FLOW_TARGET_LPM,
+    FLOW_TOL_FRAC,
+    HIGH_RH_PCT,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -1156,4 +1161,423 @@ async def get_station_episodes(
         raise
     except Exception as e:
         logger.error(f"Error detecting episodes for station {station_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+# =====================================================================================
+# BAM QC/QA status — live device health + plausibility verdict for the /bam monitor page
+# =====================================================================================
+
+# Spatial cross-check: flag if BAM diverges strongly from nearby stations.
+QC_NEIGHBOR_RADIUS_M = 40000
+QC_SPATIAL_MIN_NEIGHBORS = 2
+QC_SPATIAL_RATIO = 3.0        # BAM outside [median/3, median*3] ...
+QC_SPATIAL_ABS_MIN = 20.0     # ... AND absolute gap > 20 µg/m³ → divergent
+# Stuck-sensor: near-zero variance over a recent window.
+QC_STUCK_WINDOW_MIN = 30
+QC_STUCK_MIN_SAMPLES = 30
+QC_STUCK_STD_EPS = 0.05
+
+
+def _verdict_from_checks(checks: List[dict]) -> dict:
+    statuses = [c["status"] for c in checks]
+    fails = [c for c in checks if c["status"] == "fail"]
+    warns = [c for c in checks if c["status"] == "warn"]
+    if fails:
+        level = "RED"
+    elif warns:
+        level = "YELLOW"
+    else:
+        level = "GREEN"
+    if level == "GREEN":
+        headline = "BAM is healthy — readings are plausible and reporting normally."
+    else:
+        problems = ", ".join(c["label"].lower() for c in (fails + warns))
+        lead = "BAM has a problem" if fails else "BAM looks mostly OK, watch"
+        headline = f"{lead}: {problems}."
+    return {"level": level, "headline": headline,
+            "issues": [c["key"] for c in (fails + warns)]}
+
+
+@router.get("/{station_id}/qc-status")
+async def get_station_qc_status(
+    station_id: str,
+    hours: int = Query(24, ge=1, le=168),
+    db: AsyncSession = Depends(get_database),
+):
+    """Live QC/QA verdict for a station (built for the BAM monitor page).
+
+    Always returns the station's true state (it does NOT hide flagged data the way the
+    public map does) so faults are visible. Computed on-demand via bucketed SQL — never
+    pulls the raw 1/sec rows.
+    """
+    try:
+        info = await fetch_station_info(db, station_id)
+        if info is None:
+            raise HTTPException(status_code=404, detail="Station not found")
+
+        # --- latest reading (current state) ---
+        latest = (await db.execute(text("""
+            SELECT ts_utc, pm25, aqi_us, temp_c, humidity, pressure_hpa,
+                   wind_speed_ms, wind_dir_deg, qc_state, qc_flags,
+                   (raw->>'flow')::float AS flow,
+                   EXTRACT(EPOCH FROM (NOW() - ts_utc)) AS age_s
+            FROM readings
+            WHERE scope_type='station' AND scope_key=:sid
+            ORDER BY ts_utc DESC
+            LIMIT 1
+        """), {"sid": station_id})).mappings().first()
+
+        # --- window aggregates ---
+        agg = (await db.execute(text("""
+            SELECT
+              COUNT(*) AS n,
+              COUNT(*) FILTER (WHERE qc_state='INVALID') AS n_invalid,
+              COUNT(*) FILTER (WHERE qc_state='SUSPECT') AS n_suspect,
+              COUNT(*) FILTER (WHERE qc_state IS NULL OR qc_state='OK') AS n_ok,
+              AVG(pm25)  FILTER (WHERE qc_state IS NULL OR qc_state='OK') AS pm25_avg,
+              MAX(pm25)  FILTER (WHERE qc_state IS NULL OR qc_state='OK') AS pm25_max,
+              COUNT(*) FILTER (WHERE humidity > :high_rh) AS n_high_rh,
+              COUNT(*) FILTER (WHERE (raw->>'flow') IS NOT NULL) AS n_flow,
+              COUNT(*) FILTER (WHERE (raw->>'flow') IS NOT NULL
+                     AND abs((raw->>'flow')::float - :flow_t)/:flow_t <= :flow_tol) AS n_flow_ok,
+              AVG((raw->>'flow')::float) AS flow_avg,
+              STDDEV_POP((raw->>'flow')::float) AS flow_std,
+              COUNT(DISTINCT date_trunc('minute', ts_utc)) AS minutes_with_data,
+              MIN(ts_utc) AS first_ts, MAX(ts_utc) AS last_ts
+            FROM readings
+            WHERE scope_type='station' AND scope_key=:sid
+              AND ts_utc > NOW() - (:hours * interval '1 hour')
+        """), {"sid": station_id, "hours": hours, "high_rh": HIGH_RH_PCT,
+               "flow_t": FLOW_TARGET_LPM, "flow_tol": FLOW_TOL_FRAC})).mappings().first()
+
+        # --- recent continuity (last 60 min) — drives the Reporting verdict, so a brand-new
+        # monitor with low 24h coverage isn't marked broken while it's actually reporting now ---
+        recent = (await db.execute(text("""
+            SELECT COUNT(DISTINCT date_trunc('minute', ts_utc)) AS minutes_with_data
+            FROM readings
+            WHERE scope_type='station' AND scope_key=:sid
+              AND ts_utc > NOW() - interval '60 minutes'
+        """), {"sid": station_id})).mappings().first()
+
+        # --- stuck-sensor: variance over the recent window ---
+        stuck_row = (await db.execute(text("""
+            SELECT STDDEV_POP(pm25) AS sd, COUNT(*) AS n
+            FROM readings
+            WHERE scope_type='station' AND scope_key=:sid
+              AND pm25 IS NOT NULL
+              AND ts_utc > NOW() - (:mins * interval '1 minute')
+        """), {"sid": station_id, "mins": QC_STUCK_WINDOW_MIN})).mappings().first()
+
+        # --- spatial: BAM median vs nearby stations (last hour) ---
+        spatial = (await db.execute(text("""
+            WITH me AS (SELECT geom FROM stations WHERE station_id=:sid),
+            neigh AS (
+              SELECT DISTINCT ON (r.scope_key) r.scope_key, r.pm25
+              FROM readings r
+              JOIN stations s2 ON s2.station_id = r.scope_key
+              JOIN providers p2 ON p2.id = s2.provider_id
+              CROSS JOIN me
+              WHERE r.scope_type='station'
+                AND COALESCE(p2.code,'') != 'bam'
+                AND s2.active = true
+                AND r.pm25 IS NOT NULL
+                AND (r.qc_state IS NULL OR r.qc_state NOT IN ('INVALID','SUSPECT'))
+                AND r.ts_utc > NOW() - interval '6 hours'
+                AND me.geom IS NOT NULL
+                AND ST_DWithin(s2.geom, me.geom, :radius)
+              ORDER BY r.scope_key, r.ts_utc DESC
+            ),
+            mine AS (
+              SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY pm25) AS bam_median
+              FROM readings
+              WHERE scope_type='station' AND scope_key=:sid AND pm25 IS NOT NULL
+                AND (qc_state IS NULL OR qc_state='OK')
+                AND ts_utc > NOW() - interval '1 hour'
+            )
+            SELECT
+              (SELECT COUNT(*) FROM neigh) AS n_neighbors,
+              (SELECT percentile_cont(0.5) WITHIN GROUP (ORDER BY pm25) FROM neigh) AS neighbor_median,
+              (SELECT bam_median FROM mine) AS bam_median
+        """), {"sid": station_id, "radius": QC_NEIGHBOR_RADIUS_M})).mappings().first()
+
+        # --- hourly PM2.5 series for the trend (bucketed; avoids pulling 1/sec rows) ---
+        series_rows = (await db.execute(text("""
+            SELECT date_trunc('hour', ts_utc) AS hour_utc,
+                   AVG(pm25) FILTER (WHERE qc_state IS NULL OR qc_state='OK') AS pm25,
+                   COUNT(*) AS n
+            FROM readings
+            WHERE scope_type='station' AND scope_key=:sid
+              AND ts_utc > NOW() - (:hours * interval '1 hour')
+            GROUP BY 1 ORDER BY 1
+        """), {"sid": station_id, "hours": hours})).mappings().all()
+        series = [
+            {"hour_utc": r["hour_utc"].isoformat(),
+             "pm25": round(float(r["pm25"]), 1) if r["pm25"] is not None else None}
+            for r in series_rows
+        ]
+
+        # ---------- assemble ----------
+        n = int(agg["n"] or 0)
+        age_s = float(latest["age_s"]) if latest and latest["age_s"] is not None else None
+        if age_s is None:
+            cur_status = "offline"
+        elif age_s < 120:
+            cur_status = "online"
+        elif age_s < 900:
+            cur_status = "delayed"
+        else:
+            cur_status = "offline"
+
+        total_minutes = hours * 60
+        coverage_pct = round(100.0 * (agg["minutes_with_data"] or 0) / total_minutes, 1) if total_minutes else 0.0
+        invalid_rate = round(100.0 * (agg["n_invalid"] or 0) / n, 1) if n else 0.0
+        suspect_rate = round(100.0 * (agg["n_suspect"] or 0) / n, 1) if n else 0.0
+        high_rh_rate = round(100.0 * (agg["n_high_rh"] or 0) / n, 1) if n else 0.0
+        flow_ok_rate = round(100.0 * (agg["n_flow_ok"] or 0) / agg["n_flow"], 1) if (agg["n_flow"] or 0) else None
+
+        # recent (last-hour) coverage drives the reporting verdict
+        recent_cov = round(100.0 * (recent["minutes_with_data"] or 0) / 60.0, 1) if recent else 0.0
+
+        checks: List[dict] = []
+
+        # Reporting / continuity — judged on "is it reporting NOW", not 24h history.
+        if age_s is None or cur_status == "offline" or recent_cov < 50:
+            st = "fail"
+        elif cur_status == "delayed" or recent_cov < 90:
+            st = "warn"
+        else:
+            st = "pass"
+        checks.append({"key": "reporting", "label": "Reporting", "status": st,
+                       "value": recent_cov,
+                       "detail": (f"{recent_cov}% minute-coverage in last hour; last reading "
+                                  f"{int(age_s)}s ago ({coverage_pct}% over {hours}h)"
+                                  if age_s is not None else "no data received")})
+
+        # Flow — INFORMATIONAL only (correct target/units unconfirmed; never fails the verdict).
+        flow_avg = round(float(agg["flow_avg"]), 2) if agg["flow_avg"] is not None else None
+        flow_std = round(float(agg["flow_std"]), 2) if agg["flow_std"] is not None else None
+        if flow_avg is None:
+            flow_detail = "no flow reported"
+        else:
+            flow_detail = f"avg {flow_avg} L/min" + (f" (σ={flow_std})" if flow_std is not None else "")
+        checks.append({"key": "flow", "label": "Flow (info)", "status": "pass",
+                       "value": flow_avg, "detail": flow_detail})
+
+        # Stuck sensor
+        sd = stuck_row["sd"] if stuck_row else None
+        sn = int(stuck_row["n"]) if stuck_row and stuck_row["n"] is not None else 0
+        stuck = sd is not None and sn >= QC_STUCK_MIN_SAMPLES and float(sd) < QC_STUCK_STD_EPS
+        checks.append({"key": "stuck", "label": "Stuck sensor", "status": "fail" if stuck else "pass",
+                       "value": float(sd) if sd is not None else None,
+                       "detail": (f"PM2.5 variance ~0 over last {QC_STUCK_WINDOW_MIN}min ({sn} samples)"
+                                  if stuck else f"PM2.5 varying normally (σ={float(sd):.2f})" if sd is not None
+                                  else "not enough recent data")})
+
+        # Invalid rate
+        if invalid_rate > 20:
+            st = "fail"
+        elif invalid_rate > 5:
+            st = "warn"
+        else:
+            st = "pass"
+        checks.append({"key": "invalid_rate", "label": "Invalid readings", "status": st,
+                       "value": invalid_rate, "detail": f"{invalid_rate}% of last {hours}h flagged INVALID"})
+
+        # Spatial agreement
+        n_neighbors = int(spatial["n_neighbors"] or 0) if spatial else 0
+        neighbor_median = float(spatial["neighbor_median"]) if spatial and spatial["neighbor_median"] is not None else None
+        bam_median = float(spatial["bam_median"]) if spatial and spatial["bam_median"] is not None else None
+        spatial_status = "pass"; spatial_detail = "consistent with nearby stations"
+        ratio = None
+        if n_neighbors < QC_SPATIAL_MIN_NEIGHBORS or neighbor_median is None or bam_median is None:
+            spatial_status = "warn"; spatial_detail = "no nearby stations to compare"
+        else:
+            ratio = round(bam_median / neighbor_median, 2) if neighbor_median else None
+            diverged = (
+                (bam_median > QC_SPATIAL_RATIO * neighbor_median or
+                 bam_median < neighbor_median / QC_SPATIAL_RATIO)
+                and abs(bam_median - neighbor_median) > QC_SPATIAL_ABS_MIN
+            )
+            if diverged:
+                spatial_status = "fail"
+                spatial_detail = (f"BAM ~{bam_median:.0f} vs nearby ~{neighbor_median:.0f} µg/m³ "
+                                  f"({n_neighbors} stations)")
+            else:
+                spatial_detail = (f"BAM ~{bam_median:.0f} vs nearby ~{neighbor_median:.0f} µg/m³ "
+                                  f"({n_neighbors} stations)")
+        checks.append({"key": "spatial", "label": "Spatial agreement", "status": spatial_status,
+                       "value": ratio, "detail": spatial_detail})
+
+        # High humidity — informational only; never affects the verdict (common in Karachi).
+        checks.append({"key": "high_rh", "label": "Humidity context", "status": "pass",
+                       "value": high_rh_rate,
+                       "detail": f"{high_rh_rate}% of readings above {int(HIGH_RH_PCT)}% RH"
+                                 + (" — PM may over-read" if high_rh_rate > 50 else "")})
+
+        latest_flags = list(latest["qc_flags"]) if latest and latest["qc_flags"] else []
+        current = None
+        if latest:
+            current = {
+                "ts_utc": latest["ts_utc"].isoformat() if latest["ts_utc"] else None,
+                "age_seconds": int(age_s) if age_s is not None else None,
+                "status": cur_status,
+                "pm25": float(latest["pm25"]) if latest["pm25"] is not None else None,
+                "aqi_us": int(latest["aqi_us"]) if latest["aqi_us"] is not None else None,
+                "temp_c": float(latest["temp_c"]) if latest["temp_c"] is not None else None,
+                "humidity": float(latest["humidity"]) if latest["humidity"] is not None else None,
+                "pressure_hpa": float(latest["pressure_hpa"]) if latest["pressure_hpa"] is not None else None,
+                "wind_speed_ms": float(latest["wind_speed_ms"]) if latest["wind_speed_ms"] is not None else None,
+                "wind_dir_deg": int(latest["wind_dir_deg"]) if latest["wind_dir_deg"] is not None else None,
+                "flow": float(latest["flow"]) if latest["flow"] is not None else None,
+                "qc_state": latest["qc_state"],
+                "qc_flags": latest_flags,
+            }
+
+        return {
+            "station_id": station_id,
+            "name": info.name,
+            "provider": info.provider,
+            "lat": info.lat,
+            "lon": info.lon,
+            "window_hours": hours,
+            "current": current,
+            "stats24h": {
+                "n": n,
+                "pm25_avg": round(float(agg["pm25_avg"]), 1) if agg["pm25_avg"] is not None else None,
+                "pm25_max": round(float(agg["pm25_max"]), 1) if agg["pm25_max"] is not None else None,
+                "coverage_pct": coverage_pct,
+                "invalid_rate_pct": invalid_rate,
+                "suspect_rate_pct": suspect_rate,
+                "high_rh_rate_pct": high_rh_rate,
+                "flow_ok_rate_pct": flow_ok_rate,
+                "flow_avg": round(float(agg["flow_avg"]), 2) if agg["flow_avg"] is not None else None,
+            },
+            "neighbors": {"n": n_neighbors, "median": neighbor_median, "bam_median": bam_median},
+            "series": series,
+            "checks": checks,
+            "verdict": _verdict_from_checks(checks),
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing QC status for {station_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{station_id}/timeseries")
+async def get_station_timeseries(
+    station_id: str,
+    minutes: int = Query(60, ge=1, le=1440),
+    db: AsyncSession = Depends(get_database),
+):
+    """Raw per-reading time series for the BAM monitor page.
+
+    Returns full ~1/sec resolution for short windows; auto-downsamples (time_bucket avg)
+    when the window would exceed MAX_POINTS so the payload/chart stays sane. INVALID pm25
+    (sentinels) is nulled so it doesn't distort the line; other channels pass through.
+    """
+    MAX_POINTS = 3000
+    est_points = minutes * 60
+    downsample = est_points > MAX_POINTS
+    try:
+        if downsample:
+            import math as _math
+            bucket_s = max(1, _math.ceil(est_points / MAX_POINTS))
+            rows = (await db.execute(text("""
+                SELECT time_bucket(make_interval(secs => :bs), ts_utc) AS ts,
+                       AVG(pm25) FILTER (WHERE qc_state IS NULL OR qc_state <> 'INVALID') AS pm25,
+                       AVG((raw->>'flow')::float) AS flow,
+                       AVG(humidity) AS humidity,
+                       AVG(temp_c) AS temp,
+                       AVG(pressure_hpa) AS pressure,
+                       AVG(wind_speed_ms) AS wind
+                FROM readings
+                WHERE scope_type='station' AND scope_key=:sid
+                  AND ts_utc > NOW() - (:minutes * interval '1 minute')
+                GROUP BY 1 ORDER BY 1
+            """), {"sid": station_id, "minutes": minutes, "bs": bucket_s})).mappings().all()
+        else:
+            bucket_s = 1
+            rows = (await db.execute(text("""
+                SELECT ts_utc AS ts,
+                       CASE WHEN qc_state = 'INVALID' THEN NULL ELSE pm25 END AS pm25,
+                       (raw->>'flow')::float AS flow,
+                       humidity, temp_c AS temp, pressure_hpa AS pressure,
+                       wind_speed_ms AS wind
+                FROM readings
+                WHERE scope_type='station' AND scope_key=:sid
+                  AND ts_utc > NOW() - (:minutes * interval '1 minute')
+                ORDER BY ts_utc ASC
+            """), {"sid": station_id, "minutes": minutes})).mappings().all()
+
+        def num(v, nd=1):
+            return round(float(v), nd) if v is not None else None
+
+        points = [{
+            "ts": r["ts"].isoformat(),
+            "pm25": num(r["pm25"]),
+            "flow": num(r["flow"], 2),
+            "humidity": num(r["humidity"]),
+            "temp": num(r["temp"]),
+            "pressure": num(r["pressure"]),
+            "wind": num(r["wind"], 2),
+        } for r in rows]
+
+        return {
+            "station_id": station_id,
+            "minutes": minutes,
+            "downsampled": downsample,
+            "bucket_seconds": bucket_s,
+            "count": len(points),
+            "points": points,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing timeseries for {station_id}: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.get("/{station_id}/live")
+async def get_station_live(
+    station_id: str,
+    limit: int = Query(30, ge=1, le=200),
+    db: AsyncSession = Depends(get_database),
+):
+    """Most-recent raw readings for the BAM monitor's live feed (newest first).
+
+    Returns each reading with its full `raw` jsonb payload (what BAM actually sent),
+    so the page can show the raw JSON ticking in near-real-time.
+    """
+    try:
+        rows = (await db.execute(text("""
+            SELECT ts_utc, pm25, aqi_us, temp_c, humidity, pressure_hpa,
+                   wind_speed_ms, wind_dir_deg, qc_state, qc_flags, raw, ingested_at
+            FROM readings
+            WHERE scope_type='station' AND scope_key=:sid
+            ORDER BY ts_utc DESC
+            LIMIT :limit
+        """), {"sid": station_id, "limit": limit})).mappings().all()
+
+        readings = [{
+            "ts_utc": r["ts_utc"].isoformat() if r["ts_utc"] else None,
+            "pm25": float(r["pm25"]) if r["pm25"] is not None else None,
+            "aqi_us": int(r["aqi_us"]) if r["aqi_us"] is not None else None,
+            "temp_c": float(r["temp_c"]) if r["temp_c"] is not None else None,
+            "humidity": float(r["humidity"]) if r["humidity"] is not None else None,
+            "pressure_hpa": float(r["pressure_hpa"]) if r["pressure_hpa"] is not None else None,
+            "wind_speed_ms": float(r["wind_speed_ms"]) if r["wind_speed_ms"] is not None else None,
+            "wind_dir_deg": int(r["wind_dir_deg"]) if r["wind_dir_deg"] is not None else None,
+            "qc_state": r["qc_state"],
+            "qc_flags": list(r["qc_flags"]) if r["qc_flags"] else [],
+            "raw": r["raw"],
+            "ingested_at": r["ingested_at"].isoformat() if r["ingested_at"] else None,
+        } for r in rows]
+
+        return {"station_id": station_id, "count": len(readings), "readings": readings}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error fetching live readings for {station_id}: {e}")
         raise HTTPException(status_code=500, detail="Internal server error")
