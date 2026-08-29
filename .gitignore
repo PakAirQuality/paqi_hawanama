@@ -1,0 +1,76 @@
+node_modules
+
+# Output
+.output
+.vercel
+.netlify
+.wrangler
+/.svelte-kit
+/build
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.*
+!.env.example
+!.env.test
+
+# Vite
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+
+.dev.vars*
+!.dev.vars.example
+.env*
+# Ignore build artifacts and cache files
+.next/
+.firebase/
+out/
+apps/web-next/.firebase/
+apps/web-next/.next/
+apps/dashboard-frontend/out/
+infra/.terraform/
+infra/terraform.tfstate
+infra/terraform.tfstate.backup
+*.pack
+terraform-provider-*
+hawanama.db
+*.log
+__pycache__/
+node_modules/
+.env.local
+.env
+
+# Database schema (contains credentials in dump)
+db_schema/
+
+# Editor config
+.vscode/
+
+# Database explorer with credentials
+prod_db_explorer/
+**/prod_db_explorer/
+
+# Hawanama specific - Data directories
+exports/
+external_data/
+
+# Provider station manifests and raw API responses — regenerated at runtime, never committed
+# (contain per-station coordinates and owner-supplied names; see DATA.md)
+apps/*/artifacts/
+apps/*/tasks/artifacts/
+**/station_manifests/
+**/city_manifests/
+apps/worker/tasks/raw_api_data/
+apps/worker/tasks/city_raw_api_data/
+# Internal notes / debug dumps
+CLAUDE.md
+.claude/
+debug-gap.txt
+# macOS duplicate artefacts
+* 2.*
+# Partner monitor host lists (kept out of the public tree)
+external_data/

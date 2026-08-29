@@ -1,0 +1,25 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper function to check if user has a valid @pakairquality.com domain
+    function isInternalUser() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email.matches('.*@pakairquality\\.com');
+    }
+
+    // Default rule: Only allow access to verified @pakairquality.com users
+    match /{document=**} {
+      allow read, write: if isInternalUser();
+    }
+
+    // Specific collections can have additional rules here if needed
+    // For example, if you want certain collections to be read-only:
+    // match /readonly_collection/{document} {
+    //   allow read: if isInternalUser();
+    //   allow write: if false;
+    // }
+  }
+}

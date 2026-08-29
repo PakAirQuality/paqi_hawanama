@@ -1,0 +1,13 @@
+{
+  "projects": { 
+    "default": "hawanama-2" 
+  },
+  "targets": {
+    "hawanama-2": {
+      "hosting": {
+        "hawanama-main": ["hawanama-2"],
+        "hawanama-dashboard": ["hawanama-dashboard"]
+      }
+    }
+  }
+}

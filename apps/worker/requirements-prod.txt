@@ -1,0 +1,12 @@
+# Production requirements for Worker
+apscheduler==3.10.4
+redis==5.0.1
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+psycopg2-binary==2.9.9
+geoalchemy2==0.14.2
+httpx==0.25.2
+tenacity==8.2.3
+pydantic==2.5.0
+pydantic-settings==2.1.0
+python-decouple==3.8

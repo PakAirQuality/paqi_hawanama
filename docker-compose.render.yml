@@ -1,0 +1,94 @@
+# Docker Compose for local testing of Render deployment
+version: '3.8'
+
+services:
+  # PostgreSQL with TimescaleDB
+  postgres:
+    image: timescale/timescaledb:latest-pg15
+    environment:
+      POSTGRES_DB: hawanama
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: password123
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/init-render-db.sh:/docker-entrypoint-initdb.d/init.sh
+    command: |
+      postgres
+      -c shared_preload_libraries=timescaledb
+      -c max_connections=200
+      -c shared_buffers=256MB
+      -c effective_cache_size=1GB
+
+  # Redis for job queue
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # API Service (built from Dockerfile)
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hawanama
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: password123
+      REDIS_URL: redis://redis:6379/0
+      IQAIR_API_KEY: ${IQAIR_API_KEY}
+      PORT: 8000
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./apps/api:/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # Worker Service (built from Dockerfile)
+  worker:
+    build:
+      context: ./apps/worker
+      dockerfile: Dockerfile
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hawanama
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: password123
+      REDIS_URL: redis://redis:6379/0
+      IQAIR_API_KEY: ${IQAIR_API_KEY}
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./apps/worker:/app
+
+  # Scheduler Service (built from root Dockerfile)
+  scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.scheduler
+    environment:
+      POSTGRES_SERVER: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: hawanama
+      POSTGRES_USER: hawanama
+      POSTGRES_PASSWORD: password123
+      REDIS_URL: redis://redis:6379/0
+      IQAIR_API_KEY: ${IQAIR_API_KEY}
+    depends_on:
+      - postgres
+      - redis
+      - worker
+
+volumes:
+  postgres_data:
+  redis_data:

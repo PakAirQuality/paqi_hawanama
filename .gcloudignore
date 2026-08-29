@@ -1,0 +1,14 @@
+# .gcloudignore
+# ignore everything by default
+**
+# include only what Cloud Build needs
+!apps/
+!apps/api/
+!apps/api/**
+!apps/worker/
+!apps/worker/**
+!apps/web-next/
+!apps/web-next/**
+!cloudbuild.yaml
+!Dockerfile
+!Dockerfile.*

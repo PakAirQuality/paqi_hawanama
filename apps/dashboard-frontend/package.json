@@ -1,0 +1,60 @@
+{
+  "name": "dashboard-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {
+    "node": "20"
+  },
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "clean": "rm -rf .next out",
+    "prebuild": "npm run clean && node scripts/fetch-station-ids.mjs",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "export": "npm run clean && next build"
+  },
+  "dependencies": {
+    "@observablehq/plot": "^0.6.17",
+    "@radix-ui/react-accordion": "^1.2.6",
+    "@radix-ui/react-alert-dialog": "^1.1.5",
+    "@radix-ui/react-avatar": "^1.1.6",
+    "@radix-ui/react-dialog": "^1.1.5",
+    "@radix-ui/react-label": "^2.1.7",
+    "@radix-ui/react-select": "^2.1.5",
+    "@radix-ui/react-separator": "^1.1.6",
+    "@radix-ui/react-slot": "^1.2.3",
+    "@radix-ui/react-switch": "^1.2.6",
+    "@radix-ui/react-tabs": "^1.1.6",
+    "@tanstack/react-query": "^5.89.0",
+    "@types/d3-geo": "^3.1.0",
+    "@types/maplibre-gl": "^1.13.2",
+    "apexcharts": "^5.3.6",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "d3-geo": "^3.1.1",
+    "firebase": "^12.7.0",
+    "lucide-react": "^0.544.0",
+    "mapbox-gl": "^3.19.1",
+    "maplibre-gl": "^5.13.0",
+    "next": "^16.1.4",
+    "react": "18.3.1",
+    "react-apexcharts": "^1.8.0",
+    "react-dom": "18.3.1",
+    "recharts": "^3.2.1",
+    "tailwind-merge": "^3.3.1",
+    "zustand": "^5.0.8"
+  },
+  "devDependencies": {
+    "@eslint/eslintrc": "^3",
+    "@tailwindcss/postcss": "^4.1.13",
+    "@types/node": "^20",
+    "@types/react": "^18.3.0",
+    "@types/react-dom": "^18.3.0",
+    "eslint": "^9",
+    "eslint-config-next": "15.5.3",
+    "tailwindcss": "^4",
+    "tw-animate-css": "^1.3.8",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,385 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "mapbox-gl/dist/mapbox-gl.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.556 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.577 0.245 27.325);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.708 0 0);
+  --chart-1: oklch(0.646 0.222 41.116);
+  --chart-2: oklch(0.6 0.118 184.704);
+  --chart-3: oklch(0.398 0.07 227.392);
+  --chart-4: oklch(0.828 0.189 84.429);
+  --chart-5: oklch(0.769 0.188 70.08);
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.708 0 0);
+}
+
+.dark {
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  --card: oklch(0.205 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+  --primary: oklch(0.922 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.269 0 0);
+  --secondary-foreground: oklch(0.985 0 0);
+  --muted: oklch(0.269 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.269 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.704 0.191 22.216);
+  --border: oklch(1 0 0 / 10%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.556 0 0);
+  --chart-1: oklch(0.488 0.243 264.376);
+  --chart-2: oklch(0.696 0.17 162.48);
+  --chart-3: oklch(0.769 0.188 70.08);
+  --chart-4: oklch(0.627 0.265 303.9);
+  --chart-5: oklch(0.645 0.246 16.439);
+  --sidebar: oklch(0.205 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.488 0.243 264.376);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-ring: oklch(0.556 0 0);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  
+  /* Mobile optimization */
+  html {
+    -webkit-text-size-adjust: 100%;
+    -webkit-tap-highlight-color: transparent;
+    width: 100vw;
+    max-width: 100vw;
+    overflow-x: hidden;
+  }
+  
+  /* Prevent horizontal overflow on mobile */
+  body {
+    overflow-x: hidden;
+    width: 100vw;
+    max-width: 100vw;
+    margin: 0;
+    padding: 0;
+  }
+  
+  /* Improve touch targets on mobile */
+  @media (max-width: 768px) {
+    button, a, [role="button"] {
+      min-height: 44px;
+      min-width: 44px;
+    }
+    
+    /* Prevent mobile browser zoom on input focus */
+    input, select, textarea {
+      font-size: 16px;
+    }
+    
+    /* Prevent pull-to-refresh and overscroll behavior - but allow map touch */
+    html, body {
+      overscroll-behavior: none;
+      -webkit-overflow-scrolling: touch;
+    }
+  }
+}
+
+/* Map page specific - prevent scrolling only on map page */
+.map-page {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
+}
+
+.map-page body {
+  overflow: hidden;
+  height: 100vh;
+  max-height: 100vh;
+}
+
+/* Base container for the marker */
+.aqi-marker-container {
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  animation: marker-fade-in 0.3s forwards;
+  animation-delay: 0.1s;
+  transition: transform 0.2s ease-in-out; /* Add smooth transition for hover */
+}
+
+.aqi-marker-container:hover {
+  transform: scale(1.1); /* Grow the marker on hover */
+  z-index: 10;
+}
+
+/* Low zoom optimizations for globe view */
+.aqi-marker-container.low-zoom {
+  animation: none; /* Remove fade-in animation */
+  opacity: 1;
+  transform: scale(1);
+  transition: none; /* Remove transitions for better performance */
+}
+
+.aqi-marker-container.low-zoom:hover {
+  transform: scale(1.05); /* Minimal hover effect at low zoom */
+}
+
+.aqi-marker-container.low-zoom .aqi-marker {
+  box-shadow: 0 0 0 1px var(--glow-color, rgba(255, 255, 255, 0.4)), 0 0 4px var(--glow-color, rgba(255, 255, 255, 0.3)); /* Reduced glow */
+}
+
+@keyframes marker-fade-in {
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* The new circular marker style */
+.aqi-marker {
+  color: white;
+  font-size: 14px;
+  font-weight: normal;
+  box-shadow: 0 0 0 3px var(--glow-color, rgba(255, 255, 255, 0.4)), 0 0 12px var(--glow-color, rgba(255, 255, 255, 0.6)), 0 2px 4px rgba(0, 0, 0, 0.3);
+  border: none;
+
+  /* Circle shape and centering */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+}
+
+/* All markers use consistent styling */
+
+/* AQI Color Classes - matching cluster colors with glow */
+.bg-no-reading { 
+  background-color: #FFFFFFE6; 
+  color: #666; 
+  --glow-color: rgba(255, 255, 255, 0.4);
+} 
+.bg-good { 
+  background-color: rgba(110, 204, 57, 1); 
+  --glow-color: rgba(110, 204, 57, 0.4);
+} 
+.bg-moderate { 
+  background-color: rgba(240, 194, 12, 1); 
+  color: #333; 
+  --glow-color: rgba(240, 194, 12, 0.4);
+} 
+.bg-unhealthy-sensitive { 
+  background-color: rgba(241, 128, 23, 1); 
+  --glow-color: rgba(241, 128, 23, 0.4);
+} 
+.bg-unhealthy { 
+  background-color: rgba(239, 120, 85, 1); 
+  --glow-color: rgba(239, 120, 85, 0.4);
+} 
+.bg-very-unhealthy { 
+  background-color: #a070b5; 
+  --glow-color: rgba(160, 112, 181, 0.4);
+}
+.bg-hazardous { 
+  background-color: #991b1b; 
+  --glow-color: rgba(153, 27, 27, 0.4);
+}
+
+/* Individual station markers only */
+
+/* Remove grey shading from Recharts bar charts */
+.recharts-bar-rectangle:hover {
+    filter: brightness(1.1) !important;
+    opacity: 1 !important;
+}
+
+.recharts-active-shape {
+    filter: brightness(1.1) !important;
+    opacity: 1 !important;
+}
+
+/* Ensure tooltips and interactions work without grey overlay */
+.recharts-tooltip-cursor {
+    display: none !important;
+}
+
+.recharts-bar .recharts-rectangle:hover {
+    filter: brightness(1.1) !important;
+    opacity: 1 !important;
+}
+
+/* Hide Mapbox attribution completely */
+.mapboxgl-ctrl-attrib,
+.mapboxgl-ctrl-bottom-left,
+.mapboxgl-ctrl-bottom-right {
+    display: none !important;
+}
+
+.mapboxgl-ctrl-attrib-inner {
+    display: none !important;
+}
+
+/* Remove Recharts focus/click outlines and borders */
+.recharts-wrapper,
+.recharts-surface,
+.recharts-layer,
+.recharts-bar,
+.recharts-rectangle {
+    outline: none !important;
+    border: none !important;
+}
+
+.recharts-wrapper:focus,
+.recharts-surface:focus,
+.recharts-layer:focus,
+.recharts-bar:focus,
+.recharts-rectangle:focus {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* Remove active/click states */
+.recharts-bar:active,
+.recharts-rectangle:active,
+.recharts-wrapper:active {
+    outline: none !important;
+    border: none !important;
+    box-shadow: none !important;
+}
+
+/* AQI Colors - Override dark mode to maintain health standard colors */
+:root, .dark {
+  /* Ensure AQI marker colors remain consistent regardless of theme */
+  --aqi-good: rgba(110, 204, 57, 1);
+  --aqi-moderate: rgba(240, 194, 12, 1); 
+  --aqi-unhealthy-sensitive: rgba(241, 128, 23, 1);
+  --aqi-unhealthy: rgba(239, 120, 85, 1);
+  --aqi-very-unhealthy: #a070b5;
+  --aqi-hazardous: #991b1b;
+  --aqi-no-reading: #FFFFFFE6;
+}
+
+/* Force AQI colors to remain consistent in both light and dark modes */
+.bg-good, .dark .bg-good { 
+  background-color: var(--aqi-good) !important; 
+  --glow-color: rgba(110, 204, 57, 0.4) !important;
+} 
+.bg-moderate, .dark .bg-moderate { 
+  background-color: var(--aqi-moderate) !important; 
+  color: #333 !important; 
+  --glow-color: rgba(240, 194, 12, 0.4) !important;
+} 
+.bg-unhealthy-sensitive, .dark .bg-unhealthy-sensitive { 
+  background-color: var(--aqi-unhealthy-sensitive) !important; 
+  --glow-color: rgba(241, 128, 23, 0.4) !important;
+} 
+.bg-unhealthy, .dark .bg-unhealthy { 
+  background-color: var(--aqi-unhealthy) !important; 
+  --glow-color: rgba(239, 120, 85, 0.4) !important;
+} 
+.bg-very-unhealthy, .dark .bg-very-unhealthy { 
+  background-color: var(--aqi-very-unhealthy) !important; 
+  --glow-color: rgba(160, 112, 181, 0.4) !important;
+}
+.bg-hazardous, .dark .bg-hazardous { 
+  background-color: var(--aqi-hazardous) !important; 
+  --glow-color: rgba(153, 27, 27, 0.4) !important;
+}
+.bg-no-reading, .dark .bg-no-reading { 
+  background-color: var(--aqi-no-reading) !important; 
+  color: #666 !important; 
+  --glow-color: rgba(255, 255, 255, 0.4) !important;
+}
+
+/* AQI Text Colors - Force consistency */
+.text-green-600, .dark .text-green-600 { color: #16a34a !important; }
+.text-yellow-600, .dark .text-yellow-600 { color: #ca8a04 !important; }
+.text-orange-600, .dark .text-orange-600 { color: #ea580c !important; }
+.text-red-600, .dark .text-red-600 { color: #dc2626 !important; }
+.text-purple-600, .dark .text-purple-600 { color: #9333ea !important; }
+.text-red-900, .dark .text-red-900 { color: #7f1d1d !important; }
+
+/* AQI Background Colors for cards/badges - Force consistency */
+.bg-green-100, .dark .bg-green-100 { background-color: #dcfce7 !important; }
+.bg-yellow-100, .dark .bg-yellow-100 { background-color: #fef3c7 !important; }
+.bg-orange-100, .dark .bg-orange-100 { background-color: #fed7aa !important; }
+.bg-red-100, .dark .bg-red-100 { background-color: #fee2e2 !important; }
+.bg-purple-100, .dark .bg-purple-100 { background-color: #f3e8ff !important; }
+.bg-red-200, .dark .bg-red-200 { background-color: #fecaca !important; }

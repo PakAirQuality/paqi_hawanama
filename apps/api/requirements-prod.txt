@@ -1,0 +1,27 @@
+# Production requirements for API
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+sqlalchemy==2.0.23
+asyncpg==0.29.0
+pydantic==2.5.0
+pydantic-settings==2.1.0
+redis==5.0.1
+httpx==0.25.2
+# celery==5.3.4  # Removed - not needed in API service
+python-multipart==0.0.6
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-decouple==3.8
+psycopg2-binary==2.9.9
+tenacity==8.2.3
+geoalchemy2==0.14.2
+psutil==5.9.6
+# Twitter automation for Hawanama Bot
+tweepy>=4.14.0
+# LLM/AI integration for Hawanama Bot  
+google-generativeai==0.3.2
+# Worker task dependencies (needed for /tasks endpoints)
+apscheduler==3.10.4
+pandera==0.17.2
+numpy==1.24.3
+alembic==1.13.2

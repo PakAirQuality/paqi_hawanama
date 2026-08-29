@@ -1,0 +1,27 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama-web:latest', '.']
+    dir: 'apps/web-next'
+
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama-web:latest']
+
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hawanama-web'
+      - '--image=asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama-web:latest'
+      - '--region=asia-south1'
+      - '--platform=managed'
+      - '--port=8080'
+      - '--allow-unauthenticated'
+      - '--set-env-vars=NEXT_PUBLIC_API_BASE=https://hawanama-152782825429.asia-south1.run.app/api,NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN=${_MAPBOX_TOKEN}'
+
+options:
+  machineType: 'E2_HIGHCPU_8'
+
+# Pass at deploy time: gcloud builds submit --substitutions=_MAPBOX_TOKEN=<token>
+substitutions:
+  _MAPBOX_TOKEN: ""

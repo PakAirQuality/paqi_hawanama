@@ -1,0 +1,11 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "bench: copilot benchmark tests",
+    "live: tests that call real Gemini API (require GEMINI_API_KEY)",
+    "deterministic: hard factual checks — tool choice, args, numeric, ranking",
+    "contextual: session state, coverage, station focus — require context awareness",
+    "explanatory: provenance, regression guards — check how the model frames results",
+    "safety: abstention, refusal, hedge language — blocks fabrication and overconfidence",
+]
+testpaths = ["tests"]
