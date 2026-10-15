@@ -45,3 +45,52 @@ CREATE TABLE IF NOT EXISTS public.readings (
     ingested_at timestamp with time zone DEFAULT now() NOT NULL,
     PRIMARY KEY (scope_type, scope_key, ts_utc)
 );
+
+-- Geo hierarchy + stations (constraints as in the dump; no PostGIS geom column).
+CREATE TABLE IF NOT EXISTS public.providers (
+    id smallserial PRIMARY KEY,
+    code text NOT NULL UNIQUE,
+    display_name text NOT NULL,
+    api_url text,
+    metadata jsonb,
+    active boolean DEFAULT true NOT NULL,
+    created_at timestamptz DEFAULT now() NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public.countries (
+    id bigserial PRIMARY KEY, name text NOT NULL UNIQUE, iso2 character(2), iso3 character(3),
+    population bigint, active boolean DEFAULT true NOT NULL, last_seen_at timestamptz,
+    created_at timestamptz DEFAULT now() NOT NULL, updated_at timestamptz DEFAULT now() NOT NULL
+);
+CREATE TABLE IF NOT EXISTS public.states (
+    id bigserial PRIMARY KEY, country_id bigint NOT NULL REFERENCES public.countries(id), name text NOT NULL, code text,
+    population bigint, active boolean DEFAULT true NOT NULL, last_seen_at timestamptz,
+    created_at timestamptz DEFAULT now() NOT NULL, updated_at timestamptz DEFAULT now() NOT NULL,
+    UNIQUE (country_id, name)
+);
+CREATE TABLE IF NOT EXISTS public.cities (
+    id bigserial PRIMARY KEY, country_id bigint NOT NULL REFERENCES public.countries(id), state_id bigint REFERENCES public.states(id),
+    name text NOT NULL, population bigint, timezone text, active boolean DEFAULT true NOT NULL, last_seen_at timestamptz,
+    created_at timestamptz DEFAULT now() NOT NULL, updated_at timestamptz DEFAULT now() NOT NULL, scope_key text,
+    UNIQUE (country_id, state_id, name)
+);
+CREATE TABLE IF NOT EXISTS public.stations (
+    station_id character(16) PRIMARY KEY,
+    country_id bigint NOT NULL REFERENCES public.countries(id),
+    state_id bigint REFERENCES public.states(id),
+    city_id bigint REFERENCES public.cities(id),
+    name text NOT NULL,
+    lat double precision NOT NULL,
+    lon double precision NOT NULL,
+    provider_id smallint NOT NULL REFERENCES public.providers(id),
+    source_station_id text,
+    elevation_m double precision,
+    metadata_json jsonb,
+    timezone text,
+    active boolean DEFAULT true NOT NULL,
+    last_seen_at timestamptz,
+    created_at timestamptz DEFAULT now() NOT NULL,
+    updated_at timestamptz DEFAULT now() NOT NULL,
+    monitor_type text,
+    UNIQUE (provider_id, source_station_id),
+    UNIQUE (country_id, state_id, city_id, name, lat, lon)
+);

@@ -191,6 +191,10 @@ class FakeSession:
     async def rollback(self):
         pass
 
+    def begin_nested(self):
+        # savepoint stand-in: the same object works as an async context manager
+        return self
+
     async def __aenter__(self):
         return self
 

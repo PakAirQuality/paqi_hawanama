@@ -13,6 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import engine as async_engine
+from app.ingestion.identity import (append_identity_history, as_dict, ensure_identity, merge_discovery_metadata,
+                                    now_iso)
 from app.ingestion.reconcile import ReconcilePolicy, ReconcileResult, reconcile_and_upsert_readings
 
 logger = logging.getLogger(__name__)
@@ -110,86 +112,98 @@ class DatabaseService:
         })
         return result.scalar()
 
-    async def upsert_station(self, session: AsyncSession, station_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Insert or update station data with versioning"""
+    async def get_or_create_provider(self, session: AsyncSession, provider_code: str, display_name: Optional[str] = None) -> int:
+        """SELECT-first: INSERT ... ON CONFLICT would burn providers_id_seq (SMALLSERIAL) on every call.
+        display_name is only used when the row is created; existing names are never rewritten."""
         from sqlalchemy import text
-        
-        # Generate stable station_id
-        station_id = self.generate_station_id(
-            station_data['country'], 
-            station_data['state'], 
-            station_data['city'],
-            station_data['name'], 
-            station_data['lat'], 
-            station_data['lon']
+        pid = (await session.execute(text("SELECT id FROM providers WHERE code = :code"), {"code": provider_code})).scalar()
+        if pid is None:
+            pid = (await session.execute(
+                text("INSERT INTO providers (code, display_name) VALUES (:code, :display_name) RETURNING id"),
+                {"code": provider_code, "display_name": display_name or provider_code.title()},
+            )).scalar_one()
+        return int(pid)
+
+    async def upsert_station(self, session: AsyncSession, station_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Insert or update a station without ever splitting a device's history.
+
+        station_id is still sha1(country|state|city|name|lat|lon)[:16] for new
+        rows, but an existing row is found by (provider_id, source_station_id)
+        first: a coordinate correction keeps the legacy station_id and is
+        recorded in metadata_json.identity.history instead of creating a second
+        row. A computed id that already belongs to a different native id is an
+        identity_conflict and is skipped (reported, never merged). Curated
+        metadata keys survive; discovery only writes its own keys and native ids.
+        """
+        from sqlalchemy import text
+
+        provider_code = station_data.get("provider_code", "airvisual")
+        provider_id = await self.get_or_create_provider(session, provider_code)
+        source_station_id = station_data.get("source_station_id")
+        computed_id = self.generate_station_id(
+            station_data["country"], station_data["state"], station_data["city"],
+            station_data["name"], station_data["lat"], station_data["lon"],
         )
-        
-        # Check if station exists and if location/name changed
-        check_query = text("""
-            SELECT station_id, name, lat, lon FROM stations 
-            WHERE station_id = :station_id
-        """)
-        
-        existing = await session.execute(check_query, {'station_id': station_id})
-        existing_station = existing.fetchone()
-        
-        if existing_station:
-            # Check if name or coordinates changed
-            name_changed = existing_station.name != station_data['name']
-            coords_changed = (
-                abs(existing_station.lat - station_data['lat']) > 0.000001 or 
-                abs(existing_station.lon - station_data['lon']) > 0.000001
-            )
-            
-            if name_changed or coords_changed:
-                # Add version history
-                version_query = text("""
-                    INSERT INTO station_versions (station_id, valid_from, name, lat, lon, metadata_json)
-                    VALUES (:station_id, NOW(), :old_name, :old_lat, :old_lon, :old_metadata)
-                """)
-                
-                await session.execute(version_query, {
-                    'station_id': station_id,
-                    'old_name': existing_station.name,
-                    'old_lat': existing_station.lat,
-                    'old_lon': existing_station.lon,
-                    'old_metadata': json.dumps({'changed_reason': 'coordinates_or_name_update'})
-                })
-        
-        # Determine if this will be a create or update
-        was_existing = existing_station is not None
-        
-        # Get or create provider. SELECT-first avoids burning providers_id_seq
-        # (SMALLSERIAL, max 32767) on every station upsert: INSERT ... ON CONFLICT
-        # calls nextval() before the conflict check, exhausting the sequence.
-        provider_code = station_data.get('provider_code', 'airvisual')
-        provider_result = await session.execute(
-            text("SELECT id FROM providers WHERE code = :code"),
-            {'code': provider_code},
-        )
-        provider_id = provider_result.scalar()
-        if provider_id is None:
-            provider_result = await session.execute(
-                text("""
-                    INSERT INTO providers (code, display_name)
-                    VALUES (:code, :display_name)
-                    RETURNING id
-                """),
-                {'code': provider_code, 'display_name': provider_code.title()},
-            )
-            provider_id = provider_result.scalar_one()
-        
-        upsert_query = text("""
+        ts = now_iso()
+        incoming_meta = dict(station_data.get("metadata_json") or {})
+        if source_station_id:
+            incoming_meta = ensure_identity(incoming_meta, provider_code, source_station_id, since=ts,
+                                            evidence=f"{provider_code}:discovery")
+
+        by_native = None
+        if source_station_id:
+            by_native = (await session.execute(text("""
+                SELECT station_id, name, lat, lon, metadata_json FROM stations
+                WHERE provider_id = :pid AND source_station_id = :sid
+            """), {"pid": provider_id, "sid": source_station_id})).fetchone()
+
+        # --- 1. same native id, different computed id: a move/rename. Keep the legacy id. ---
+        if by_native is not None and by_native.station_id.strip() != computed_id:
+            legacy_id = by_native.station_id.strip()
+            merged = merge_discovery_metadata(as_dict(by_native.metadata_json), incoming_meta)
+            merged = append_identity_history(merged, {
+                "at": ts, "run_id": station_data.get("run_id"), "event": "rename_or_move", "provider": provider_code,
+                "from": {"name": by_native.name, "lat": by_native.lat, "lon": by_native.lon},
+                "to": {"name": station_data["name"], "lat": station_data["lat"], "lon": station_data["lon"]},
+                "computed_station_id": computed_id,
+            })
+            await session.execute(text("""
+                UPDATE stations
+                   SET name = :name, lat = :lat, lon = :lon, metadata_json = CAST(:metadata_json AS jsonb),
+                       active = :active, updated_at = NOW(), last_seen_at = :last_seen_at
+                 WHERE station_id = :station_id
+            """), {"name": station_data["name"], "lat": station_data["lat"], "lon": station_data["lon"],
+                   "metadata_json": json.dumps(merged), "active": station_data.get("active", True),
+                   "last_seen_at": station_data.get("last_seen_at"), "station_id": legacy_id})
+            logger.warning("Station %s (%s) moved/renamed: computed id %s, keeping legacy id %s",
+                           station_data["name"], source_station_id, computed_id, legacy_id)
+            return {"station_id": legacy_id, "created": False, "updated": True,
+                    "identity_event": "rename_or_move", "computed_station_id": computed_id}
+
+        # --- 2. computed id already used by a different native id: do not merge, report. ---
+        by_id = (await session.execute(text("""
+            SELECT station_id, provider_id, source_station_id, metadata_json FROM stations WHERE station_id = :sid
+        """), {"sid": computed_id})).fetchone()
+        if by_id is not None and source_station_id and by_id.source_station_id and \
+                (by_id.source_station_id != source_station_id or int(by_id.provider_id) != provider_id):
+            logger.error("Identity conflict: computed station_id %s for %s/%s already belongs to %s/%s; skipping",
+                         computed_id, provider_code, source_station_id, by_id.provider_id, by_id.source_station_id)
+            return {"station_id": None, "created": False, "updated": False, "identity_event": "identity_conflict",
+                    "conflicting_station_id": computed_id, "conflicting_source_station_id": by_id.source_station_id}
+
+        # --- 3. normal path: merge metadata in Python so curated keys survive, then upsert. ---
+        merged = merge_discovery_metadata(as_dict(by_id.metadata_json) if by_id is not None else None, incoming_meta)
+        await session.execute(text("""
             INSERT INTO stations (
                 station_id, country_id, state_id, city_id, name, lat, lon,
                 provider_id, source_station_id, metadata_json, active, updated_at, last_seen_at
             )
             VALUES (
                 :station_id, :country_id, :state_id, :city_id, :name, :lat, :lon,
-                :provider_id, :source_station_id, :metadata_json, :active, NOW(), :last_seen_at
+                :provider_id, :source_station_id, CAST(:metadata_json AS jsonb), :active, NOW(), :last_seen_at
             )
-            ON CONFLICT (station_id) 
-            DO UPDATE SET 
+            ON CONFLICT (station_id) DO UPDATE SET
                 name = EXCLUDED.name,
                 lat = EXCLUDED.lat,
                 lon = EXCLUDED.lon,
@@ -197,29 +211,31 @@ class DatabaseService:
                 updated_at = NOW(),
                 active = EXCLUDED.active,
                 last_seen_at = EXCLUDED.last_seen_at
-        """)
-        
-        await session.execute(upsert_query, {
-            'station_id': station_id,
-            'country_id': station_data['country_id'],
-            'state_id': station_data.get('state_id'),
-            'city_id': station_data.get('city_id'),
-            'name': station_data['name'],
-            'lat': station_data['lat'],
-            'lon': station_data['lon'],
-            'provider_id': provider_id,
-            'source_station_id': station_data.get('source_station_id'),
-            'metadata_json': json.dumps(station_data.get('metadata_json', {})),
-            'active': station_data.get('active', True),
-            'last_seen_at': station_data.get('last_seen_at')
+        """), {
+            "station_id": computed_id, "country_id": station_data["country_id"],
+            "state_id": station_data.get("state_id"), "city_id": station_data.get("city_id"),
+            "name": station_data["name"], "lat": station_data["lat"], "lon": station_data["lon"],
+            "provider_id": provider_id, "source_station_id": source_station_id,
+            "metadata_json": json.dumps(merged), "active": station_data.get("active", True),
+            "last_seen_at": station_data.get("last_seen_at"),
         })
-        
-        return {
-            'station_id': station_id,
-            'created': not was_existing,
-            'updated': was_existing
-        }
-    
+
+        # --- 4. rename candidates (same provider, city and coordinates, different name): report only. ---
+        cands = (await session.execute(text("""
+            SELECT station_id, name, source_station_id FROM stations
+             WHERE provider_id = :pid AND station_id <> :sid
+               AND COALESCE(city_id, -1) = COALESCE(:city_id, -1)
+               AND abs(lat - :lat) < 0.000001 AND abs(lon - :lon) < 0.000001
+             LIMIT 5
+        """), {"pid": provider_id, "sid": computed_id, "city_id": station_data.get("city_id"),
+               "lat": station_data["lat"], "lon": station_data["lon"]})).fetchall()
+        result = {"station_id": computed_id, "created": by_id is None, "updated": by_id is not None}
+        if cands:
+            result["identity_event"] = "rename_candidate"
+            result["rename_candidates"] = [{"station_id": c.station_id.strip(), "name": c.name,
+                                            "source_station_id": c.source_station_id} for c in cands]
+        return result
+
     async def reconcile_and_upsert_readings(self, session: AsyncSession, rows: List[Dict[str, Any]],
                                             policy: ReconcilePolicy) -> ReconcileResult:
         """

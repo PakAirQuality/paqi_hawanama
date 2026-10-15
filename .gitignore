@@ -48,6 +48,7 @@ node_modules/
 db_schema/*
 !db_schema/migrations/
 !db_schema/oneoff/
+!db_schema/station_metadata.md
 
 # Editor config
 .vscode/

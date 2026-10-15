@@ -124,13 +124,21 @@ class StationDiscoveryTask:
                 recorder.add_failure(EntityFailure("city", f"{ct['country']}|{ct['state']}|{ct['city']}", ct.get("reason", "skipped"), "", details=ct))
             for cf in summary["countries_failed"]:
                 recorder.add_failure(EntityFailure("country", cf["country"], cf.get("reason", "failed"), cf.get("message", ""), details=cf))
+            for fs in summary["stations_failed"]:
+                recorder.add_failure(EntityFailure("station", fs["source_station_id"], fs.get("reason", "failed"), fs.get("message", ""), details=fs))
+            for ev in summary["identity_events"]:
+                if ev["event"] == "identity_conflict":
+                    recorder.add_failure(EntityFailure("station", ev["source_station_id"], "identity_conflict",
+                                                       f"computed id {ev.get('conflicting_station_id')} belongs to {ev.get('conflicting_source_station_id')}",
+                                                       details=ev))
             if c.expected == 0:
                 outcome.fail("empty_inventory", "no target countries after filtering")
             elif c.failed == c.attempted:
                 outcome.fail("all_countries_failed", "every target country failed")
             elif summary["stations_discovered"] == 0:
                 outcome.fail("no_stations_discovered", "discovery completed but found zero stations")
-            elif summary["states_skipped"] or summary["cities_skipped"] or summary["countries_failed"]:
+            elif (summary["states_skipped"] or summary["cities_skipped"] or summary["countries_failed"]
+                  or summary["stations_failed"] or summary["identity_counts"]["identity_conflict"]):
                 outcome.partial_reason = "entities_skipped"
         except _Skipped:
             pass
@@ -161,6 +169,8 @@ class StationDiscoveryTask:
             skipped_states: List[Dict[str, Any]] = []
             skipped_cities: List[Dict[str, Any]] = []
             failed_countries: List[Dict[str, Any]] = []
+            identity_events: List[Dict[str, Any]] = []
+            failed_stations: List[Dict[str, Any]] = []
 
             # Collect rows for manifest
             manifest_rows: List[Dict[str, Any]] = []
@@ -285,7 +295,8 @@ class StationDiscoveryTask:
                                             'discovery_method': 'apscheduler'
                                         },
                                         'active': True,
-                                        'last_seen_at': datetime.now(timezone.utc)
+                                        'last_seen_at': datetime.now(timezone.utc),
+                                        'run_id': progress_id,
                                     }
                                     station_infos.append(station_info)
 
@@ -309,10 +320,22 @@ class StationDiscoveryTask:
                                                     "last_seen_at_utc": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                                                 })
                                                 try:
-                                                    result = await self.db_service.upsert_station(station_session, info)
+                                                    # Savepoint per station: one bad row must not poison the batch.
+                                                    async with station_session.begin_nested():
+                                                        result = await self.db_service.upsert_station(station_session, info)
                                                     returned_station_id = (result.get("station_id") if isinstance(result, dict) else None)
                                                     if returned_station_id:
                                                         manifest_rows[-1]["station_id"] = returned_station_id
+                                                    if result.get("identity_event"):
+                                                        identity_events.append({
+                                                            "event": result["identity_event"],
+                                                            "source_station_id": info["source_station_id"],
+                                                            "station_id": returned_station_id,
+                                                            "name": info["name"], "city": city, "state": state, "country": country,
+                                                            **{k: v for k, v in result.items()
+                                                               if k in ("computed_station_id", "conflicting_station_id",
+                                                                        "conflicting_source_station_id", "rename_candidates")},
+                                                        })
 
                                                     if result.get('created'):
                                                         total_stations_created += 1
@@ -322,6 +345,10 @@ class StationDiscoveryTask:
                                                         logger.info("Updated station: %s at (%s,%s)", info['name'], info['lat'], info['lon'])
                                                 except Exception as station_error:
                                                     logger.error("Error upserting station %s: %s", info['name'], station_error)
+                                                    failed_stations.append({"source_station_id": info["source_station_id"],
+                                                                            "name": info["name"], "city": city, "state": state,
+                                                                            "country": country, "reason": type(station_error).__name__,
+                                                                            "message": str(station_error)[:300]})
                                                     continue
                                             await station_session.commit()
                                         station_infos = []
@@ -368,6 +395,13 @@ class StationDiscoveryTask:
                 'completion_time_utc': completion_time,
                 'states_skipped': skipped_states,
                 'cities_skipped': skipped_cities,
+                'stations_failed': failed_stations,
+                'identity_events': identity_events[:500],
+                'identity_counts': {
+                    'rename_or_move': sum(1 for e in identity_events if e['event'] == 'rename_or_move'),
+                    'identity_conflict': sum(1 for e in identity_events if e['event'] == 'identity_conflict'),
+                    'rename_candidate': sum(1 for e in identity_events if e['event'] == 'rename_candidate'),
+                },
             }
             logger.info("Final summary: %s", json.dumps(final_summary))
 
