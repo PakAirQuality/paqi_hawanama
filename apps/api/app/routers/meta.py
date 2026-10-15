@@ -260,9 +260,14 @@ async def get_cities(
 async def get_stations(
     province_name: Optional[str] = None,
     city_name: Optional[str] = None,
+    province: Optional[str] = None,
+    city: Optional[str] = None,
     db: AsyncSession = Depends(get_database)
 ) -> List[Dict[str, str]]:
-    """Get scrollable list of stations with station_id and station_name. If no filters provided, shows all stations for selection."""
+    """Get scrollable list of stations with station_id and station_name. If no filters provided, shows all stations for selection.
+    `city`/`province` are accepted as aliases of `city_name`/`province_name` (runbooks used them and were silently ignored)."""
+    province_name = province_name or province
+    city_name = city_name or city
     try:
         # Get stations with their metadata - same pattern as cities/{city}/current endpoint
         query = """

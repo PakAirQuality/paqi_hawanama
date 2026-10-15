@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.core.database import get_database
+from app.utils.timefmt import iso_z
 
 logger = logging.getLogger(__name__)
 
@@ -144,7 +145,10 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
                   -- providers use other qc_state values ('raw', 'OK', NULL) and must all
                   -- pass — so we EXCLUDE the bad states rather than allow-list 'OK'.
                   AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
-                ORDER BY scope_key, ts_utc DESC
+                -- Prefer the newest PM2.5-bearing row. IQAir's current.weather.ts is often an
+                -- hour ahead of current.pollution.ts, leaving a weather-only row at H+1 that
+                -- used to blank the marker/popup while IQAir itself shows a value at H.
+                ORDER BY scope_key, (pm25 IS NOT NULL) DESC, ts_utc DESC
             )
             SELECT
                 s.station_id,
@@ -197,7 +201,7 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
                 "hum": float(row.hum) if row.hum is not None else None,
                 "qc_state": row.qc_state,
                 "aqi_category": row.aqi_category if row.aqi_us is not None else None,
-                "last_reading": row.last_reading.isoformat() if row.last_reading else None,
+                "last_reading": iso_z(row.last_reading) if row.last_reading else None,
             }
             stations_list.append(station_data)
         
@@ -244,7 +248,10 @@ async def get_station_current_data(
                   AND ts_utc > NOW() - INTERVAL '48 hours'
                   -- QC gate: hide only explicitly-flagged-bad readings (INVALID/SUSPECT).
                   AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
-                ORDER BY scope_key, ts_utc DESC
+                -- Prefer the newest PM2.5-bearing row. IQAir's current.weather.ts is often an
+                -- hour ahead of current.pollution.ts, leaving a weather-only row at H+1 that
+                -- used to blank the marker/popup while IQAir itself shows a value at H.
+                ORDER BY scope_key, (pm25 IS NOT NULL) DESC, ts_utc DESC
             )
             SELECT * FROM latest_readings
         """), {"station_id": station_id})
@@ -268,7 +275,7 @@ async def get_station_current_data(
             "wind_speed_kmh": float(reading_row.wind_speed_ms * 3.6) if reading_row and reading_row.wind_speed_ms is not None else None,
             "wind_direction": float(reading_row.wind_dir_deg) if reading_row and reading_row.wind_dir_deg is not None else None,
             "pressure_mbar": float(reading_row.pressure_hpa) if reading_row and reading_row.pressure_hpa is not None else None,
-            "last_update": reading_row.ts_utc.isoformat() if reading_row and reading_row.ts_utc is not None else None,
+            "last_update": iso_z(reading_row.ts_utc) if reading_row and reading_row.ts_utc is not None else None,
         }
         
     except HTTPException:
@@ -308,7 +315,7 @@ async def get_station_history_data(
         if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
 
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         if date:
             try:
@@ -318,13 +325,13 @@ async def get_station_history_data(
             # Pakistan day (UTC+5, no DST): May 11 PKT = May 10 19:00 UTC → May 11 19:00 UTC.
             # All callers (public site map, internal dashboard StructuresTab) treat
             # `date` as a PKT calendar day; this keeps the 24 h chart aligned with that label.
-            start_time = day - timedelta(hours=5)
+            start_time = (day - timedelta(hours=5)).replace(tzinfo=timezone.utc)
             end_time = start_time + timedelta(hours=24)
         else:
             if not isinstance(hours, int) or hours < 1 or hours > 168:
                 raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
-            start_time = datetime.now() - timedelta(hours=hours)
-            end_time = datetime.now()
+            start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+            end_time = datetime.now(timezone.utc)
 
         history_result = await db.execute(text("""
             SELECT
@@ -342,9 +349,9 @@ async def get_station_history_data(
         history_rows = history_result.fetchall()
         history_data = [
             {
-                "timestamp_utc": row.hour_utc.isoformat() + "Z",
+                "timestamp_utc": iso_z(row.hour_utc),
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "timestamp": row.hour_utc.isoformat() + "Z",  # backward compat
+                "timestamp": iso_z(row.hour_utc),  # backward compat
                 "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None,
             }
             for row in history_rows
@@ -389,7 +396,7 @@ async def get_station_history_pm25_data(
         if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
 
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
         if date:
             try:
@@ -399,14 +406,14 @@ async def get_station_history_pm25_data(
             # Pakistan day (UTC+5, no DST): May 11 PKT = May 10 19:00 UTC → May 11 19:00 UTC.
             # All callers (public site map, internal dashboard StructuresTab) treat
             # `date` as a PKT calendar day; this keeps the 24 h chart aligned with that label.
-            start_time = day - timedelta(hours=5)
+            start_time = (day - timedelta(hours=5)).replace(tzinfo=timezone.utc)
             end_time = start_time + timedelta(hours=24)
         else:
             # Validate hours parameter
             if not isinstance(hours, int) or hours < 1 or hours > 168:
                 raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
-            start_time = datetime.now() - timedelta(hours=hours)
-            end_time = datetime.now()
+            start_time = datetime.now(timezone.utc) - timedelta(hours=hours)
+            end_time = datetime.now(timezone.utc)
 
         history_result = await db.execute(text("""
             SELECT
@@ -424,9 +431,9 @@ async def get_station_history_pm25_data(
         history_rows = history_result.fetchall()
         history_data = [
             {
-                "timestamp_utc": row.hour_utc.isoformat() + "Z",
+                "timestamp_utc": iso_z(row.hour_utc),
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "timestamp": row.hour_utc.isoformat() + "Z",
+                "timestamp": iso_z(row.hour_utc),
                 "pm25": float(row.pm25) if row.pm25 is not None else None,
             }
             for row in history_rows
@@ -466,8 +473,8 @@ async def get_station_daily_pm25_data(
         if not isinstance(days, int) or days < 1 or days > 365:
             raise HTTPException(status_code=400, detail="Invalid days parameter (1-365)")
 
-        from datetime import datetime, timedelta
-        start_time = datetime.now() - timedelta(days=days)
+        from datetime import datetime, timedelta, timezone
+        start_time = datetime.now(timezone.utc) - timedelta(days=days)
 
         history_result = await db.execute(text("""
             SELECT

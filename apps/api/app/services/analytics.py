@@ -5,6 +5,7 @@ the copilot tools.  Observation-first for "current conditions" queries;
 forecast-first for "alert/driver" queries.
 """
 
+from app.utils.timefmt import iso_z
 import logging
 from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -1935,8 +1936,8 @@ async def get_data_coverage(
         "entity": target_name,
         "geography": geography,
         "detail_level": detail_level,
-        "earliest_ts_utc": earliest.isoformat() + "Z",
-        "latest_ts_utc": latest.isoformat() + "Z",
+        "earliest_ts_utc": iso_z(earliest),
+        "latest_ts_utc": iso_z(latest),
         "coverage_days": round(total_hours / 24, 1),
         "n_observations": agg.n_obs,
         "n_stations_total": n_stations,
@@ -1979,8 +1980,8 @@ async def get_data_coverage(
         {
             "station_name": r.station_name,
             "station_id": r.station_id,
-            "earliest_ts_utc": r.earliest_ts.isoformat() + "Z",
-            "latest_ts_utc": r.latest_ts.isoformat() + "Z",
+            "earliest_ts_utc": iso_z(r.earliest_ts),
+            "latest_ts_utc": iso_z(r.latest_ts),
             "n_readings": r.n_readings,
             "coverage_days": round(
                 (r.latest_ts - r.earliest_ts).total_seconds() / 86400, 1

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 
 from app.core.database import get_database
+from app.utils.timefmt import iso_z
 from app.utils.normalization import pm25_to_aqi, get_aqi_label, get_aqi_category
 
 logger = logging.getLogger(__name__)
@@ -76,9 +77,9 @@ async def get_station_history_data(
         history_rows = history_result.fetchall()
         history_data = [
             {
-                "timestamp_utc": row.hour_utc.isoformat() + "Z",
+                "timestamp_utc": iso_z(row.hour_utc),
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
+                "timestamp": iso_z(row.hour_utc),  # Keep for backward compatibility
                 "aqi_us": int(row.aqi_us) if row.aqi_us is not None else None
             }
             for row in history_rows
@@ -162,9 +163,9 @@ async def get_station_history_pm25_data(
         history_rows = history_result.fetchall()
         history_data = [
             {
-                "timestamp_utc": row.hour_utc.isoformat() + "Z",
+                "timestamp_utc": iso_z(row.hour_utc),
                 "timestamp_pk": row.hour_pk.strftime('%Y-%m-%dT%H:%M:%S+05:00'),
-                "timestamp": row.hour_utc.isoformat() + "Z",  # Keep for backward compatibility
+                "timestamp": iso_z(row.hour_utc),  # Keep for backward compatibility
                 "pm25": float(row.pm25) if row.pm25 is not None else None
             }
             for row in history_rows

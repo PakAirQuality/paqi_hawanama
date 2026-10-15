@@ -25,6 +25,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_database
+from app.utils.timefmt import iso_z
 from app.core.config import settings
 from app.ingestion.export_membership import (CURSOR_WHERE, KEYSET_ORDER, MEMBERSHIP_WHERE, POLLUTANT_PARAMS,
                                              READINGS_NOT_OPENAQ, decode_cursor, hardware_label, next_cursor,
@@ -310,7 +311,7 @@ async def list_locations(
             "provider": PROVIDER_LABEL,
             "network": NETWORK_NAME,
             "organization": ORGANIZATION,
-            "generated": datetime.utcnow().isoformat() + "Z",
+            "generated": iso_z(datetime.utcnow()),
             "count": len(locations),
             "data_available_from": DATA_CUTOFF_DATE.strftime('%Y-%m-%d'),
         },
@@ -441,7 +442,7 @@ async def list_measurements(
             "provider": PROVIDER_LABEL,
             "network": NETWORK_NAME,
             "organization": ORGANIZATION,
-            "generated": datetime.utcnow().isoformat() + "Z",
+            "generated": iso_z(datetime.utcnow()),
             "rows_from_db": len(rows),
             "measurements": len(measurements),
             "limit": limit,
@@ -611,7 +612,7 @@ async def current_conditions(
             "provider": PROVIDER_LABEL,
             "network": NETWORK_NAME,
             "organization": ORGANIZATION,
-            "generated": datetime.utcnow().isoformat() + "Z",
+            "generated": iso_z(datetime.utcnow()),
             "count": len(stations),
             "aqi_standard": "US EPA 2024",
             # A single hourly PM2.5 concentration mapped through the breakpoints,

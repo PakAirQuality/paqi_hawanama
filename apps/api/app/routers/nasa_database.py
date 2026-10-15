@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 from app.core.database import get_database
+from app.utils.timefmt import iso_z
 
 
 # ---------------------------------------------------------------------
@@ -176,7 +177,7 @@ async def list_locations(db: AsyncSession = Depends(get_database)):
             "provider": PROVIDER_LABEL,
             "network": NETWORK_NAME,
             "organization": ORGANIZATION,
-            "generated": datetime.utcnow().isoformat() + "Z",
+            "generated": iso_z(datetime.utcnow()),
             "count": len(locations),
         },
         results=locations,
@@ -285,7 +286,7 @@ async def list_measurements(
             "provider": PROVIDER_LABEL,
             "network": NETWORK_NAME,
             "organization": ORGANIZATION,
-            "generated": datetime.utcnow().isoformat() + "Z",
+            "generated": iso_z(datetime.utcnow()),
             "rows_from_db": len(rows),
             "measurements": len(measurements),
         },

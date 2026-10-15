@@ -31,4 +31,5 @@ except Exception as e:
 PY
 
 echo "Starting Uvicorn..."
-exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT}"
+# --proxy-headers: honour X-Forwarded-Proto from Cloud Run so redirects stay https://
+exec uvicorn app.main:app --host 0.0.0.0 --port "${PORT}" --proxy-headers --forwarded-allow-ips="*"

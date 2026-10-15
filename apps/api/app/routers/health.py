@@ -27,18 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import settings
 from app.core.database import get_database
 from app.ingestion.provenance import describe as describe_provenance
+from app.utils.timefmt import iso_z
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _iso(dt: Optional[datetime]) -> Optional[str]:
-    """RFC 3339 with a Z suffix; tz-aware values no longer come out as '+00:00Z'."""
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+_iso = iso_z   # RFC 3339 with a Z suffix (shared helper)
 
 
 def _thresholds() -> Dict[str, int]:
