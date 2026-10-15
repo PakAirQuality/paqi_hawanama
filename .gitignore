@@ -79,3 +79,6 @@ gb_stations_*.csv
 
 # Local data dumps for comparison plots (CSVs only — plots PNGs are kept)
 data/
+
+# local verification runs (scripts/verify_iqair_match.py)
+verify/
