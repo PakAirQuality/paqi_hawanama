@@ -106,6 +106,7 @@ class CityIngestionTask:
         self._allow_state_alias      = bool(s.ALLOW_STATE_ALIAS)
         self._allow_nearest_fallback = bool(s.ALLOW_NEAREST_FALLBACK)
         self._db_city_fallback       = bool(s.ALLOW_DB_CITY_FALLBACK)
+        self._manifest_read_error: Optional[str] = None
 
         # Manifest locations (produced by station_discovery.py)
         self._city_manifest_dir    = Path(s.CITY_MANIFEST_DIR)
@@ -140,6 +141,7 @@ class CityIngestionTask:
             df = pd.read_parquet(path)
             return df.to_dict("records")
         except Exception as e:
+            self._manifest_read_error = f"{type(e).__name__}: {e}"   # _run fails as manifest_unreadable
             logger.error("Failed reading parquet %s: %s", path, e)
             return []
 
@@ -309,6 +311,9 @@ class CityIngestionTask:
 
         rows = self._load_city_manifest()
         outcome.manifest_source = self._manifest_source
+        if self._manifest_read_error:
+            outcome.fail("manifest_unreadable", f"manifest could not be parsed: {self._manifest_read_error}")
+            return
         if self._manifest_ref is not None and self._manifest_source in ("gcs", "local"):
             outcome.manifest_generation = self._manifest_ref.generation
         if not rows and self._db_city_fallback:

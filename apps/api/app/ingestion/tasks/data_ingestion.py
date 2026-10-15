@@ -100,6 +100,7 @@ class DataIngestionTask:
         self._out_dir: Optional[Path] = None
         self._abort: Optional[asyncio.Event] = None
         self._manifest_source: Optional[str] = None
+        self._manifest_read_error: Optional[str] = None   # set when a manifest exists but cannot be parsed
         self._manifest_ref: Optional[ManifestRef] = None
 
         # Concurrency and rate limiting
@@ -141,6 +142,9 @@ class DataIngestionTask:
             df = pd.read_parquet(path)
             return df.to_dict("records")
         except Exception as e:
+            # An unreadable manifest must not degrade into the DB fallback (which lists one
+            # provider only): the run fails as manifest_unreadable instead (see _run).
+            self._manifest_read_error = f"{type(e).__name__}: {e}"
             logger.error("Failed reading parquet %s: %s", path, e)
             return []
 
@@ -298,6 +302,11 @@ class DataIngestionTask:
                 return
         rows = self._load_manifest()
         outcome.manifest_source = self._manifest_source
+        if self._manifest_read_error:
+            outcome.fail("manifest_unreadable",
+                         f"manifest {self._manifest_ref.path if self._manifest_ref else ''} could not be parsed: "
+                         f"{self._manifest_read_error} (no DB fallback: it would silently drop other providers)")
+            return
         if self._manifest_ref is not None:
             outcome.manifest_generation = self._manifest_ref.generation
         if (not rows) and self._db_station_fallback:

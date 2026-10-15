@@ -31,6 +31,8 @@ COPY apps/api/ /app/
 ARG GIT_SHA=unknown
 ENV HAWANAMA_GIT_SHA=$GIT_SHA
 RUN python -c "from app.ingestion.provenance import assert_canonical; assert_canonical(import_modules=False); print('PROVENANCE_OK')"
+# Parquet manifests must be readable in this image (pyarrow must import against the pinned numpy).
+RUN python -c "import pyarrow, pandas, numpy; print('PARQUET_OK', pyarrow.__version__, numpy.__version__)"
 
 # Copy alembic configuration (migrations handled via SQLAlchemy)
 COPY apps/api/alembic.ini /app/alembic.ini
