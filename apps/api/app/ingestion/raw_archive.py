@@ -195,6 +195,18 @@ class RawPayloadArchiver:
             return False
 
 
+async def record_in_session(session, ref: RawPayloadRef) -> None:
+    """Index a payload inside the caller's transaction (used by the OpenAQ window commit)."""
+    await session.execute(RawPayloadArchiver.RECORD_SQL, {
+        "provider": ref.provider, "stream": ref.stream, "native_id": ref.native_id,
+        "window_from": ref.request_window_from, "window_to": ref.request_window_to,
+        "fetched_at": ref.fetched_at, "sha256": ref.sha256, "gcs_uri": ref.gcs_uri, "archived": ref.archived,
+        "archive_error": ref.error, "parser_version": ref.parser_version, "run_id": ref.run_id,
+        "http_status": ref.http_status, "size_bytes": ref.size_bytes,
+        "request_meta": json.dumps(ref.request_meta or {}, default=str),
+    })
+
+
 class NullArchiver(RawPayloadArchiver):
     """Computes hashes/refs but never uploads or records (tests, dry runs)."""
 

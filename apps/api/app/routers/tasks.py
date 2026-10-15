@@ -171,6 +171,50 @@ async def run_full_pipeline(
         )
 
 
+# ---------------------------------------------------------------------------
+# OpenAQ v3 (independent source, shadow mode; gated by OPENAQ_ENABLED)
+# ---------------------------------------------------------------------------
+
+@router.post("/tasks/openaq/discover")
+async def run_openaq_discovery(
+    request: Request,
+    dry_run: bool = Query(False, description="Make the requests and report the inventory, but write nothing"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Discover Pakistan locations on OpenAQ → shadow stations + pm25 stream checkpoints."""
+    from app.services.ingestion.openaq.discovery import OpenAQDiscoveryTask
+    try:
+        outcome = await OpenAQDiscoveryTask().run(dry_run=dry_run, trigger=_trigger(request))
+        return _outcome_response(outcome, "OpenAQ discovery completed")
+    except Exception as e:
+        logger.error("OpenAQ discovery failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"OpenAQ discovery failed: {e}")
+
+
+@router.post("/tasks/openaq/ingest")
+async def run_openaq_ingest(request: Request, _: bool = Depends(verify_tasks_token)):
+    """Hourly: fetch the next window per active stream and reconcile into readings (source='openaq')."""
+    from app.services.ingestion.openaq.ingest import OpenAQIngestTask
+    try:
+        outcome = await OpenAQIngestTask().run(mode="ingest", trigger=_trigger(request))
+        return _outcome_response(outcome, "OpenAQ ingestion completed")
+    except Exception as e:
+        logger.error("OpenAQ ingestion failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"OpenAQ ingestion failed: {e}")
+
+
+@router.post("/tasks/openaq/reconcile")
+async def run_openaq_reconcile(request: Request, _: bool = Depends(verify_tasks_token)):
+    """Daily: re-read older windows (late/revised data) without moving the completed-window checkpoint."""
+    from app.services.ingestion.openaq.ingest import OpenAQIngestTask
+    try:
+        outcome = await OpenAQIngestTask().run(mode="reconcile", trigger=_trigger(request))
+        return _outcome_response(outcome, "OpenAQ reconciliation completed")
+    except Exception as e:
+        logger.error("OpenAQ reconciliation failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"OpenAQ reconciliation failed: {e}")
+
+
 @router.post("/tasks/twitter-lahore-pm25")
 async def run_twitter_lahore_pm25(
     request: Request,
@@ -244,6 +288,9 @@ async def get_task_status(
                 "POST /tasks/ingest-stations", 
                 "POST /tasks/ingest-cities",
                 "POST /tasks/full-pipeline",
+                "POST /tasks/openaq/discover?dry_run=true|false",
+                "POST /tasks/openaq/ingest",
+                "POST /tasks/openaq/reconcile",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
             ],

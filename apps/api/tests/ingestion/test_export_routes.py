@@ -157,7 +157,7 @@ async def test_tied_timestamps_paginate_without_loss(sf):
             seen += [(m["location_id"], m["datetime"]) for m in body["results"] if m["location_id"].startswith(tag)]
             cursor = body["meta"]["next_cursor"]
             pages += 1
-            if not cursor or pages > 50:
+            if not cursor or pages > 5000:   # shared test DB accumulates rows across runs; walk to the end
                 break
     mine = [x for x in seen if x[0].startswith(tag)]
     assert sorted(mine) == sorted([(ids["A"], "2026-10-15T10:00:00Z"), (ids["E"], "2026-10-15T10:00:00Z"),
