@@ -19,13 +19,31 @@ resource "google_service_account" "scheduler_invoker" {
   description  = "Service account for Cloud Scheduler to invoke Cloud Run services"
 }
 
-# Grant the service account permission to invoke Cloud Run
+# Grant the service account permission to invoke the public API (kept for any
+# scheduler that targets hawanama; harmless if all jobs migrate to ingest).
 resource "google_cloud_run_service_iam_member" "scheduler_invoker" {
   project  = "hawanama-2"
   location = "asia-south1"
   service  = "hawanama"
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler_invoker.email}"
+}
+
+# Grant the service account permission to invoke the ingestion worker.
+# All scheduled jobs now POST to hawanama-ingest so they don't share resources
+# with the public read API.
+resource "google_cloud_run_service_iam_member" "scheduler_invoker_ingest" {
+  project  = "hawanama-2"
+  location = "asia-south1"
+  service  = "hawanama-ingest"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler_invoker.email}"
+}
+
+# Base URL for all scheduled task invocations. Switching this single locals
+# value moves every scheduler job between services.
+locals {
+  ingest_base_url = "https://hawanama-ingest-152782825429.asia-south1.run.app"
 }
 
 # 1. Station Discovery - Twice Daily (2:00 AM and 2:00 PM UTC)
@@ -37,7 +55,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2am" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/discover"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/discover"
     
     headers = {
       "Content-Type" = "application/json"
@@ -64,7 +82,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2pm" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/discover"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/discover"
     
     headers = {
       "Content-Type" = "application/json"
@@ -92,7 +110,7 @@ resource "google_cloud_scheduler_job" "station_ingestion" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/ingest-stations"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/ingest-stations"
     
     headers = {
       "Content-Type" = "application/json"
@@ -120,7 +138,7 @@ resource "google_cloud_scheduler_job" "city_ingestion" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/ingest-cities"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/ingest-cities"
     
     headers = {
       "Content-Type" = "application/json"
@@ -151,7 +169,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_hourly" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/bot/execute"
+    uri         = "${local.ingest_base_url}/api/v1/bot/execute"
     
     headers = {
       "Content-Type" = "application/json"
@@ -184,7 +202,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_test" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/bot/execute"
+    uri         = "${local.ingest_base_url}/api/v1/bot/execute"
     
     headers = {
       "Content-Type" = "application/json"
@@ -217,7 +235,7 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/punjab/ingest/hourly"
+    uri         = "${local.ingest_base_url}/api/v1/punjab/ingest/hourly"
     
     headers = {
       "Content-Type" = "application/json"
@@ -245,7 +263,7 @@ resource "google_cloud_scheduler_job" "firms_fire_ingest" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/ops/analyst-desk/fires/ingest?days_back=3"
+    uri         = "${local.ingest_base_url}/api/v1/ops/analyst-desk/fires/ingest?days_back=3"
 
     headers = {
       "Content-Type" = "application/json"
@@ -273,7 +291,7 @@ resource "google_cloud_scheduler_job" "parquet_export_daily" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-readings-hourly-parquet"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-readings-hourly-parquet"
 
     headers = {
       "Content-Type" = "application/json"
@@ -308,7 +326,7 @@ resource "google_cloud_scheduler_job" "hourly_partitioned_export" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-readings-hourly-parquet-partitioned?days_back=3"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-readings-hourly-parquet-partitioned?days_back=3"
 
     headers = {
       "Content-Type" = "application/json"
@@ -336,7 +354,7 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-daily/parquet?start_date=2024-01-01&end_date=2026-12-31&only_missing=true&apply_qc=true"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-daily/parquet?start_date=2024-01-01&end_date=2026-12-31&only_missing=true&apply_qc=true"
 
     headers = {
       "Content-Type" = "application/json"
@@ -366,7 +384,7 @@ resource "google_cloud_scheduler_job" "daily_brief_generation" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/ops/pipeline/generate-briefs?days_back=7"
+    uri         = "${local.ingest_base_url}/api/v1/ops/pipeline/generate-briefs?days_back=7"
 
     headers = {
       "Content-Type" = "application/json"
@@ -395,7 +413,7 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/full-pipeline"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/full-pipeline"
 
     headers = {
       "Content-Type" = "application/json"

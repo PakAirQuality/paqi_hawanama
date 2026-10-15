@@ -78,7 +78,7 @@ export default function EstimatedDateRail({ dates, selectedDate, onChange }: Pro
       />
 
       <span className="text-[10px] text-white/40">
-        {dates.length} days available
+        Historical daily data
       </span>
     </div>
   )

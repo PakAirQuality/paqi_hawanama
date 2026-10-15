@@ -7,7 +7,9 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import { API_BASE, API_TOKEN } from './api'
 import type { FeatureInfo } from './types'
 
-mapboxgl.accessToken = '***REMOVED***'
+// the deployed build reads a token restricted to this site's own addresses
+// (.env.production.local); the literal is the development fallback
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'
 
 const STYLE_URL = 'mapbox://styles/rehan0900/cmmh9p69z009m01qu0nnn3iwu'
 const INITIAL_CENTER: [number, number] = [69.3459, 30.3]

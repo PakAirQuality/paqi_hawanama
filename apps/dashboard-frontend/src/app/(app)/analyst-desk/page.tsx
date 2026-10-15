@@ -163,6 +163,7 @@ export default function AnalystDeskPage() {
         activeTab={railTab}
         onTabChange={setRailTab}
         isStreaming={isStreaming}
+        tabs={['chat', 'analytics', 'layers']}
       />
 
       {/* Sliding panel */}

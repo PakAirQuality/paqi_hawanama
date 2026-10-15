@@ -155,7 +155,12 @@ async def collect_once(db: AsyncSession) -> Dict[str, Any]:
             errors.append(f"bad station meta #{i}: {st}")
             continue
 
-        data = fetch_station_24h(s["api_base"], s["api_key"], code, district)
+        try:
+            data = fetch_station_24h(s["api_base"], s["api_key"], code, district)
+        except Exception as e:
+            fail += 1
+            errors.append(f"fetch error {code}: {e}")
+            continue
         if not data:
             fail += 1
             errors.append(f"no data {code}")

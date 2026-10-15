@@ -5,13 +5,10 @@ import { usePathname } from 'next/navigation'
 import { UserMenu } from '@/components/auth/UserMenu'
 
 const modules = [
-  { id: 'aqi-dashboard', name: 'Dashboard', href: '/' },
-  { id: 'station-management', name: 'Stations', href: '/stations' },
-  { id: 'data-quality', name: 'Data Quality', href: '/data-quality' },
-  { id: 'reports', name: 'Reports', href: '/reports' },
+  { id: 'aqi-tracker', name: 'Air Quality Tracker', href: '/' },
   { id: 'analyst-desk', name: 'Analyst Desk', href: '/analyst-desk' },
-  { id: 'ml-ops', name: 'ML Ops', href: '/ops/pipeline' },
-  { id: 'kilns', name: 'Kilns', href: '/kilns' },
+  { id: 'reports', name: 'Reports', href: '/reports' },
+  { id: 'bam', name: 'BAM Monitor', href: '/bam' },
 ]
 
 function cn(...classes: (string | false | undefined)[]) {
@@ -25,9 +22,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
   const currentModule = modules.find(m =>
     m.href === normalizedPath || (m.href !== '/' && normalizedPath.startsWith(m.href))
-  )?.id || 'aqi-dashboard'
+  )?.id || 'aqi-tracker'
 
-  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk' || currentModule === 'ml-ops' || currentModule === 'kilns'
+  const isFullBleed = currentModule === 'aqi-tracker' || currentModule === 'analyst-desk'
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Header container — shrink-0 keeps it fixed height, no sticky needed */}
@@ -74,7 +71,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         {/* Row 2: Navigation strip */}
         <nav className="bg-gradient-to-r from-slate-800 to-slate-900">
           <div className="px-4 lg:px-8">
-            <div className="flex items-center h-11 -mb-px overflow-x-auto scrollbar-hide">
+            <div className="flex items-center h-11 -mb-px -ml-5 overflow-x-auto scrollbar-hide">
               {modules.map((module) => {
                 const isActive = currentModule === module.id
                 return (

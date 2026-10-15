@@ -2,9 +2,16 @@ import os
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.database import get_database
 from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest
+
+# True only on the dedicated ingestion Cloud Run service (hawanama-ingest).
+# Public read API does not expose POST /tasks/* — schedulers call ingest directly.
+INGEST_ROLE = os.environ.get("INGEST_ROLE", "").lower() == "true"
 
 # True only on the dedicated public BAM push-ingest service (hawanama-bam).
 # Not mounted on the main public app, so BAM POST is isolated to its own service.
@@ -16,6 +23,25 @@ app = FastAPI(
     version="1.0.0",
     openapi_url=f"{settings.API_V1_STR}/openapi.json"
 )
+
+# Compress JSON responses (the /dashboard/stations payload was 440 KB uncompressed).
+app.add_middleware(GZipMiddleware, minimum_size=1024)
+
+# Rate limiting for the public partner API (/api/v1/public/*).
+# The limiter instance lives in the public router; register it on the app and
+# wire the 429 handler so @limiter.limit decorators take effect.
+app.state.limiter = public.limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# Baseline security headers on every response.
+@app.middleware("http")
+async def security_headers(request, call_next):
+    response = await call_next(request)
+    response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    return response
 
 # Set up CORS
 app.add_middleware(
@@ -37,7 +63,8 @@ app.include_router(dashboard.router, prefix=f"{settings.API_V1_STR}/dashboard", 
 app.include_router(cities.router, prefix=f"{settings.API_V1_STR}", tags=["cities"])
 app.include_router(exports.router, prefix=f"{settings.API_V1_STR}/exports", tags=["exports"])
 app.include_router(exports_publish.router, prefix=f"{settings.API_V1_STR}/exports/publish", tags=["publish"])
-app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}", tags=["tasks"])
+if INGEST_ROLE:
+    app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}", tags=["tasks"])
 if BAM_ROLE:
     app.include_router(bam_ingest.router, prefix=f"{settings.API_V1_STR}/bam", tags=["bam-ingest"])
 app.include_router(bot.router, prefix=f"{settings.API_V1_STR}", tags=["bot"])

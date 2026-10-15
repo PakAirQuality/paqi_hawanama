@@ -1,6 +1,6 @@
 'use client'
 
-type ViewMode = 'live' | 'estimated'
+export type ViewMode = 'live' | 'history'
 
 interface Props {
   mode: ViewMode
@@ -17,7 +17,7 @@ export default function ViewModeToggle({ mode, onChange }: Props) {
         aria-hidden
         className="absolute top-1 bottom-1 left-1 rounded-full bg-white/14 shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_4px_14px_rgba(0,0,0,0.12)] transition-all duration-300 ease-out"
         style={{
-          width: isLive ? '88px' : '124px',
+          width: '88px',
           transform: isLive ? 'translateX(0)' : 'translateX(88px)',
         }}
       />
@@ -36,13 +36,13 @@ export default function ViewModeToggle({ mode, onChange }: Props) {
               : 'bg-white/30'
           }`}
         />
-        LIVE
+        Live
       </button>
 
       <button
         type="button"
-        onClick={() => onChange('estimated')}
-        className={`relative z-10 flex w-[124px] items-center justify-center gap-2.5 py-1.5 rounded-full text-xs font-medium tracking-wide transition-colors duration-200 ${
+        onClick={() => onChange('history')}
+        className={`relative z-10 flex w-[88px] items-center justify-center gap-2 py-1.5 rounded-full text-xs font-medium tracking-wide transition-colors duration-200 ${
           !isLive ? 'text-white' : 'text-white/50'
         }`}
       >
@@ -53,7 +53,7 @@ export default function ViewModeToggle({ mode, onChange }: Props) {
               : 'bg-white/30'
           }`}
         />
-        ESTIMATED
+        History
       </button>
     </div>
   )

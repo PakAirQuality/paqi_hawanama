@@ -719,6 +719,7 @@ def upload_daily_partition_to_gcs(
                 station_records = []
                 for _, row in valid.iterrows():
                     station_records.append({
+                        "station_id": str(row.get("station_id", "")).strip(),
                         "name": str(row.get("station_name", "")),
                         "city": str(row.get("city_name", "")),
                         "lat": round(float(row[lat_col]), 5),

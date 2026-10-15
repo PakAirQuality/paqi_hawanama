@@ -21,7 +21,7 @@ interface MapWrapperProps {
   heatmapVisible?: boolean
   windVisible?: boolean
   modelVariant?: 'backbone' | 'support_aware'
-  viewMode?: 'live' | 'estimated'
+  viewMode?: 'live' | 'history'
   selectedDate?: string | null
   availableDates?: string[]
 }

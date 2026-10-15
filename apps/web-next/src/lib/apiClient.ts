@@ -62,8 +62,9 @@ export const apiClient = {
     }
   },
 
-  async getStationHistory(stationId: string, hours = 24, signal?: AbortSignal): Promise<StationHistory[]> {
-    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/history?hours=${hours}`
+  async getStationHistory(stationId: string, hours = 24, date?: string, signal?: AbortSignal): Promise<StationHistory[]> {
+    const qs = date ? `date=${date}` : `hours=${hours}`
+    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/history?${qs}&all_providers=true`
     console.log('[apiClient] Fetching station history from:', url)
     
     try {
@@ -85,8 +86,9 @@ export const apiClient = {
     }
   },
 
-  async getStationPM25History(stationId: string, hours = 24, signal?: AbortSignal): Promise<StationPM25History[]> {
-    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/history/pm25?hours=${hours}`
+  async getStationPM25History(stationId: string, hours = 24, date?: string, signal?: AbortSignal): Promise<StationPM25History[]> {
+    const qs = date ? `date=${date}` : `hours=${hours}`
+    const url = `${BASE_URL}/v1/dashboard/stations/${stationId}/history/pm25?${qs}&all_providers=true`
     console.log('[apiClient] Fetching station PM2.5 history from:', url)
     
     try {

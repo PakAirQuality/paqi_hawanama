@@ -1,5 +1,7 @@
 {
-  "projects": {},
+  "projects": {
+    "default": "hawanama-2"
+  },
   "targets": {
     "hawanama-2": {
       "hosting": {

@@ -67,6 +67,8 @@ function getFirebase() {
 
 const ALLOWED_EMAILS = new Set([
   "redacted@example.org",
+  "redacted@example.org",
+  "redacted@example.org",
 ]);
 
 export function isValidUser(user: User | null): boolean {

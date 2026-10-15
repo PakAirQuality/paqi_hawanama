@@ -51,6 +51,8 @@ export default function EstimatedContextPanel({ selectedDate }: Props) {
     queryKey: ['daily-stations', selectedDate],
     queryFn: () => fetchDailyStations(selectedDate),
     staleTime: Infinity,
+    retry: 1,
+    retryDelay: 1500,
   })
 
   const { data: brief, isLoading: briefLoading } = useQuery({

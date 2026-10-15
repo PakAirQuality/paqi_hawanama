@@ -24,6 +24,8 @@ class CopilotSession:
     last_entities: List[str] = field(default_factory=list)
     # ── Coverage query tracking (for deterministic follow-up upgrades) ──
     last_coverage_query: Optional[Dict] = None  # {entity, geography, detail_level}
+    # ── Historical date anchor (set when user focuses on a past date) ──
+    active_historical_date: Optional[str] = None  # YYYY-MM-DD
 
 
 _sessions: Dict[str, CopilotSession] = {}

@@ -14,6 +14,8 @@ import { FirebaseStorage, getStorage } from "firebase/storage";
 // Approved guest emails (external collaborators granted dashboard access)
 const GUEST_EMAILS: string[] = [
   "redacted@example.org",
+  "redacted@example.org",
+  "redacted@example.org",
 ];
 
 const firebaseConfig = {

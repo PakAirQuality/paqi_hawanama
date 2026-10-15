@@ -4,10 +4,19 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     // Helper function to check if user has a valid @pakairquality.com domain
+    // or is on the guest-email allowlist (must stay in sync with
+    // dashboard-frontend/src/lib/firebase.ts::GUEST_EMAILS and
+    // firebaseClient.ts::ALLOWED_EMAILS).
     function isInternalUser() {
       return request.auth != null
         && request.auth.token.email_verified == true
-        && request.auth.token.email.matches('.*@pakairquality\\.com');
+        && (
+          request.auth.token.email.matches('.*@pakairquality\\.com')
+          || request.auth.token.email == 'redacted@example.org'
+          || request.auth.token.email == 'redacted@example.org'
+          || request.auth.token.email == 'redacted@example.org'
+          || request.auth.token.email == 'redacted@example.org'
+        );
     }
 
     // Default rule: Only allow access to verified @pakairquality.com users

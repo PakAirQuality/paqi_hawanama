@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import Map, { Marker, Source, Layer, type ViewStateChangeEvent, type MapRef } from 'react-map-gl/mapbox';
 import { useStationSidebar } from '@/stores/stationSidebar';
@@ -11,6 +11,7 @@ import { useWindData } from './hooks/useWindData';
 import { useWindLayer } from './hooks/useWindLayer';
 import AqiMarker from './components/AqiMarker';
 import { fetchDailyStations, type DailyStation } from '@/lib/api';
+import { formatDateLabel } from '@/lib/dateLabel';
 
 // PM2.5 µg/m³ thresholds → synthetic AQI class for AqiMarker coloring
 function pm25ToSyntheticAqi(pm25: number): number {
@@ -28,7 +29,7 @@ interface MapProps {
   heatmapVisible?: boolean;
   windVisible?: boolean;
   modelVariant?: 'backbone' | 'support_aware';
-  viewMode?: 'live' | 'estimated';
+  viewMode?: 'live' | 'history';
   selectedDate?: string | null;
   availableDates?: string[];
 }
@@ -45,7 +46,7 @@ export default function MapRefactored({
   availableDates = [],
 }: MapProps) {
   const { openStation } = useStationSidebar();
-  const { stations, error } = useStationsData();
+  const { stations, error } = useStationsData(viewMode === 'live');
 
   const [viewport, setViewport] = useState({
     longitude: center?.[0] || 78,
@@ -65,7 +66,7 @@ export default function MapRefactored({
 
   // Fetch daily station observations when in estimated mode
   useEffect(() => {
-    if (viewMode !== 'estimated' || !selectedDate) {
+    if (viewMode !== 'history' || !selectedDate) {
       setDailyStations([])
       return
     }
@@ -74,17 +75,29 @@ export default function MapRefactored({
       .catch(() => setDailyStations([]))
   }, [viewMode, selectedDate]);
 
-  // Fly to Pakistan when switching to estimated mode
+  // Fly between modes: zoom into Pakistan for ESTIMATED, back to the South Asia
+  // overview for LIVE. Skip the initial mount (when viewMode is still its default
+  // 'live') so we don't animate from the user's already-correct starting view.
+  const flownOnce = useRef(false);
   useEffect(() => {
-    if (viewMode === 'estimated' && map) {
+    if (!map) return;
+    if (viewMode === 'history') {
       map.flyTo({ center: [69.35, 30.0], zoom: 5, duration: 1200, essential: true })
+      flownOnce.current = true
+    } else if (flownOnce.current) {
+      map.flyTo({
+        center: [center?.[0] ?? 78, center?.[1] ?? 22],
+        zoom: zoom ?? 3.6,
+        duration: 1200,
+        essential: true,
+      })
     }
-  }, [viewMode, map]);
+  }, [viewMode, map, center, zoom]);
 
   // Prefetch center tile for adjacent dates so going back is instant.
   // Uses same-origin /api/... path so the browser HTTP cache absorbs repeats.
   useEffect(() => {
-    if (viewMode !== 'estimated' || !selectedDate || !map || availableDates.length === 0) return;
+    if (viewMode !== 'history' || !selectedDate || !map || availableDates.length === 0) return;
     const idx = availableDates.indexOf(selectedDate);
     const neighbors = [availableDates[idx - 1], availableDates[idx + 1]].filter(Boolean);
     if (neighbors.length === 0) return;
@@ -131,7 +144,7 @@ export default function MapRefactored({
         coordinates: [stn.lon, stn.lat]
       },
       properties: {
-        id: `daily-${i}`,
+        id: stn.station_id ?? `daily-${i}`,
         name: stn.name,
         city: stn.city,
         aqi: pm25ToSyntheticAqi(stn.pm25),
@@ -141,13 +154,24 @@ export default function MapRefactored({
     }));
   }, [dailyStations]);
 
-  const features = viewMode === 'estimated' ? estimatedFeatures : liveFeatures;
+  const features = viewMode === 'history' ? estimatedFeatures : liveFeatures;
 
   const handleMarkerClick = (feature: any) => {
     const { properties } = feature;
-    // Only open sidebar for live station markers (estimated markers use surrogate IDs)
-    if (viewMode === 'estimated') return;
-    openStation(String(properties.id));
+    const id = String(properties.id);
+    // Synthetic IDs from estimated markers without a real station_id — skip.
+    if (id.startsWith('daily-')) return;
+    const isEstimated = viewMode === 'history';
+    const snapshot = isEstimated
+      ? dailyStations.find(s => s.station_id === id)
+      : undefined;
+    openStation(
+      id,
+      isEstimated ? selectedDate ?? undefined : undefined,
+      isEstimated && snapshot
+        ? { pm25: snapshot.pm25, name: snapshot.name, city: snapshot.city }
+        : undefined,
+    );
   };
 
   const handleMapChange = (evt: ViewStateChangeEvent) => {
@@ -160,6 +184,68 @@ export default function MapRefactored({
     setMap(mapInstance);
     handleMapChange(evt);
   };
+
+  // ── History-mode hover tooltip on the estimated grid ─────────────────────
+  // Shows the model-estimated PM2.5 for the cell under the cursor.
+  // Live mode = no-op; in History mode we debounce a fetch to /tiles/{date}/point
+  // and cache results in a Map so micro-movements don't refetch.
+  const [hoverInfo, setHoverInfo] = useState<
+    { x: number; y: number; lat: number; lon: number; pm25: number | null } | null
+  >(null);
+  const hoverCache = useRef<Record<string, number>>({});
+  const hoverFetchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const handleMapMouseMove = useCallback((e: any) => {
+    if (viewMode !== 'history' || !selectedDate) return;
+    const lng = e?.lngLat?.lng;
+    const lat = e?.lngLat?.lat;
+    const x = e?.point?.x;
+    const y = e?.point?.y;
+    if (lng == null || lat == null || x == null || y == null) return;
+    // /tiles/{date}/point expects 20 ≤ lat ≤ 40 and 60 ≤ lon ≤ 80
+    if (lat < 20 || lat > 40 || lng < 60 || lng > 80) {
+      setHoverInfo(null);
+      return;
+    }
+    setHoverInfo(prev => ({
+      x, y, lat, lon: lng,
+      pm25: prev?.pm25 ?? null,
+    }));
+  }, [viewMode, selectedDate]);
+
+  const handleMapMouseLeave = useCallback(() => setHoverInfo(null), []);
+
+  // Clear the tooltip whenever the user switches modes or date.
+  useEffect(() => {
+    if (viewMode !== 'history') setHoverInfo(null);
+  }, [viewMode, selectedDate]);
+
+  // Debounced fetch keyed on the rounded coords + date — same cell uses cached value.
+  const hoverKey = hoverInfo
+    ? `${selectedDate}|${hoverInfo.lat.toFixed(3)}|${hoverInfo.lon.toFixed(3)}`
+    : null;
+  useEffect(() => {
+    if (!hoverInfo || !selectedDate || !hoverKey) return;
+    const cached = hoverCache.current[hoverKey];
+    if (cached !== undefined) {
+      setHoverInfo(prev => (prev ? { ...prev, pm25: cached } : prev));
+      return;
+    }
+    if (hoverFetchTimer.current) clearTimeout(hoverFetchTimer.current);
+    hoverFetchTimer.current = setTimeout(async () => {
+      try {
+        const url = `/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${hoverInfo.lat.toFixed(4)}&lon=${hoverInfo.lon.toFixed(4)}&smoothed=true&model=support_aware`;
+        const res = await fetch(url, { credentials: 'omit' });
+        if (!res.ok) return;
+        const data = await res.json();
+        const v = typeof data?.pm25 === 'number' ? data.pm25 : null;
+        if (v != null) hoverCache.current[hoverKey] = v;
+        setHoverInfo(prev => (prev ? { ...prev, pm25: v } : prev));
+      } catch { /* swallow — transient network/edge case */ }
+    }, 180);
+    return () => { if (hoverFetchTimer.current) clearTimeout(hoverFetchTimer.current); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hoverKey]);
 
   // Error state
   if (error) {
@@ -182,6 +268,14 @@ export default function MapRefactored({
         mapStyle="mapbox://styles/mapbox/streets-v12"
         onMove={handleMapChange}
         onLoad={handleMapLoad}
+        onMouseMove={handleMapMouseMove}
+        onMouseLeave={handleMapMouseLeave}
+        interactiveLayerIds={[]}
+        transformRequest={(url: string, resourceType?: string) =>
+          resourceType === 'Tile' && url.startsWith('/api/')
+            ? { url, credentials: 'omit' as const }
+            : { url }
+        }
         style={{ 
           width: '100%', 
           height: '100%'
@@ -226,7 +320,7 @@ export default function MapRefactored({
               type="raster"
               paint={{
                 'raster-resampling': 'linear',
-                'raster-opacity': viewMode === 'estimated'
+                'raster-opacity': viewMode === 'history'
                   ? [
                       'interpolate', ['linear'], ['zoom'],
                       3, 0.7,
@@ -261,6 +355,35 @@ export default function MapRefactored({
           );
         })}
       </Map>
+
+      {/* History-mode grid hover tooltip */}
+      {viewMode === 'history' && selectedDate && hoverInfo && hoverInfo.pm25 != null && (
+        <div
+          className="pointer-events-none absolute z-40 rounded-md shadow-lg px-2.5 py-1.5"
+          style={{
+            left: hoverInfo.x + 14,
+            top: hoverInfo.y + 14,
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            color: 'white',
+            minWidth: 140,
+          }}
+        >
+          <div className="text-[9px] uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.5)' }}>
+            Estimated PM2.5
+          </div>
+          <div className="text-sm font-semibold leading-tight">
+            {hoverInfo.pm25.toFixed(1)}
+            <span className="text-[10px] font-normal ml-1" style={{ color: 'rgba(255,255,255,0.55)' }}>µg/m³</span>
+          </div>
+          <div className="text-[10px] mt-0.5" style={{ color: 'rgba(255,255,255,0.7)' }}>
+            {formatDateLabel(selectedDate)} · Grid cell daily mean
+          </div>
+          <div className="text-[9px] mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            Estimated for this grid cell
+          </div>
+        </div>
+      )}
     </div>
   );
 }

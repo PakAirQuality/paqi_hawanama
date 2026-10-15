@@ -40,7 +40,11 @@ class Settings(BaseSettings):
     
     # Security
     TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
-    PUBLIC_API_SECRET: Optional[str] = None  # Secret for public API endpoints
+    PUBLIC_API_SECRET: Optional[str] = None  # Legacy single shared key for public API endpoints
+    # Per-partner API keys for the public partner API. JSON object mapping
+    # key -> partner name, e.g. '{"abc123": "alertli", "def456": "delivetree"}'.
+    # Lets us issue/revoke/attribute keys per partner without a DB table.
+    PARTNER_API_KEYS: Optional[str] = None
     NASA_API_KEY: Optional[str] = None  # API key for NASA Database endpoints
 
     # BAM push-ingest (SFL / external MQTT bridge → HTTPS)
@@ -61,6 +65,7 @@ class Settings(BaseSettings):
     OPS_FEATURES_BUCKET: Optional[str] = None  # GCS bucket for COGs and training data (e.g., paqi-features-hawanama-data)
     OPS_DERIVED_BUCKET: Optional[str] = None  # GCS bucket for feature stores (e.g., paqi-derived-hawanama-data) - legacy/fallback
     OPS_FORECASTS_BUCKET: Optional[str] = None  # GCS bucket for PM2.5 forecasts (e.g., paqi-forecasts-hawanama-data)
+    FIRMS_MAP_KEY: Optional[str] = None  # NASA FIRMS API key for active fire data
     OPS_GCP_PROJECT: Optional[str] = None  # GCP project for Cloud Run jobs
     OPS_RUN_REGION: str = "asia-south1"  # Cloud Run region
     OPS_DAILY_JOB_NAME: str = "estimation-daily-pipeline"  # Daily estimation job name

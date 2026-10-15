@@ -19,7 +19,7 @@ steps:
       - 'push'
       - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
 
-  # Deploy to Cloud Run using latest tag (guaranteed to be available after push)
+  # Deploy public read API: hawanama (user-facing, sized for low-latency reads)
   # Uses Secret Manager for sensitive credentials
   - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
     entrypoint: 'gcloud'
@@ -30,10 +30,55 @@ steps:
       - '--image=asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
       - '--region=asia-south1'
       - '--platform=managed'
-      - '--set-secrets=POSTGRES_SERVER=POSTGRES_SERVER:latest,POSTGRES_USER=POSTGRES_USER:latest,POSTGRES_PASSWORD=POSTGRES_PASSWORD:latest,POSTGRES_DB=POSTGRES_DB:latest,POSTGRES_PORT=POSTGRES_PORT:latest,TASKS_API_SECRET=TASKS_API_SECRET:latest,IQAIR_API_KEY=IQAIR_API_KEY:latest,NASA_API_KEY=NASA_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,LANGFUSE_SECRET_KEY=LANGFUSE_SECRET_KEY:latest,LANGFUSE_PUBLIC_KEY=LANGFUSE_PUBLIC_KEY:latest'
+      - '--set-secrets=POSTGRES_SERVER=POSTGRES_SERVER:latest,POSTGRES_USER=POSTGRES_USER:latest,POSTGRES_PASSWORD=POSTGRES_PASSWORD:latest,POSTGRES_DB=POSTGRES_DB:latest,POSTGRES_PORT=POSTGRES_PORT:latest,TASKS_API_SECRET=TASKS_API_SECRET:latest,IQAIR_API_KEY=IQAIR_API_KEY:latest,NASA_API_KEY=NASA_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,LANGFUSE_SECRET_KEY=LANGFUSE_SECRET_KEY:latest,LANGFUSE_PUBLIC_KEY=LANGFUSE_PUBLIC_KEY:latest,PUNJAB_EPA_API_KEY=PUNJAB_EPA_API_KEY:latest,FIRMS_MAP_KEY=FIRMS_MAP_KEY:latest,PARTNER_API_KEYS=PARTNER_API_KEYS:latest'
       - '--set-env-vars=OPS_MODELS_BUCKET=paqi-models-hawanama-data,OPS_OUTPUTS_BUCKET=paqi-outputs-hawanama-data,OPS_FEATURES_BUCKET=paqi-features-hawanama-data,OPS_DERIVED_BUCKET=paqi-derived-hawanama-data,OPS_GCP_PROJECT=hawanama-data,OPS_RUN_REGION=asia-south1,OPS_DAILY_JOB_NAME=estimation-daily-pipeline,OPS_RETRAIN_JOB_NAME=estimation-model-retrain,MANIFEST_GCS_BUCKET=hawanama-manifests,ALLOW_DB_STATION_FALLBACK=true,IQAIR_MAX_CALLS_PER_MIN=500,INGEST_CONCURRENCY=10,LANGFUSE_HOST=https://us.cloud.langfuse.com'
-      - '--memory=1Gi'
+      - '--cpu=2'
+      - '--memory=2Gi'
+      - '--concurrency=20'
       - '--timeout=3600'
+      - '--min-instances=2'
+
+  # Deploy ingestion worker: hawanama-ingest (private, OIDC-only, sized for bursty bulk writes)
+  # Same image, same secrets, but isolated CPU/memory so ingestion never starves the public API.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hawanama-ingest'
+      - '--image=asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
+      - '--region=asia-south1'
+      - '--platform=managed'
+      - '--no-allow-unauthenticated'
+      - '--set-secrets=POSTGRES_SERVER=POSTGRES_SERVER:latest,POSTGRES_USER=POSTGRES_USER:latest,POSTGRES_PASSWORD=POSTGRES_PASSWORD:latest,POSTGRES_DB=POSTGRES_DB:latest,POSTGRES_PORT=POSTGRES_PORT:latest,TASKS_API_SECRET=TASKS_API_SECRET:latest,IQAIR_API_KEY=IQAIR_API_KEY:latest,NASA_API_KEY=NASA_API_KEY:latest,GEMINI_API_KEY=GEMINI_API_KEY:latest,LANGFUSE_SECRET_KEY=LANGFUSE_SECRET_KEY:latest,LANGFUSE_PUBLIC_KEY=LANGFUSE_PUBLIC_KEY:latest,PUNJAB_EPA_API_KEY=PUNJAB_EPA_API_KEY:latest,FIRMS_MAP_KEY=FIRMS_MAP_KEY:latest'
+      - '--set-env-vars=OPS_MODELS_BUCKET=paqi-models-hawanama-data,OPS_OUTPUTS_BUCKET=paqi-outputs-hawanama-data,OPS_FEATURES_BUCKET=paqi-features-hawanama-data,OPS_DERIVED_BUCKET=paqi-derived-hawanama-data,OPS_GCP_PROJECT=hawanama-data,OPS_RUN_REGION=asia-south1,OPS_DAILY_JOB_NAME=estimation-daily-pipeline,OPS_RETRAIN_JOB_NAME=estimation-model-retrain,MANIFEST_GCS_BUCKET=hawanama-manifests,ALLOW_DB_STATION_FALLBACK=true,IQAIR_MAX_CALLS_PER_MIN=500,INGEST_CONCURRENCY=10,LANGFUSE_HOST=https://us.cloud.langfuse.com,INGEST_ROLE=true'
+      - '--cpu=4'
+      - '--memory=4Gi'
+      - '--concurrency=4'
+      - '--timeout=3600'
+      - '--min-instances=0'
+      - '--max-instances=4'
+
+  # Deploy public BAM push-ingest: hawanama-bam (public HTTPS, guarded by our own
+  # bearer token so SFL can POST readings; BAM_ROLE=true mounts only the BAM router).
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'gcloud'
+    args:
+      - 'run'
+      - 'deploy'
+      - 'hawanama-bam'
+      - '--image=asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
+      - '--region=asia-south1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--set-secrets=POSTGRES_SERVER=POSTGRES_SERVER:latest,POSTGRES_USER=POSTGRES_USER:latest,POSTGRES_PASSWORD=POSTGRES_PASSWORD:latest,POSTGRES_DB=POSTGRES_DB:latest,POSTGRES_PORT=POSTGRES_PORT:latest,BAM_INGEST_TOKEN=BAM_INGEST_TOKEN:latest'
+      - '--set-env-vars=BAM_ROLE=true'
+      - '--cpu=1'
+      - '--memory=512Mi'
+      - '--concurrency=8'
+      - '--timeout=60'
+      - '--min-instances=0'
+      - '--max-instances=2'
 
 # Build options for faster builds
 options:

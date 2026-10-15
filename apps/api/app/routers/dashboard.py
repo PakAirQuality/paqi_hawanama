@@ -3,7 +3,7 @@ Dashboard API Router - provides dashboard endpoints for frontend
 """
 
 import logging
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,7 +134,7 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
     try:
         result = await db.execute(text("""
             WITH latest_readings AS (
-                SELECT DISTINCT ON (scope_key) 
+                SELECT DISTINCT ON (scope_key)
                     scope_key, pm25, aqi_us, temp_c, humidity, pressure_hpa,
                     wind_speed_ms, wind_dir_deg, ts_utc, qc_state
                 FROM readings
@@ -175,6 +175,8 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
             LEFT JOIN providers p ON s.provider_id = p.id
             WHERE s.active = true
               AND COALESCE(p.code, '') != 'punjab'
+              AND lr.ts_utc IS NOT NULL
+              AND lr.ts_utc > NOW() - INTERVAL '6 hours'
             ORDER BY s.name
         """))
         
@@ -240,7 +242,7 @@ async def get_station_current_data(
                 WHERE scope_type = 'station'
                   AND scope_key = :station_id
                   AND ts_utc > NOW() - INTERVAL '48 hours'
-                  -- QC gate: hide implausible readings from the public current view.
+                  -- QC gate: hide only explicitly-flagged-bad readings (INVALID/SUSPECT).
                   AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
                 ORDER BY scope_key, ts_utc DESC
             )
@@ -280,43 +282,62 @@ async def get_station_current_data(
 async def get_station_history_data(
     station_id: str,
     hours: int = 24,
+    date: Optional[str] = None,
+    all_providers: bool = False,
     db: AsyncSession = Depends(get_database)
 ):
-    """Get historical AQI data for a specific station using hash station_id"""
+    """Get historical AQI data for a specific station using hash station_id.
+
+    If `date` is provided (YYYY-MM-DD), returns hourly data for that **PKT day**
+    (00:00 → 24:00 Asia/Karachi). Otherwise returns the last `hours` hours from now.
+    If `all_providers` is true, includes Punjab EPA stations (mirrors PM2.5 endpoint).
+    """
     try:
         # Verify station exists / is allowed
-        station_result = await db.execute(text("""
+        provider_filter = "" if all_providers else "AND COALESCE(p.code, '') != 'punjab'"
+        station_result = await db.execute(text(f"""
             SELECT s.station_id, s.name
             FROM stations s
             LEFT JOIN providers p ON s.provider_id = p.id
             WHERE s.station_id = :station_id
               AND s.active = true
-              AND COALESCE(p.code, '') != 'punjab'
+              {provider_filter}
         """), {"station_id": station_id})
-        
+
         target_station = station_result.fetchone()
         if not target_station:
             raise HTTPException(status_code=404, detail="Station not found")
-        
-        # Validate hours parameter
-        if not isinstance(hours, int) or hours < 1 or hours > 168:
-            raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
-            
+
         from datetime import datetime, timedelta
-        start_time = datetime.now() - timedelta(hours=hours)
-        
+
+        if date:
+            try:
+                day = datetime.strptime(date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+            # Pakistan day (UTC+5, no DST): May 11 PKT = May 10 19:00 UTC → May 11 19:00 UTC.
+            # All callers (public site map, internal dashboard StructuresTab) treat
+            # `date` as a PKT calendar day; this keeps the 24 h chart aligned with that label.
+            start_time = day - timedelta(hours=5)
+            end_time = start_time + timedelta(hours=24)
+        else:
+            if not isinstance(hours, int) or hours < 1 or hours > 168:
+                raise HTTPException(status_code=400, detail="Invalid hours parameter (1-168)")
+            start_time = datetime.now() - timedelta(hours=hours)
+            end_time = datetime.now()
+
         history_result = await db.execute(text("""
-            SELECT 
+            SELECT
                 date_trunc('hour', r.ts_utc) AS hour_utc,
                 date_trunc('hour', r.ts_utc) + INTERVAL '5 hours' AS hour_pk,
                 r.aqi_us
-            FROM readings r 
-            WHERE r.scope_key = :station_id 
+            FROM readings r
+            WHERE r.scope_key = :station_id
                 AND r.scope_type = 'station'
                 AND r.ts_utc >= :start_time
-                AND r.ts_utc <= NOW()
+                AND r.ts_utc <= :end_time
             ORDER BY r.ts_utc ASC
-        """), {"station_id": station_id, "start_time": start_time})
+        """), {"station_id": station_id, "start_time": start_time, "end_time": end_time})
         
         history_rows = history_result.fetchall()
         history_data = [
@@ -348,8 +369,8 @@ async def get_station_history_pm25_data(
 ):
     """Get historical PM2.5 concentration data for a specific station using hash station_id.
 
-    If `date` is provided (YYYY-MM-DD), returns hourly data for that specific day (00:00-23:59 UTC).
-    Otherwise returns the last `hours` hours from now.
+    If `date` is provided (YYYY-MM-DD), returns hourly data for that **PKT day**
+    (00:00 → 24:00 Asia/Karachi). Otherwise returns the last `hours` hours from now.
     If `all_providers` is true, includes all providers (including Punjab EPA).
     """
     try:
@@ -371,13 +392,15 @@ async def get_station_history_pm25_data(
         from datetime import datetime, timedelta
 
         if date:
-            # Date-specific query: full day in UTC
             try:
                 day = datetime.strptime(date, "%Y-%m-%d")
             except ValueError:
                 raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
-            start_time = day
-            end_time = day + timedelta(days=1)
+            # Pakistan day (UTC+5, no DST): May 11 PKT = May 10 19:00 UTC → May 11 19:00 UTC.
+            # All callers (public site map, internal dashboard StructuresTab) treat
+            # `date` as a PKT calendar day; this keeps the 24 h chart aligned with that label.
+            start_time = day - timedelta(hours=5)
+            end_time = start_time + timedelta(hours=24)
         else:
             # Validate hours parameter
             if not isinstance(hours, int) or hours < 1 or hours > 168:

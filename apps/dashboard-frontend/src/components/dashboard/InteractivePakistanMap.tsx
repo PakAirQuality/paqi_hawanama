@@ -17,7 +17,9 @@ interface StationReading {
 
 interface Props {}
 
-mapboxgl.accessToken = '***REMOVED***'
+// the deployed build reads a token restricted to this site's own addresses
+// (.env.production.local); the literal is the development fallback
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'
 
 const INITIAL_CENTER: [number, number] = [69.3459, 30.3]
 const INITIAL_ZOOM = 4.2

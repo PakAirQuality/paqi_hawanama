@@ -11,19 +11,19 @@ export function useStationCurrent(stationId: string | null) {
   })
 }
 
-export function useStationHistory(stationId: string | null) {
+export function useStationHistory(stationId: string | null, date?: string) {
   return useQuery({
-    queryKey: ['station', stationId, 'history'],
-    queryFn: ({ signal }) => apiClient.getStationHistory(stationId!, 24, signal),
+    queryKey: ['station', stationId, 'history', date ?? 'live'],
+    queryFn: ({ signal }) => apiClient.getStationHistory(stationId!, 24, date, signal),
     enabled: !!stationId,
     staleTime: 5 * 60 * 1000, // 5 minutes
   })
 }
 
-export function useStationPM25History(stationId: string | null) {
+export function useStationPM25History(stationId: string | null, date?: string) {
   return useQuery({
-    queryKey: ['station', stationId, 'pm25-history'],
-    queryFn: ({ signal }) => apiClient.getStationPM25History(stationId!, 24, signal),
+    queryKey: ['station', stationId, 'pm25-history', date ?? 'live'],
+    queryFn: ({ signal }) => apiClient.getStationPM25History(stationId!, 24, date, signal),
     enabled: !!stationId,
     staleTime: 5 * 60 * 1000, // 5 minutes
   })

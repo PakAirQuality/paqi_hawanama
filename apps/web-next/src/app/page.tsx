@@ -11,7 +11,7 @@ import { fetchTileDates } from '@/lib/api'
 
 export default function Home() {
   const [showCitySearch, setShowCitySearch] = useState(false)
-  const [viewMode, setViewMode] = useState<'live' | 'estimated'>('live')
+  const [viewMode, setViewMode] = useState<'live' | 'history'>('live')
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
 
@@ -57,7 +57,7 @@ export default function Home() {
       </div>
 
       {/* Date rail — bottom-center, visible only in ESTIMATED mode */}
-      {viewMode === 'estimated' && availableDates.length > 0 && (
+      {viewMode === 'history' && availableDates.length > 0 && (
         <div
           className="absolute left-1/2 -translate-x-1/2 z-50"
           style={{ bottom: 'max(env(safe-area-inset-bottom, 1.5rem), 1.5rem)' }}
@@ -94,7 +94,7 @@ export default function Home() {
       </div>
 
       {/* Context Panel - ESTIMATED mode only, desktop only */}
-      {viewMode === 'estimated' && selectedDate && (
+      {viewMode === 'history' && selectedDate && (
         <div
           className="absolute right-4 sm:right-20 z-40 hidden md:block"
           style={{ top: 'max(env(safe-area-inset-top), 5rem)' }}

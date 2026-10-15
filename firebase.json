@@ -13,6 +13,13 @@
     {
       "site": "hawanama-dashboard",
       "public": "apps/dashboard-frontend/out",
+      "redirects": [
+        {
+          "source": "/emissions{,/**}",
+          "destination": "https://emissions.hawanama.org",
+          "type": 302
+        }
+      ],
       "rewrites": [
         {
           "source": "/api/**",

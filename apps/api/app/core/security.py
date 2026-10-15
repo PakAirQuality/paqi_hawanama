@@ -2,6 +2,7 @@
 Security dependencies for the API.
 """
 
+import os
 import secrets
 from fastapi import HTTPException, Depends, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -100,6 +101,15 @@ async def verify_cloud_scheduler_request(request: Request):
     an Authorization bearer token is included, we can trust the
     request. Without a bearer token the headers alone are spoofable.
     """
+    # Cloud Run only validates OIDC tokens on services that require IAM
+    # invoker auth (hawanama-ingest, --no-allow-unauthenticated). On the
+    # public hawanama service the Authorization header passes through
+    # unvalidated, so scheduler headers + an arbitrary bearer token are
+    # fully spoofable there. All scheduler jobs target hawanama-ingest,
+    # so only trust this branch when running with the ingest role.
+    if os.environ.get("INGEST_ROLE", "").lower() != "true":
+        return False
+
     user_agent = request.headers.get("user-agent", "")
     x_cloudscheduler = request.headers.get("x-cloudscheduler", "")
 

@@ -1,23 +1,26 @@
 'use client'
 
-import { MessageCircle, BarChart3, Layers, Building2 } from 'lucide-react'
+import { MessageCircle, BarChart3, Radio, Building2, Flame, Layers } from 'lucide-react'
 
-export type RailTab = 'chat' | 'analytics' | 'layers' | 'structures'
+export type RailTab = 'chat' | 'analytics' | 'stations' | 'sources' | 'fires' | 'layers'
 
 interface IconRailProps {
   activeTab: RailTab | null
   onTabChange: (tab: RailTab | null) => void
   isStreaming?: boolean
+  tabs?: RailTab[]
 }
 
-const TABS: { id: RailTab; icon: typeof MessageCircle; label: string }[] = [
+const ALL_TABS: { id: RailTab; icon: typeof MessageCircle; label: string }[] = [
   { id: 'chat', icon: MessageCircle, label: 'Chat' },
   { id: 'analytics', icon: BarChart3, label: 'Analytics' },
-  { id: 'structures', icon: Building2, label: 'Sources' },
+  { id: 'stations', icon: Radio, label: 'Stations' },
+  { id: 'sources', icon: Building2, label: 'Sources' },
+  { id: 'fires', icon: Flame, label: 'Fires' },
   { id: 'layers', icon: Layers, label: 'Layers' },
 ]
 
-export function IconRail({ activeTab, onTabChange, isStreaming }: IconRailProps) {
+export function IconRail({ activeTab, onTabChange, isStreaming, tabs }: IconRailProps) {
   return (
     <div
       style={{
@@ -32,7 +35,7 @@ export function IconRail({ activeTab, onTabChange, isStreaming }: IconRailProps)
         zIndex: 100,
       }}
     >
-      {TABS.map((tab) => {
+      {(tabs ? ALL_TABS.filter(t => tabs.includes(t.id)) : ALL_TABS).map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
         return (

@@ -163,29 +163,25 @@ class DatabaseService:
         # Determine if this will be a create or update
         was_existing = existing_station is not None
         
-        # Get or create provider (providers table has required display_name column)
-        provider_query = text("""
-            INSERT INTO providers (code, display_name) 
-            VALUES (:code, :display_name)
-            ON CONFLICT (code) DO UPDATE SET
-                display_name = EXCLUDED.display_name
-            RETURNING id
-        """)
-        
+        # Get or create provider. SELECT-first avoids burning providers_id_seq
+        # (SMALLSERIAL, max 32767) on every station upsert: INSERT ... ON CONFLICT
+        # calls nextval() before the conflict check, exhausting the sequence.
         provider_code = station_data.get('provider_code', 'airvisual')
-        provider_result = await session.execute(provider_query, {
-            'code': provider_code,
-            'display_name': provider_code.title()
-        })
-        
-        # Get provider ID
-        provider_id_query = text("""
-            SELECT id FROM providers WHERE code = :code
-        """)
-        provider_result = await session.execute(provider_id_query, {
-            'code': station_data.get('provider_code', 'airvisual')
-        })
+        provider_result = await session.execute(
+            text("SELECT id FROM providers WHERE code = :code"),
+            {'code': provider_code},
+        )
         provider_id = provider_result.scalar()
+        if provider_id is None:
+            provider_result = await session.execute(
+                text("""
+                    INSERT INTO providers (code, display_name)
+                    VALUES (:code, :display_name)
+                    RETURNING id
+                """),
+                {'code': provider_code, 'display_name': provider_code.title()},
+            )
+            provider_id = provider_result.scalar_one()
         
         upsert_query = text("""
             INSERT INTO stations (

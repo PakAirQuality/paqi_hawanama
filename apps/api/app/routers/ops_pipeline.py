@@ -1076,8 +1076,10 @@ def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
 async def list_cog_dates(
     limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
     model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
-) -> Dict[str, Any]:
+) -> Any:
     """List available COG prediction dates for tile serving."""
+    from fastapi.responses import JSONResponse
+
     backbone_dates = set(_gcs_list_cog_dates(limit=limit))
 
     # Always include support_aware dates so the timeline shows all available dates
@@ -1101,12 +1103,17 @@ async def list_cog_dates(
         all_dates = sorted(backbone_dates)
 
     dates = all_dates[-limit:]
-    return {
-        "dates": dates,
-        "count": len(dates),
-        "tile_url_template": "/api/v1/ops/pipeline/tiles/{date}/{z}/{x}/{y}.png",
-        "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson"
-    }
+    return JSONResponse(
+        content={
+            "dates": dates,
+            "count": len(dates),
+            "tile_url_template": "/api/v1/ops/pipeline/tiles/{date}/{z}/{x}/{y}.png",
+            "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson",
+        },
+        headers={
+            "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+        },
+    )
 
 
 @router.get(
@@ -1171,8 +1178,9 @@ async def get_point_value(
     lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
     smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
     model: str = Query("backbone", description="Model variant: 'backbone', 'support_aware', or 'urban/{city}'"),
-    _: bool = Depends(verify_tasks_token),
-) -> Dict[str, Any]:
+) -> Any:
+    # Public — reads from the same GCS COGs as the unauthenticated tile-serving
+    # endpoints; the public site's history-mode hover tooltip needs this.
     """
     Query PM2.5 prediction value at a specific coordinate.
 
@@ -1213,17 +1221,24 @@ async def get_point_value(
             if value is not None and (value < -9000 or not math.isfinite(value)):
                 value = None
 
-            return {
-                "date": pred_date,
-                "lat": lat,
-                "lon": lon,
-                "pm25": round(float(value), 2) if value is not None else None,
-                "unit": "µg/m³",
-                "colorscale": {
-                    "vmin": PM25_VMIN,
-                    "vmax": PM25_VMAX,
-                }
-            }
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                content={
+                    "date": pred_date,
+                    "lat": lat,
+                    "lon": lon,
+                    "pm25": round(float(value), 2) if value is not None else None,
+                    "unit": "µg/m³",
+                    "colorscale": {
+                        "vmin": PM25_VMIN,
+                        "vmax": PM25_VMAX,
+                    },
+                },
+                headers={
+                    # The COG is immutable per (date, smoothed, model); cache aggressively.
+                    "Cache-Control": "public, max-age=86400, s-maxage=604800, immutable",
+                },
+            )
 
     except HTTPException:
         raise
@@ -1373,7 +1388,7 @@ async def get_feature_tile(
                 content=png_bytes,
                 media_type="image/png",
                 headers={
-                    "Cache-Control": "public, max-age=86400",
+                    "Cache-Control": "public, max-age=86400, s-maxage=604800, immutable",
                     "X-Tile-Date": feat_date,
                     "X-Feature": feature,
                 }
@@ -1440,7 +1455,7 @@ async def get_feature_tile(
             return Response(
                 content=buf.getvalue(),
                 media_type="image/png",
-                headers={"Cache-Control": "public, max-age=86400"}
+                headers={"Cache-Control": "public, max-age=86400, s-maxage=604800, immutable"}
             )
         except:
             raise HTTPException(status_code=500, detail="Tile generation failed")
@@ -1748,7 +1763,9 @@ async def get_station_daily_observations(
             data["count"] = len(data["stations"])
             return JSONResponse(
                 content=data,
-                headers={"Cache-Control": "public, max-age=86400"},
+                headers={
+                    "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
+                },
             )
 
         # ── Slow fallback: parse parquets ──
@@ -1813,11 +1830,16 @@ async def get_station_daily_observations(
                     "complete": bool(row.get("pm25_ugm3_complete", 0)),
                 })
 
-            return {
-                "date": obs_date,
-                "stations": stations,
-                "count": len(stations),
-            }
+            return JSONResponse(
+                content={
+                    "date": obs_date,
+                    "stations": stations,
+                    "count": len(stations),
+                },
+                headers={
+                    "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
+                },
+            )
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -2229,18 +2251,39 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
         },
     }
 
-    # ── Cache to GCS ──
+    # ── Cache to GCS (only if we have station data) ──
     cache_path = f"briefs/ops_{date}.json"
-    try:
-        client = _gcs_client()
-        blob = client.bucket(outputs_bucket).blob(cache_path)
-        blob.upload_from_string(
-            json.dumps(result, ensure_ascii=False),
-            content_type="application/json",
+    if result["station_count"] == 0:
+        logger.warning(
+            f"Brief for {date} has no station observations — not caching "
+            f"(station daily aggregation likely not yet complete for this date)"
         )
-        logger.info(f"Cached brief for {date} at gs://{outputs_bucket}/{cache_path}")
-    except Exception as e:
-        logger.warning(f"Failed to cache brief for {date}: {e}")
+    else:
+        try:
+            client = _gcs_client()
+            blob = client.bucket(outputs_bucket).blob(cache_path)
+            blob.upload_from_string(
+                json.dumps(result, ensure_ascii=False),
+                content_type="application/json",
+            )
+            logger.info(f"Cached brief for {date} at gs://{outputs_bucket}/{cache_path}")
+            # Warm the public CDN edge cache so the first human visitor is a HIT.
+            # This GET goes Cloud Run → Fastly → GCS, seeding the s-maxage=86400 response.
+            try:
+                import httpx
+                brief_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/briefs/{date}"
+                stations_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/stations/daily/{date}?country=Pakistan&min_hours=6"
+                async with httpx.AsyncClient(timeout=20.0) as warm_client:
+                    brief_resp = await warm_client.get(brief_url)
+                    stations_resp = await warm_client.get(stations_url)
+                logger.info(
+                    f"Warmed CDN for {date} "
+                    f"(brief={brief_resp.status_code}, stations={stations_resp.status_code})"
+                )
+            except Exception as warm_err:
+                logger.warning(f"Failed to warm CDN for {date}: {warm_err}")
+        except Exception as e:
+            logger.warning(f"Failed to cache brief for {date}: {e}")
 
     return result
 
@@ -2263,6 +2306,13 @@ async def generate_briefs_batch(
 
     all_dates = _gcs_list_cog_dates(limit=days_back + 10)
     target_dates = all_dates[-days_back:]
+
+    # Never generate briefs for today's UTC date — station daily aggregation
+    # runs at 04:00 UTC and produces yesterday's data; today's stations.json
+    # won't exist yet, resulting in a stale "no stations reporting" brief.
+    from datetime import datetime, timezone
+    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    target_dates = [d for d in target_dates if d < today_utc]
 
     generated: List[str] = []
     skipped: List[str] = []

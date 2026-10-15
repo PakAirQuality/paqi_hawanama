@@ -18,6 +18,13 @@ const SUGGESTED_QUESTIONS = [
   "Which stations should I prioritize?",
 ]
 
+const TRACKER_SUGGESTED_QUESTIONS = [
+  "What were the worst cities on this day?",
+  "Were there any fires detected?",
+  "What was driving the pollution?",
+  "Which stations exceeded healthy levels?",
+]
+
 const STATION_CHIPS = [
   "What's the forecast?",
   "Show 24h trend",
@@ -27,6 +34,7 @@ const STATION_CHIPS = [
 
 interface CopilotChatProps {
   selectedDate: string
+  trackerMode?: boolean
   onAction?: (action: CopilotAction) => void
   stationMention?: StationMention | null
   cityMention?: string | null
@@ -36,29 +44,35 @@ interface CopilotChatProps {
   activeTab?: 'chat' | 'analytics'
 }
 
-export function CopilotChat({ selectedDate, onAction, stationMention, cityMention, onMentionConsumed, stations, onStreamingChange, activeTab: externalTab }: CopilotChatProps) {
+export function CopilotChat({ selectedDate, trackerMode = false, onAction, stationMention, cityMention, onMentionConsumed, stations, onStreamingChange, activeTab: externalTab }: CopilotChatProps) {
   const [internalTab, setInternalTab] = useState<'chat' | 'analytics'>('chat')
   const activeTab = externalTab ?? internalTab
   const setActiveTab = setInternalTab
   const [messages, setMessages] = useState<ChatMessageType[]>(() => {
-    // Restore cached briefing from today if available
-    if (typeof window !== 'undefined') {
-      const lastBriefDate = localStorage.getItem('analyst_briefing_date')
-      const today = new Date().toISOString().slice(0, 10)
-      if (lastBriefDate === today) {
-        try {
-          const cached = localStorage.getItem('analyst_briefing_messages')
-          if (cached) return JSON.parse(cached)
-        } catch { /* ignore parse errors */ }
-      }
+    // Tracker mode never reads from cache — briefs per selected date
+    if (trackerMode || typeof window === 'undefined') return []
+    // Analyst mode: restore cached briefing from today if available
+    const lastBriefDate = localStorage.getItem('analyst_briefing_date')
+    const today = new Date().toISOString().slice(0, 10)
+    if (lastBriefDate === today) {
+      try {
+        const cached = localStorage.getItem('analyst_briefing_messages')
+        if (cached) return JSON.parse(cached)
+      } catch { /* ignore parse errors */ }
     }
     return []
   })
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
-  const [sessionId] = useState(() => crypto.randomUUID())
+  // Analyst mode: fixed session per mount. Tracker mode: session keyed by date for fresh context.
+  const [_sessionId] = useState(() => crypto.randomUUID())
+  const sessionId = trackerMode ? `tracker-${selectedDate}` : _sessionId
+  // Tracker mode: track which date was last briefed so we re-brief on date change
+  const [trackerBriefedDate, setTrackerBriefedDate] = useState<string>('')
   const [briefingDone, setBriefingDone] = useState(() => {
-    // Only brief once per calendar day — show cached brief on reload
+    // Tracker mode always starts unbriefed — briefs per selected date
+    if (trackerMode) return false
+    // Analyst mode: only brief once per calendar day
     if (typeof window !== 'undefined') {
       const lastBriefDate = localStorage.getItem('analyst_briefing_date')
       const today = new Date().toISOString().slice(0, 10)
@@ -246,8 +260,9 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     }
   }, [extractActions, onAction, onStreamingChange])
 
-  // Cache briefing messages whenever they change (after streaming ends)
+  // Cache briefing messages whenever they change (after streaming ends) — analyst mode only
   useEffect(() => {
+    if (trackerMode) return
     if (briefingDone && messages.length > 0 && !messages.some(m => m.streaming)) {
       try {
         const today = new Date().toISOString().slice(0, 10)
@@ -255,29 +270,32 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
         localStorage.setItem('analyst_briefing_messages', JSON.stringify(messages))
       } catch { /* quota exceeded — ignore */ }
     }
-  }, [briefingDone, messages])
+  }, [briefingDone, messages, trackerMode])
 
-  // Auto-briefing on mount (once per calendar day)
+  // Auto-briefing: tracker mode re-briefs on every date change; analyst mode briefs once per day
   useEffect(() => {
-    if (briefingDone || !selectedDate) return
+    if (!selectedDate) return
+
+    if (trackerMode) {
+      // Re-brief whenever the selected date changes
+      if (trackerBriefedDate === selectedDate) return
+      setTrackerBriefedDate(selectedDate)
+      const assistantId = crypto.randomUUID()
+      setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
+      streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate }, assistantId)
+      return
+    }
+
+    // Analyst mode: brief once per calendar day
+    if (briefingDone) return
     setBriefingDone(true)
     if (typeof window !== 'undefined') {
       localStorage.setItem('analyst_briefing_date', new Date().toISOString().slice(0, 10))
     }
-
     const assistantId = crypto.randomUUID()
-    setMessages([{
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      streaming: true,
-    }])
-
-    streamResponse('/copilot/briefing', {
-      session_id: sessionId,
-      date: selectedDate,
-    }, assistantId)
-  }, [selectedDate, briefingDone, sessionId, streamResponse])
+    setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
+    streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate }, assistantId)
+  }, [selectedDate, trackerBriefedDate, briefingDone, sessionId, streamResponse, trackerMode])
 
   // Send a message
   const sendMessage = useCallback(async (text: string) => {
@@ -378,7 +396,7 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
               <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-1.5">
                 Ask about...
               </p>
-              {SUGGESTED_QUESTIONS.map((q, i) => (
+              {(trackerMode ? TRACKER_SUGGESTED_QUESTIONS : SUGGESTED_QUESTIONS).map((q, i) => (
                 <button
                   key={i}
                   onClick={() => handleSuggestion(q)}
