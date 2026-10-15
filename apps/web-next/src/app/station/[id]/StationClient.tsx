@@ -127,7 +127,9 @@ export default function StationClient({ stationId }: StationClientProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <img 
-                src="/logo-cropped.png" 
+                src="/logo-cropped-96.v1.png"
+                width={96}
+                height={105} 
                 alt="Hawanama Logo" 
                 className="w-12 h-12 object-contain"
               />

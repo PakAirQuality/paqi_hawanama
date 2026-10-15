@@ -1,6 +1,9 @@
 import { useState, useEffect, useRef } from 'react'
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-152782825429.asia-south1.run.app/api'
+// Same-origin by default: firebase.json rewrites /api/** to Cloud Run and the CDN honours the
+// endpoint's Cache-Control, so the ~186 KB texture is served from the edge instead of hitting
+// the API cross-origin on every visit. next.config.ts mirrors the rewrite in dev.
+const BASE_URL = process.env.NEXT_PUBLIC_API_BASE || '/api'
 
 export interface WindMetadata {
   width: number

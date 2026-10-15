@@ -199,7 +199,9 @@ export default function CityClient({ citySlug }: CityClientProps) {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center space-x-3 min-w-0">
               <img 
-                src="/logo-cropped.png" 
+                src="/logo-cropped-96.v1.png"
+                width={96}
+                height={105} 
                 alt="Hawanama Logo" 
                 className="w-8 h-8 sm:w-12 sm:h-12 object-contain flex-shrink-0"
               />

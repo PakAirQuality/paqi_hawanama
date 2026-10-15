@@ -1,19 +1,29 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import dynamic from 'next/dynamic'
 import MapWrapper from '@/components/map/MapWrapper'
-import { StationCard } from '@/components/station/StationCard'
+import { useStationSidebar } from '@/stores/stationSidebar'
+import { useStationsData } from '@/components/map/hooks/useStationsData'
 import { CitySearch } from '@/components/ui/CitySearch'
 import ViewModeToggle from '@/components/map/ViewModeToggle'
 import EstimatedDateRail from '@/components/map/EstimatedDateRail'
 import EstimatedContextPanel from '@/components/map/EstimatedContextPanel'
 import { fetchTileDates } from '@/lib/api'
 
+// The popup (and its recharts chunk, ~370 KB) is loaded only when a station is opened.
+const StationCard = dynamic(() => import('@/components/station/StationCard').then(m => m.StationCard), { ssr: false })
+
 export default function Home() {
   const [showCitySearch, setShowCitySearch] = useState(false)
   const [viewMode, setViewMode] = useState<'live' | 'history'>('live')
   const [availableDates, setAvailableDates] = useState<string[]>([])
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  const stationOpen = useStationSidebar((s) => s.isOpen)
+
+  // Start the shared station query here (static chunk) so it is in flight while the
+  // dynamic map chunks download; MapRefactored reads the same ['stations'] cache entry.
+  useStationsData(viewMode === 'live')
 
   // Prevent body scrolling on map page only
   useEffect(() => {
@@ -24,8 +34,12 @@ export default function Home() {
     }
   }, [])
 
-  // Fetch available prediction dates on mount
+  // Fetch available prediction dates the first time ESTIMATED mode is opened, not on
+  // every homepage load (LIVE mode never needs them, and no raster source is mounted
+  // until a date exists). Once fetched, the dates and selectedDate persist across
+  // mode switches so the tile source keeps its cache.
   useEffect(() => {
+    if (viewMode !== 'history' || availableDates.length > 0) return
     fetchTileDates()
       .then((dates) => {
         const today = new Date().toISOString().slice(0, 10)
@@ -34,7 +48,7 @@ export default function Home() {
         if (filtered.length > 0) setSelectedDate(filtered[filtered.length - 1])
       })
       .catch(() => {}) // silent — ESTIMATED mode just won't show dates
-  }, [])
+  }, [viewMode, availableDates.length])
 
   return (
     <div className="map-page relative w-full h-full overflow-hidden" style={{
@@ -85,8 +99,10 @@ export default function Home() {
             }}
           >
             <img
-              src="/hawanama.png"
+              src="/hawanama-128.v1.png"
               alt="Hawanama Logo"
+              width={128}
+              height={128}
               className="w-12 h-12 sm:w-16 sm:h-16 object-contain"
             />
           </button>
@@ -137,8 +153,8 @@ export default function Home() {
         </div>
       )}
 
-      {/* Station Card Popup */}
-      <StationCard />
+      {/* Station Card Popup — mounted only while a station is open */}
+      {stationOpen && <StationCard />}
     </div>
   )
 }

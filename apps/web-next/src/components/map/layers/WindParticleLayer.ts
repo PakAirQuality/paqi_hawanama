@@ -89,7 +89,12 @@ export class WindParticleRenderer {
   private _updateActiveParticles() {
     const zoom = this.map.getZoom()
     const t = Math.min(Math.max((zoom - ZOOM_MIN) / (ZOOM_MAX - ZOOM_MIN), 0), 1)
-    this.activeParticles = Math.round(this.baseParticles + t * (this.maxParticles - this.baseParticles))
+    // Never exceed the buffer (allocated for maxParticles): indices past it read NaN and never
+    // draw, so clamping changes nothing visually and removes the wasted per-frame work.
+    this.activeParticles = Math.min(
+      Math.round(this.baseParticles + t * (this.maxParticles - this.baseParticles)),
+      this.maxParticles,
+    )
     // Scale speed down as zoom increases so particles don't fly at close zoom
     this.speedScale = Math.pow(2, (ZOOM_MIN - zoom) * 0.7)
   }
@@ -230,8 +235,11 @@ export class WindParticleRenderer {
 
   private _animate = () => {
     if (!this.running) return
-    this._update()
-    this._draw()
+    // The canvas is at opacity 0 while the camera moves; skip the simulation until moveend.
+    if (!this.mapMoving) {
+      this._update()
+      this._draw()
+    }
     this.animFrame = requestAnimationFrame(this._animate)
   }
 

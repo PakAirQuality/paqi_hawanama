@@ -77,4 +77,4 @@ const AqiMarker: React.FC<AqiMarkerProps> = ({ aqi, pm25, isCluster, zoom = 5 })
   );
 };
 
-export default AqiMarker;
+export default React.memo(AqiMarker);

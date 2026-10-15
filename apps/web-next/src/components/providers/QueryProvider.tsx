@@ -8,7 +8,9 @@ export function QueryProvider({ children }: { children: React.ReactNode }) {
     defaultOptions: {
       queries: {
         staleTime: 60 * 1000, // 1 minute
-        refetchInterval: 60 * 1000, // Refetch every minute for live data
+        // Polling is opt-in per query: live data sets its own refetchInterval;
+        // metadata and historical queries must not poll.
+        refetchInterval: false,
       },
     },
   }))

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { memo, useEffect, useState, useMemo, useRef, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import Map, { Marker, Source, Layer, type ViewStateChangeEvent, type MapRef } from 'react-map-gl/mapbox';
 import { useStationSidebar } from '@/stores/stationSidebar';
@@ -12,6 +13,37 @@ import { useWindLayer } from './hooks/useWindLayer';
 import AqiMarker from './components/AqiMarker';
 import { fetchDailyStations, type DailyStation } from '@/lib/api';
 import { formatDateLabel } from '@/lib/dateLabel';
+
+const EMPTY_DAILY: DailyStation[] = [];
+
+// Memoized marker list: re-renders only when the station set, the zoom band or the click
+// handler changes — not on every camera move (which re-renders MapRefactored itself).
+const StationMarkers = memo(function StationMarkers({ features, zoomBand, onMarkerClick }: {
+  features: any[];
+  zoomBand: number;
+  onMarkerClick: (feature: any) => void;
+}) {
+  return (
+    <>
+      {features.map(feature => (
+        <Marker
+          key={`marker-${feature.properties.id}`}
+          longitude={feature.geometry.coordinates[0]}
+          latitude={feature.geometry.coordinates[1]}
+        >
+          <div onClick={() => onMarkerClick(feature)}>
+            <AqiMarker
+              aqi={feature.properties.aqi}
+              pm25={feature.properties.pm25}
+              isCluster={false}
+              zoom={zoomBand}
+            />
+          </div>
+        </Marker>
+      ))}
+    </>
+  );
+});
 
 // PM2.5 µg/m³ thresholds → synthetic AQI class for AqiMarker coloring
 function pm25ToSyntheticAqi(pm25: number): number {
@@ -54,9 +86,7 @@ export default function MapRefactored({
     zoom: zoom ?? 3.6,
   });
 
-  const [bounds, setBounds] = useState<[number, number, number, number] | undefined>();
   const [map, setMap] = useState<any>(null);
-  const [dailyStations, setDailyStations] = useState<DailyStation[]>([]);
 
   // Same-origin URL so Firebase Hosting CDN (Fastly) caches tiles for all users.
   // firebase.json rewrites /api/** → Cloud Run; in dev, next.config.ts mirrors this.
@@ -64,16 +94,17 @@ export default function MapRefactored({
     ? `/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png?smoothed=true&model=support_aware`
     : null;
 
-  // Fetch daily station observations when in estimated mode
-  useEffect(() => {
-    if (viewMode !== 'history' || !selectedDate) {
-      setDailyStations([])
-      return
-    }
-    fetchDailyStations(selectedDate)
-      .then(setDailyStations)
-      .catch(() => setDailyStations([]))
-  }, [viewMode, selectedDate]);
+  // Daily station observations in ESTIMATED mode. Same query key as EstimatedContextPanel,
+  // so the map and the panel share one cached request per date instead of fetching twice.
+  const { data: dailyStationsData } = useQuery({
+    queryKey: ['daily-stations', selectedDate],
+    queryFn: () => fetchDailyStations(selectedDate as string),
+    enabled: viewMode === 'history' && !!selectedDate,
+    staleTime: Infinity,
+    retry: 1,
+    retryDelay: 1500,
+  });
+  const dailyStations: DailyStation[] = (viewMode === 'history' && dailyStationsData) ? dailyStationsData : EMPTY_DAILY;
 
   // Fly between modes: zoom into Pakistan for ESTIMATED, back to the South Asia
   // overview for LIVE. Skip the initial mount (when viewMode is still its default
@@ -112,8 +143,11 @@ export default function MapRefactored({
     }
   }, [selectedDate, viewMode, map, availableDates]);
 
-  // Wind layer (lazy — only fetches data when toggled on)
-  const { windImage, windMetadata } = useWindData(windVisible);
+  // Wind layer: start only once the map has loaded and the station markers are usable
+  // (or the station request has failed), so the ~186 KB texture and the particle
+  // animation never compete with the first usable map.
+  const stationsReady = viewMode !== 'live' || stations.length > 0 || !!error;
+  const { windImage, windMetadata } = useWindData(windVisible && !!map && stationsReady);
   useWindLayer(map, windImage, windMetadata, windVisible);
 
   // Live station features (LIVE mode)
@@ -156,7 +190,7 @@ export default function MapRefactored({
 
   const features = viewMode === 'history' ? estimatedFeatures : liveFeatures;
 
-  const handleMarkerClick = (feature: any) => {
+  const handleMarkerClick = useCallback((feature: any) => {
     const { properties } = feature;
     const id = String(properties.id);
     // Synthetic IDs from estimated markers without a real station_id — skip.
@@ -172,12 +206,16 @@ export default function MapRefactored({
         ? { pm25: snapshot.pm25, name: snapshot.name, city: snapshot.city }
         : undefined,
     );
-  };
+  }, [viewMode, dailyStations, selectedDate, openStation]);
 
   const handleMapChange = (evt: ViewStateChangeEvent) => {
     setViewport(evt.viewState);
-    setBounds(evt.target.getBounds().toArray().flat() as [number, number, number, number]);
   };
+
+  // AqiMarker only changes appearance at zoom 3 and zoom 8, so markers re-render on those
+  // crossings only; panning and small zooms leave the memoized marker list untouched
+  // (react-map-gl repositions Marker elements itself on every map move).
+  const zoomBand = (viewport?.zoom ?? 3.6) < 3 ? 2 : (viewport?.zoom ?? 3.6) < 8 ? 5 : 9;
 
   const handleMapLoad = (evt: any) => {
     const mapInstance = evt.target;
@@ -334,26 +372,7 @@ export default function MapRefactored({
           </Source>
         )}
 
-        {features.map(feature => {
-          const key = `marker-${feature.properties.id}`;
-
-          return (
-            <Marker
-              key={key}
-              longitude={feature.geometry.coordinates[0]}
-              latitude={feature.geometry.coordinates[1]}
-            >
-              <div onClick={() => handleMarkerClick(feature)}>
-                <AqiMarker
-                  aqi={feature.properties.aqi}
-                  pm25={feature.properties.pm25}
-                  isCluster={false}
-                  zoom={viewport?.zoom ?? 3.6}
-                />
-              </div>
-            </Marker>
-          );
-        })}
+        <StationMarkers features={features} zoomBand={zoomBand} onMarkerClick={handleMarkerClick} />
       </Map>
 
       {/* History-mode grid hover tooltip */}
