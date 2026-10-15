@@ -88,6 +88,11 @@ class Settings(BaseSettings):
     IQAIR_QUOTA_MAX_WAIT_S: float = 180.0            # give up waiting for a shared-quota slot after this
     IQAIR_BACKFILL_HOURS: int = 48
     IQAIR_COUNTRIES: Optional[str] = None            # comma-separated; see app.core.south_asia
+    # Provider: Punjab EPA (separate credential and endpoint; never routed through IQAir)
+    PUNJAB_EPA_API_KEY: Optional[str] = None
+    PUNJAB_EPA_API_BASE: str = "https://aqipunjab.com/api"
+    PUNJAB_EPA_TIMEOUT_S: float = 30.0
+    PUNJAB_EPA_PACING_S: float = 0.25
     # Provider: OpenAQ v3 (adapter arrives in a later PR; declared so one Settings object exists)
     OPENAQ_BASE_URL: str = "https://api.openaq.org/v3"
     OPENAQ_CREDENTIAL_ALIAS: str = "openaq-default"

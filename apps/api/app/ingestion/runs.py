@@ -381,3 +381,28 @@ class RunRecorder:
 
 class RunAborted(Exception):
     """Raised inside per-entity workers when the run has been aborted (e.g. provider auth failure)."""
+
+
+# ---- FastAPI glue shared by every task endpoint -----------------------------
+
+def trigger_from_headers(headers) -> str:
+    """'scheduler' for Cloud Scheduler calls (header or user agent), else 'http'."""
+    ua = headers.get("user-agent", "") or ""
+    if headers.get("x-cloudscheduler") or "Google-Cloud-Scheduler" in ua:
+        return "scheduler"
+    return "http"
+
+
+def outcome_response(outcome: RunOutcome, message: str):
+    """
+    JSONResponse whose status code follows the run: success/skipped 200, partial
+    207, failed 500 — Cloud Scheduler retries only non-2xx, so total failures
+    get retried and live runs (skipped/lease_held) do not.
+    """
+    from fastapi.responses import JSONResponse
+    from app.ingestion.provenance import describe
+    return JSONResponse(
+        status_code=outcome.http_status(),
+        content={"status": outcome.status.value, "message": message, "run_id": outcome.run_id,
+                 "summary": outcome.to_dict(), "provenance": describe()},
+    )

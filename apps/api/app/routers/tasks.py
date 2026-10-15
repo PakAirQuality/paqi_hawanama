@@ -11,7 +11,7 @@ from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
 from app.ingestion.provenance import describe as describe_provenance
-from app.ingestion.runs import RunOutcome, worst_status
+from app.ingestion.runs import RunOutcome, outcome_response, trigger_from_headers, worst_status
 from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask
 
 logger = logging.getLogger(__name__)
@@ -19,27 +19,11 @@ router = APIRouter()
 
 
 def _trigger(request: Request) -> str:
-    ua = request.headers.get("user-agent", "")
-    if request.headers.get("x-cloudscheduler") or "Google-Cloud-Scheduler" in ua:
-        return "scheduler"
-    return "http"
+    return trigger_from_headers(request.headers)
 
 
 def _outcome_response(outcome: RunOutcome, message: str) -> JSONResponse:
-    """
-    Map the run status to an HTTP status so Cloud Scheduler (which retries only
-    on non-2xx) retries total failures: success/skipped 200, partial 207, failed 500.
-    """
-    return JSONResponse(
-        status_code=outcome.http_status(),
-        content={
-            "status": outcome.status.value,
-            "message": message,
-            "run_id": outcome.run_id,
-            "summary": outcome.to_dict(),
-            "provenance": describe_provenance(),
-        },
-    )
+    return outcome_response(outcome, message)
 
 
 @router.post("/tasks/discover")

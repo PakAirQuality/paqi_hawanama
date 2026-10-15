@@ -1,7 +1,7 @@
 """Punjab EPA router for Hawanama API"""
 
 import pandas as pd
-from fastapi import APIRouter, HTTPException, Query, Depends
+from fastapi import Request, APIRouter, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -15,6 +15,7 @@ from enum import Enum
 
 from app.core.database import get_database
 from app.services.aqi import category_for, pm25_to_aqi
+from app.ingestion.runs import outcome_response, trigger_from_headers
 from app.core.security import verify_tasks_token
 from app.services.ingestion.epa_service import collect_once
 
@@ -432,26 +433,19 @@ async def export_readings_csv(
 
 @router.post("/ingest/hourly")
 async def trigger_punjab_ingest(
+    request: Request,
     db: AsyncSession = Depends(get_database),
     _: bool = Depends(verify_tasks_token)
 ):
     """
-    Trigger one-shot Punjab EPA data ingestion.
-    
-    Public endpoint for Terraform/Cloud Scheduler to trigger data collection.
+    Trigger one-shot Punjab EPA data ingestion (Cloud Scheduler / manual).
+    Answers with the run's real status: 200 success/skipped, 207 partial, 500 failed.
     """
     try:
         logger.info("Starting Punjab EPA ingestion")
-        result = await collect_once(db)
-        logger.info("Punjab EPA ingestion completed successfully")
-        
-        return {
-            "status": "success",
-            "message": "Punjab EPA data ingestion completed",
-            "summary": result,
-            "triggered_at": datetime.now().isoformat()
-        }
-        
+        outcome = await collect_once(db, trigger=trigger_from_headers(request.headers))
+        logger.info("Punjab EPA ingestion finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return outcome_response(outcome, "Punjab EPA data ingestion completed")
     except Exception as e:
         logger.error(f"Punjab EPA ingestion failed: {e}")
         raise HTTPException(

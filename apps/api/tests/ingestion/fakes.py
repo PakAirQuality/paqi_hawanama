@@ -164,6 +164,8 @@ class FakeDatabaseService:
     async def upsert_country(self, session, data): return 1
     async def upsert_state(self, session, data): return 2
     async def upsert_city(self, session, data): return 3
+    async def resolve_country_id(self, session, name, iso2=None): return 1
+    async def get_or_create_provider(self, session, code, display_name=None): return 7
 
     async def upsert_station(self, session, info):
         self.stations.append(info)

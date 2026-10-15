@@ -124,6 +124,16 @@ class DatabaseService:
             )).scalar_one()
         return int(pid)
 
+    async def resolve_country_id(self, session: AsyncSession, name: str, iso2: Optional[str] = None) -> int:
+        """id of an existing country by name (or iso2), creating it if absent."""
+        from sqlalchemy import text
+        cid = (await session.execute(text("SELECT id FROM countries WHERE name = :n"), {"n": name})).scalar()
+        if cid is None and iso2:
+            cid = (await session.execute(text("SELECT id FROM countries WHERE iso2 = :i"), {"i": iso2})).scalar()
+        if cid is None:
+            cid = await self.upsert_country(session, {"name": name, "iso2": iso2})
+        return int(cid)
+
     async def upsert_station(self, session: AsyncSession, station_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Insert or update a station without ever splitting a device's history.
