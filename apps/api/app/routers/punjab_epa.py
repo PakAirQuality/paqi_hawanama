@@ -14,6 +14,7 @@ from typing import Optional
 from enum import Enum
 
 from app.core.database import get_database
+from app.services.aqi import category_for, pm25_to_aqi
 from app.core.security import verify_tasks_token
 from app.services.ingestion.epa_service import collect_once
 
@@ -73,15 +74,7 @@ AQI_CATEGORIES = [
     (301,500, "Hazardous"),
 ]
 
-# ---- EPA breakpoint tables (U.S. AQI). PM2.5 updated in 2024 ----
-PM25_BPTS = [  # µg/m³
-    (0.0, 9.0,      0, 50),
-    (9.1, 35.4,    51,100),
-    (35.5, 55.4,  101,150),
-    (55.5,125.4,  151,200),
-    (125.5,225.4, 201,300),
-    (225.5,500.4, 301,500),
-]
+# ---- EPA breakpoint tables (U.S. AQI). PM2.5 lives in app.services.aqi (2024 table) ----
 PM10_BPTS = [  # µg/m³
     (0, 54,    0, 50),
     (55,154,  51,100),
@@ -132,12 +125,7 @@ def _interp_aqi(C: float, table):
     return None  # out of table
 
 def _aqi_category(aqi: int) -> str:
-    if aqi is None:
-        return "Unknown"
-    for lo, hi, name in AQI_CATEGORIES:
-        if lo <= aqi <= hi:
-            return name
-    return "Beyond Index"
+    return category_for(aqi)
 
 def compute_hourly_usaqi_iqair(
     pm25_ugm3, pm10_ugm3, no2_ppb, so2_ppb, co_ppm, o3_ppb,
@@ -164,7 +152,7 @@ def compute_hourly_usaqi_iqair(
 
     # 2) pollutant sub-indices (hourly → U.S. AQI scale)
     sub = {
-        "PM2.5": _interp_aqi(pm25, PM25_BPTS) if pm25 is not None else None,
+        "PM2.5": pm25_to_aqi(pm25, above_500="cap", averaging_basis="1h_subindex").value if pm25 is not None else None,
         "PM10":  _interp_aqi(pm10, PM10_BPTS) if pm10 is not None else None,
         "O3":    _interp_aqi(o3ppm, O3_8H_BPTS) if o3ppm is not None else None,
         "CO":    _interp_aqi(co, CO_8H_BPTS) if co is not None else None,

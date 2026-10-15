@@ -26,7 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_database
 from app.core.config import settings
-from app.services.ingestion.bam_service import pm25_to_aqi_us
+from app.services.aqi import category_for
+from app.services.ingestion.bam_service import BAM_AQI_BASIS, pm25_to_aqi_us
 
 # How this network should appear to OpenAQ
 NETWORK_NAME = "PAQI"
@@ -197,24 +198,8 @@ class CurrentResponse(BaseModel):
     results: List[CurrentStation]
 
 
-# US EPA AQI category bands (mirrors punjab_epa.py:_aqi_category).
-AQI_CATEGORIES = [
-    (0, 50,   "Good"),
-    (51, 100, "Moderate"),
-    (101, 150, "Unhealthy for Sensitive Groups"),
-    (151, 200, "Unhealthy"),
-    (201, 300, "Very Unhealthy"),
-    (301, 500, "Hazardous"),
-]
-
-
 def _aqi_category(aqi: Optional[int]) -> str:
-    if aqi is None:
-        return "Unknown"
-    for lo, hi, name in AQI_CATEGORIES:
-        if lo <= aqi <= hi:
-            return name
-    return "Beyond Index"
+    return category_for(aqi)
 
 
 # ---------------------------------------------------------------------
@@ -620,7 +605,11 @@ async def current_conditions(
             "organization": ORGANIZATION,
             "generated": datetime.utcnow().isoformat() + "Z",
             "count": len(stations),
-            "aqi_standard": "US EPA",
+            "aqi_standard": "US EPA 2024",
+            # A single hourly PM2.5 concentration mapped through the breakpoints,
+            # capped at 500 — not a daily or NowCast AQI.
+            "aqi_basis": BAM_AQI_BASIS,
+            "aqi_above_500": "cap",
         },
         results=stations,
     )

@@ -25,6 +25,7 @@ from app.services.ingestion.bam_service import (
     ensure_bam_provider,
     evaluate_bam_qc,
     pm25_to_aqi_us,
+    bam_aqi_provenance,
     upsert_bam_reading,
     upsert_bam_station,
     wind_dir_to_deg,
@@ -244,6 +245,7 @@ async def ingest_bam_reading(
                 "wind_dir": d.wind_dir,
                 "pressure_raw": d.pressure,
                 "qc": {"state": qc_state, "flags": qc_flags, "detail": qc_detail},
+                "prov": {"aqi": bam_aqi_provenance(d.pm25)},
                 "v": "bam_push_v2",
             },
         )
