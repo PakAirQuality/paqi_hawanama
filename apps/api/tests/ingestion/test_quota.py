@@ -156,3 +156,46 @@ async def test_two_engines_cannot_exceed_shared_budget(pg_url):
             await s.commit()
         for e in engines:
             await e.dispose()
+
+
+# ----------------------------------------------------------------- hour window
+
+async def test_postgres_reserve_with_hour_limit_denies_when_hour_spent():
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    hour = now.replace(minute=0)
+    # minute granted, hour INSERT returns nothing, hour state says spent
+    sf, sess = _factory([(3, 45, now, 30.0), None, (1500, 1500, hour, 1800.0)])
+    q = PostgresQuota(sf, required=True)
+    d = await q.reserve("openaq-prod", limit_per_min=45, limit_per_hour=1500)
+    assert not d.granted and d.used == 1500 and d.limit == 1500 and d.retry_in_s == 1800.0
+    assert "window_kind, window_start" in sess.calls[1][0] and sess.calls[1][1] == {"alias": "openaq-prod", "limit": 1500}
+
+
+async def test_postgres_reserve_with_hour_limit_granted():
+    now = datetime.now(timezone.utc).replace(second=0, microsecond=0)
+    sf, sess = _factory([(3, 45, now, 30.0), (10, 1500, now.replace(minute=0), 1800.0)])
+    d = await PostgresQuota(sf, required=True).reserve("openaq-prod", limit_per_min=45, limit_per_hour=1500)
+    assert d.granted and d.used == 3 and len(sess.calls) == 2
+
+
+async def test_real_hour_window(pg_url):
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy import text
+    engine = create_async_engine(pg_url)
+    sf = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    alias = f"hour-{datetime.now(timezone.utc):%H%M%S%f}"
+    q = PostgresQuota(sf, required=True)
+    try:
+        d1 = await q.reserve(alias, limit_per_min=10, limit_per_hour=2)
+        d2 = await q.reserve(alias, limit_per_min=10, limit_per_hour=2)
+        d3 = await q.reserve(alias, limit_per_min=10, limit_per_hour=2)
+        assert d1.granted and d2.granted and not d3.granted and d3.limit == 2
+        async with sf() as s:
+            kinds = (await s.execute(text("SELECT window_kind, used FROM ops.provider_quota WHERE credential_alias=:a ORDER BY 1"), {"a": alias})).fetchall()
+        assert [(k, u) for k, u in kinds] == [("hour", 2), ("minute", 3)]
+    finally:
+        async with sf() as s:
+            await s.execute(text("DELETE FROM ops.provider_quota WHERE credential_alias=:a"), {"a": alias})
+            await s.commit()
+        await engine.dispose()

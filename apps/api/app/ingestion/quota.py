@@ -61,14 +61,15 @@ class QuotaDecision:
 
 
 class QuotaReservation(Protocol):
-    async def reserve(self, credential_alias: str, *, limit_per_min: int) -> QuotaDecision: ...
+    async def reserve(self, credential_alias: str, *, limit_per_min: int, limit_per_hour: Optional[int] = None) -> QuotaDecision: ...
     async def healthcheck(self) -> None: ...
-    async def reserve_or_wait(self, credential_alias: str, *, limit_per_min: int, max_wait_s: float) -> QuotaDecision: ...
+    async def reserve_or_wait(self, credential_alias: str, *, limit_per_min: int, max_wait_s: float,
+                              limit_per_hour: Optional[int] = None) -> QuotaDecision: ...
 
 
 class _BaseQuota:
     async def reserve_or_wait(self, credential_alias: str, *, limit_per_min: int, max_wait_s: float,
-                              sleep=asyncio.sleep) -> QuotaDecision:
+                              limit_per_hour: Optional[int] = None, sleep=asyncio.sleep) -> QuotaDecision:
         """
         Reserve, sleeping until the next window when denied, up to max_wait_s in
         total. Raises QuotaExhausted when the wait budget runs out; the provider
@@ -76,7 +77,7 @@ class _BaseQuota:
         """
         waited = 0.0
         while True:
-            d = await self.reserve(credential_alias, limit_per_min=limit_per_min)
+            d = await self.reserve(credential_alias, limit_per_min=limit_per_min, limit_per_hour=limit_per_hour)
             if d.granted:
                 return d
             delay = min(max(d.retry_in_s, 0.25), 60.0) + random.random() * 0.5
@@ -113,6 +114,29 @@ class PostgresQuota(_BaseQuota):
         WHERE credential_alias = :alias AND window_kind = 'minute' AND window_start = date_trunc('minute', now())
     """)
     HEALTH_SQL = text("SELECT 1 FROM ops.provider_quota LIMIT 1")
+    # Hour window (OpenAQ has a per-hour entitlement as well as per-minute). Reserved after the
+    # minute slot; a denial here wastes one minute slot, which is harmless.
+    RESERVE_HOUR_SQL = text("""
+        WITH res AS (
+            INSERT INTO ops.provider_quota AS q
+                (credential_alias, window_kind, window_start, used, quota_limit, updated_at)
+            VALUES
+                (:alias, 'hour', date_trunc('hour', now()), 1, :limit, now())
+            ON CONFLICT (credential_alias, window_kind, window_start)
+            DO UPDATE SET used = q.used + 1, quota_limit = EXCLUDED.quota_limit, updated_at = now()
+            WHERE q.used < EXCLUDED.quota_limit
+            RETURNING used, quota_limit, window_start
+        )
+        SELECT used, quota_limit, window_start,
+               EXTRACT(EPOCH FROM (date_trunc('hour', now()) + interval '1 hour' - now())) AS until_next
+        FROM res
+    """)
+    STATE_HOUR_SQL = text("""
+        SELECT used, quota_limit, window_start,
+               EXTRACT(EPOCH FROM (date_trunc('hour', now()) + interval '1 hour' - now())) AS until_next
+        FROM ops.provider_quota
+        WHERE credential_alias = :alias AND window_kind = 'hour' AND window_start = date_trunc('hour', now())
+    """)
 
     _warned = False
 
@@ -129,16 +153,21 @@ class PostgresQuota(_BaseQuota):
         except Exception as exc:
             raise QuotaUnavailable(f"ops.provider_quota unavailable: {type(exc).__name__}: {exc}") from exc
 
-    async def reserve(self, credential_alias: str, *, limit_per_min: int) -> QuotaDecision:
+    async def reserve(self, credential_alias: str, *, limit_per_min: int, limit_per_hour: Optional[int] = None) -> QuotaDecision:
         if self._degraded:
             return _granted_unmetered(limit_per_min)
         limit = max(1, int(limit_per_min))
         state = None
+        hour_row = hour_state = None
         try:
             async with self._sf() as sess:
                 row = (await sess.execute(self.RESERVE_SQL, {"alias": credential_alias, "limit": limit})).first()
                 if row is None:
                     state = (await sess.execute(self.STATE_SQL, {"alias": credential_alias})).first()
+                elif limit_per_hour:
+                    hour_row = (await sess.execute(self.RESERVE_HOUR_SQL, {"alias": credential_alias, "limit": int(limit_per_hour)})).first()
+                    if hour_row is None:
+                        hour_state = (await sess.execute(self.STATE_HOUR_SQL, {"alias": credential_alias})).first()
                 await sess.commit()
         except Exception as exc:
             if self._required:
@@ -150,6 +179,12 @@ class PostgresQuota(_BaseQuota):
             self._degraded = True
             return _granted_unmetered(limit)
 
+        if row is not None and limit_per_hour and hour_row is None:
+            # Minute slot granted but the hour budget is spent: deny until the next hour.
+            if hour_state is not None:
+                return QuotaDecision(False, int(hour_state[0]), int(hour_state[1]), _aware(hour_state[2]),
+                                     max(float(hour_state[3] or 0.0), 1.0))
+            return QuotaDecision(False, int(limit_per_hour), int(limit_per_hour), datetime.now(timezone.utc), 60.0)
         if row is not None:
             used, qlimit, window_start, until_next = row[0], row[1], row[2], float(row[3] or 0.0)
             return QuotaDecision(True, int(used), int(qlimit), _aware(window_start), until_next)
@@ -171,7 +206,7 @@ class LocalQuota(_BaseQuota):
     async def healthcheck(self) -> None:
         return None
 
-    async def reserve(self, credential_alias: str, *, limit_per_min: int) -> QuotaDecision:
+    async def reserve(self, credential_alias: str, *, limit_per_min: int, limit_per_hour: Optional[int] = None) -> QuotaDecision:
         limit = max(1, int(self._fixed_limit or limit_per_min))
         now = time.time()
         window = int(now // 60)

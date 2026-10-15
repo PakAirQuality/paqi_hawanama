@@ -93,10 +93,27 @@ class Settings(BaseSettings):
     PUNJAB_EPA_API_BASE: str = "https://aqipunjab.com/api"
     PUNJAB_EPA_TIMEOUT_S: float = 30.0
     PUNJAB_EPA_PACING_S: float = 0.25
-    # Provider: OpenAQ v3 (adapter arrives in a later PR; declared so one Settings object exists)
+    # Provider: OpenAQ v3 — independent source, own key (X-API-Key), shadow mode until cutover.
+    # Official defaults are 60 requests/min and 2,000/hour per key; targets below leave headroom
+    # for retries and discovery. Never rotate/multiplex keys to evade limits.
+    OPENAQ_ENABLED: bool = False
     OPENAQ_BASE_URL: str = "https://api.openaq.org/v3"
     OPENAQ_CREDENTIAL_ALIAS: str = "openaq-default"
-    OPENAQ_ENABLED: bool = False
+    OPENAQ_COUNTRY_ISO: str = "PK"                   # /v3/locations?iso=
+    OPENAQ_PARAMETERS: str = "pm25"                  # comma-separated parameter names to ingest
+    OPENAQ_RATE_PER_MIN: int = 45
+    OPENAQ_RATE_PER_HOUR: int = 1500
+    OPENAQ_MAX_REQUESTS_PER_RUN: int = 1200          # hard cap per invocation
+    OPENAQ_PAGE_LIMIT: int = 1000                    # documented maximum
+    OPENAQ_MAX_PAGES_PER_STREAM: int = 6
+    OPENAQ_OVERLAP_HOURS: int = 72                   # re-read window for late/revised data
+    OPENAQ_WINDOW_HOURS: int = 24                    # forward step per run beyond the checkpoint
+    OPENAQ_INITIAL_BACKFILL_HOURS: int = 72          # first window for a new stream
+    OPENAQ_RECONCILE_LOOKBACK_DAYS: int = 14
+    OPENAQ_SELF_PROVIDER_NAMES: str = "PAQI,Pakistan Air Quality Initiative,Hawanama"   # our own data seen via OpenAQ
+    OPENAQ_ALIAS_DISTANCE_M: float = 150.0
+    OPENAQ_HTTP_TIMEOUT_S: float = 30.0
+    OPENAQ_RETIRE_AFTER_MISSED_RUNS: int = 7
     # Ingestion behaviour
     INGEST_CONCURRENCY: int = 6                      # entities (stations/cities) in flight per task
     ALLOW_DB_STATION_FALLBACK: bool = False
