@@ -85,28 +85,6 @@ STATION_FALLBACK_SQL = """
 """
 
 
-class _AsyncRateLimiter:
-    """
-    Smooth global rate limiter (token spacing). Guarantees average <= rate/min.
-    """
-    def __init__(self, per_minute: int):
-        per_minute = max(1, per_minute)
-        self._interval = 60.0 / float(per_minute)
-        self._lock = asyncio.Lock()
-        self._next = 0.0
-
-    async def wait(self):
-        async with self._lock:
-            loop = asyncio.get_running_loop()
-            now = loop.time()
-            if self._next <= now:
-                self._next = now + self._interval
-                return
-            delay = self._next - now
-            self._next += self._interval
-        await asyncio.sleep(delay)
-
-
 class DataIngestionTask:
     """Manifest-driven data ingestion (station endpoint) with backfill from history.pollution."""
 
@@ -129,7 +107,6 @@ class DataIngestionTask:
         self._concurrency = int(s.INGEST_CONCURRENCY)
         self._sema = asyncio.Semaphore(self._concurrency)
         self._rate = int(s.IQAIR_MAX_CALLS_PER_MIN)
-        self._limiter = _AsyncRateLimiter(self._rate)
 
         # Fallback toggles
         self._allow_city_fallback   = bool(s.ALLOW_CITY_FALLBACK)
@@ -258,7 +235,6 @@ class DataIngestionTask:
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - timedelta(hours=self._backfill_hours)
         try:
-            await self._limiter.wait()
             hist_raw = await self.iqair_client.get_station_history_pollution(
                 station=station_name,
                 city=city,
@@ -289,7 +265,6 @@ class DataIngestionTask:
         end_utc = datetime.now(timezone.utc)
         start_utc = end_utc - timedelta(hours=self._backfill_hours)
         try:
-            await self._limiter.wait()
             hist_raw = await self.iqair_client.get_station_history_weather(
                 station=station_name, city=city, state=state_try, country=country,
                 start_utc=start_utc, end_utc=end_utc,
@@ -729,7 +704,6 @@ class DataIngestionTask:
 
             for idx, state_try in enumerate(states_to_try or [state]):
                 try:
-                    await self._limiter.wait()
                     raw = await self.iqair_client.get_station_data(
                         station=station_name, city=city, state=state_try, country=country
                     )
@@ -775,7 +749,6 @@ class DataIngestionTask:
             # Optional: city fallback
             if self._allow_city_fallback:
                 try:
-                    await self._limiter.wait()
                     raw = await self.iqair_client.get_city_data(city=city, state=state, country=country)
                     parsed = self.iqair_client.parse_city_data(raw)
                     # History data is already included in the city response if available

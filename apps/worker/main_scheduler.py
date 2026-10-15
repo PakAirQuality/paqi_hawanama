@@ -23,11 +23,10 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
 from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask  # noqa: E402
 
-# -------- logging --------
-logging.basicConfig(
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+# -------- logging (same redacting setup as the API) --------
+from app.core.config import settings  # noqa: E402
+from app.ingestion.http import configure_logging  # noqa: E402
+configure_logging(settings.LOG_LEVEL, secrets=(settings.IQAIR_API_KEY, settings.OPENAQ_API_KEY))
 logger = logging.getLogger(__name__)
 
 

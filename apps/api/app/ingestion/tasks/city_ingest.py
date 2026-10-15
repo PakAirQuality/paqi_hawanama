@@ -82,28 +82,6 @@ CITY_FALLBACK_SQL = """
 """
 
 
-class _AsyncRateLimiter:
-    """
-    Smooth global rate limiter (token spacing). Guarantees average <= rate/min.
-    """
-    def __init__(self, per_minute: int):
-        per_minute = max(1, per_minute)
-        self._interval = 60.0 / float(per_minute)
-        self._lock = asyncio.Lock()
-        self._next = 0.0
-
-    async def wait(self):
-        async with self._lock:
-            loop = asyncio.get_running_loop()
-            now = loop.time()
-            if self._next <= now:
-                self._next = now + self._interval
-                return
-            delay = self._next - now
-            self._next += self._interval
-        await asyncio.sleep(delay)
-
-
 class CityIngestionTask:
     """Manifest-driven city-level ingestion (IQAir /v2/city)."""
 
@@ -124,7 +102,6 @@ class CityIngestionTask:
         self._concurrency = int(s.INGEST_CONCURRENCY)
         self._sema = asyncio.Semaphore(self._concurrency)
         self._rate = int(s.IQAIR_MAX_CALLS_PER_MIN)
-        self._limiter = _AsyncRateLimiter(self._rate)
 
         # Toggles
         self._allow_state_alias      = bool(s.ALLOW_STATE_ALIAS)
@@ -417,7 +394,6 @@ class CityIngestionTask:
             # Try exact + alias states
             for idx, state_try in enumerate(states_to_try or [state]):
                 try:
-                    await self._limiter.wait()
                     raw = await self.iqair_client.get_city_data(city=city, state=state_try, country=country)
                     parsed = self.iqair_client.parse_city_data(raw)
                     readings = self._normalize_city_readings(parsed, scope_key)
@@ -446,7 +422,6 @@ class CityIngestionTask:
                 lon = row.get("lon") or row.get("longitude")
                 if lat is not None and lon is not None:
                     try:
-                        await self._limiter.wait()
                         raw = await self.iqair_client.get_nearest_city_data(lat=float(lat), lon=float(lon))
                         parsed = self.iqair_client.parse_city_data(raw)
                         readings = self._normalize_city_readings(parsed, scope_key)

@@ -7,6 +7,11 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.database import get_database
+from app.ingestion.http import aclose_shared_clients, configure_logging
+
+# Process-wide logging: redacts credentials in every record and keeps httpx from
+# logging request URLs (which carry the IQAir key as a query parameter).
+configure_logging(settings.LOG_LEVEL, secrets=(settings.IQAIR_API_KEY, settings.OPENAQ_API_KEY))
 from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest
 
 # True only on the dedicated ingestion Cloud Run service (hawanama-ingest).
@@ -86,6 +91,11 @@ async def get_stations_list(db = Depends(get_database)):
     """Get stations data for frontend - delegates to dashboard"""
     from app.routers.dashboard import get_stations_for_map
     return await get_stations_for_map(db)
+
+@app.on_event("shutdown")
+async def _close_shared_http_clients():
+    await aclose_shared_clients()
+
 
 @app.get("/")
 async def root():
