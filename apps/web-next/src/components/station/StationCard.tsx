@@ -7,7 +7,7 @@ import { useStationCurrent, useStationHistory, useStationPM25History, useAQICate
 import { formatPollutant, getWindDirection } from '@/lib/aqi'
 import { getAQICategory } from '@/lib/aqi'
 import { getAQIColorByValue, getAQICategoryLabel } from '@/components/map/config/aqiStyles'
-import { formatDateLabel } from '@/lib/dateLabel'
+import { formatDateLabel, pktHour, pktHourLabel } from '@/lib/dateLabel'
 import {
   BarChart,
   Bar,
@@ -101,8 +101,8 @@ export function StationCard() {
       return {
         timestamp_pk: item.timestamp_pk,
         timestamp_utc: item.timestamp_utc,
-        hour: pkDate.getHours(),
-        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+        hour: pktHour(pkDate),
+        timeLabel: pktHourLabel(pkDate),
         aqi: item.aqi_us,
         pm25: null as number | null
       }
@@ -113,8 +113,8 @@ export function StationCard() {
       return {
         timestamp_pk: item.timestamp_pk,
         timestamp_utc: item.timestamp_utc,
-        hour: pkDate.getHours(),
-        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+        hour: pktHour(pkDate),
+        timeLabel: pktHourLabel(pkDate),
         aqi: null as number | null,
         pm25: item.pm25
       }
@@ -157,8 +157,7 @@ export function StationCard() {
       .sort((a, b) => new Date(a.timestamp_pk).getTime() - new Date(b.timestamp_pk).getTime())
     
     // Get current local time hour to determine rightmost position
-    const currentPKTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' })
-    const currentHour = new Date(currentPKTime).getHours()
+    const currentHour = pktHour(new Date())
     
     return sortedData.map((item, index) => ({
       ...item,
@@ -223,7 +222,7 @@ export function StationCard() {
     : (category ? getAQICategoryLabel(currentAQI, category.label) : '—')
   const displayName = isHistorical ? (viewSnapshot!.name ?? '') : (current?.name ?? '')
   const displayDateLabel = isHistorical && viewDate ? formatDateLabel(viewDate) : null
-  const currentHour = new Date().getHours()
+  const currentHour = pktHour(new Date())
 
   // Debug logging for data inconsistency tracking
   if (process.env.NODE_ENV === 'development' && current && stationId) {

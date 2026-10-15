@@ -121,8 +121,8 @@ export const api = {
     const response = await fetch(url, { credentials: 'omit' })
     const data = await response.json()
 
-    // Server already filters to non-null readings within a 6h freshness window,
-    // so a hard hour-boundary cliff can no longer drop ~half the markers at HH:00.
+    // Server returns each station's newest PM2.5-bearing hour (48 h lookback, 6 h freshness),
+    // so a weather-only row at H+1 no longer blanks a marker and the HH:00 cliff is gone.
     return data.stations || []
   },
 

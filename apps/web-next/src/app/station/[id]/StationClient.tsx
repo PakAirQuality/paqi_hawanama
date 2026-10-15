@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { useStationCurrent, useStationHistory, useStationPM25History, useAQICategories } from '@/hooks/useStation'
 import { formatPollutant, getWindDirection } from '@/lib/aqi'
 import { getAQICategory } from '@/lib/aqi'
+import { pktHour, pktHourLabel } from '@/lib/dateLabel'
 import { getAQIColorByValue } from '@/components/map/config/aqiStyles'
 import {
   BarChart,
@@ -315,8 +316,8 @@ export default function StationClient({ stationId }: StationClientProps) {
                       return {
                         timestamp_pk: item.timestamp_pk || item.timestamp,
                         timestamp_utc: item.timestamp_utc || item.timestamp,
-                        hour: pkDate.getHours(),
-                        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+                        hour: pktHour(pkDate),
+                        timeLabel: pktHourLabel(pkDate),
                         aqi: item.aqi_us,
                         pm25: null as number | null
                       }
@@ -327,8 +328,8 @@ export default function StationClient({ stationId }: StationClientProps) {
                       return {
                         timestamp_pk: item.timestamp_pk || item.timestamp,
                         timestamp_utc: item.timestamp_utc || item.timestamp,
-                        hour: pkDate.getHours(),
-                        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+                        hour: pktHour(pkDate),
+                        timeLabel: pktHourLabel(pkDate),
                         aqi: null as number | null,
                         pm25: item.pm25
                       }

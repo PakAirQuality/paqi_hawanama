@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { pktHour, pktHourLabel, formatPktDateTime } from '@/lib/dateLabel'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CitySearch } from '@/components/ui/CitySearch'
@@ -166,13 +167,13 @@ export default function CityClient({ citySlug }: CityClientProps) {
   }, index: number) => {
     // Use local time for display
     const pkDate = new Date(reading.timestamp_pk || reading.timestamp)
-    const hour = pkDate.getHours()
+    const hour = pktHour(pkDate)
     const aqiValue = reading.avg_aqi
     const pm25Value = reading.avg_pm25
     
     return {
       hour: hour,
-      timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+      timeLabel: pktHourLabel(pkDate),
       aqi: aqiValue !== null && aqiValue !== undefined ? Math.round(aqiValue) : null,
       pm25: pm25Value !== null && pm25Value !== undefined ? Math.round(pm25Value) : null,
       color: getAQIColorByValue(aqiValue || 0),
@@ -500,7 +501,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
                   
                   {/* Last updated */}
                   <div className="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-black/10">
-                    Last updated: {new Date(cityWeatherData.timestamp).toLocaleDateString()}, {new Date(cityWeatherData.timestamp).toLocaleTimeString()}
+                    Last updated: {formatPktDateTime(cityWeatherData.timestamp)}
                   </div>
                 </div>
               </div>
