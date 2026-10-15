@@ -98,6 +98,17 @@ else:
         return await get_stations_for_map(db)
 
 
+@app.on_event("startup")
+async def _warm_caches():
+    # Public API only: pre-generate the wind texture so no visitor waits for the
+    # S3 read + PNG encode. Ingest/BAM roles never serve it.
+    if os.getenv("INGEST_ROLE", "").lower() in ("1", "true") or os.getenv("BAM_ROLE", "").lower() in ("1", "true"):
+        return
+    import asyncio
+    from app.routers.data_sources import warm_wind_cache
+    asyncio.create_task(warm_wind_cache())
+
+
 @app.on_event("shutdown")
 async def _close_shared_http_clients():
     await aclose_shared_clients()
