@@ -4,10 +4,10 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 """
 
 import logging
-import os
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from typing import Dict, Any, Optional
+from app.core.config import settings
 from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
 from app.ingestion.provenance import describe as describe_provenance
 from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask
@@ -219,8 +219,8 @@ async def get_task_status(
     try:
         # Manifest locations must match what the tasks use (relative to the
         # process working directory, /app in the image), not a worker checkout.
-        station_manifest_dir = Path(os.getenv("STATION_MANIFEST_DIR", "artifacts/station_manifests"))
-        city_manifest_dir = Path(os.getenv("CITY_MANIFEST_DIR", "artifacts/city_manifests"))
+        station_manifest_dir = Path(settings.STATION_MANIFEST_DIR)
+        city_manifest_dir = Path(settings.CITY_MANIFEST_DIR)
         
         station_manifest_exists = (
             (station_manifest_dir / "latest.parquet").exists() or 

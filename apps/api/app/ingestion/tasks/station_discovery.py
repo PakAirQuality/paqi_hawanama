@@ -20,6 +20,7 @@ from sqlalchemy import text
 from app.services.ingestion.iqair_service import IQAirClient
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import finalize_union_manifest, upload_manifest_to_gcs
+from app.core.config import settings as _default_settings
 from app.core.south_asia import get_iqair_countries, get_state_aliases
 
 logger = logging.getLogger(__name__)
@@ -43,13 +44,14 @@ def _scope_key(country: str, state: str, city: str) -> str:
 class StationDiscoveryTask:
     """Task handler for station discovery operations"""
 
-    def __init__(self):
-        self.iqair_client = IQAirClient()
-        self.db_service = DatabaseService()
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None):
+        self.settings = s = settings or _default_settings
+        self.iqair_client = iqair_client or IQAirClient()
+        self.db_service = db_service or DatabaseService()
 
         # Station manifest configuration (directory and format)
-        self.manifest_root = Path(os.getenv("STATION_MANIFEST_DIR", "artifacts/station_manifests"))
-        self.manifest_format = os.getenv("STATION_MANIFEST_FORMAT", "parquet").lower()  # parquet|jsonl
+        self.manifest_root = Path(s.STATION_MANIFEST_DIR)
+        self.manifest_format = (s.STATION_MANIFEST_FORMAT or "parquet").lower()  # parquet|jsonl
         if self.manifest_format not in {"parquet", "jsonl"}:
             logger.warning("Unknown STATION_MANIFEST_FORMAT=%s, falling back to parquet", self.manifest_format)
             self.manifest_format = "parquet"
@@ -58,8 +60,8 @@ class StationDiscoveryTask:
             self.manifest_format = "jsonl"
 
         # City manifest configuration (defaults to its own dir; format defaults to station format)
-        self.city_manifest_root = Path(os.getenv("CITY_MANIFEST_DIR", "artifacts/city_manifests"))
-        self.city_manifest_format = os.getenv("CITY_MANIFEST_FORMAT", self.manifest_format).lower()
+        self.city_manifest_root = Path(s.CITY_MANIFEST_DIR)
+        self.city_manifest_format = (s.CITY_MANIFEST_FORMAT or self.manifest_format).lower()
         if self.city_manifest_format not in {"parquet", "jsonl"}:
             self.city_manifest_format = self.manifest_format
         if self.city_manifest_format == "parquet" and not _HAVE_PANDAS:
@@ -77,7 +79,7 @@ class StationDiscoveryTask:
                      Takes precedence over DISCOVERY_COUNTRY env var.
         """
         try:
-            countries = get_iqair_countries()
+            countries = get_iqair_countries(self.settings.IQAIR_COUNTRIES)
             logger.info("Starting comprehensive station discovery for %d countries: %s",
                         len(countries), countries)
 
@@ -96,7 +98,7 @@ class StationDiscoveryTask:
             progress_id = f"discovery-{datetime.now(timezone.utc).isoformat()}"
 
             # Optionally limit to a single country — query param takes precedence over env var
-            only_country = country or os.getenv("DISCOVERY_COUNTRY")
+            only_country = country or self.settings.DISCOVERY_COUNTRY
             if only_country:
                 countries = [c for c in countries if c.lower() == only_country.lower()]
                 logger.info("Limiting discovery to country=%s", only_country)
@@ -111,7 +113,7 @@ class StationDiscoveryTask:
                     logger.info("Found %d states in %s: %s", len(states), country, [s.get('state') for s in states])
 
                     # Optionally limit to a single state for quick re-runs
-                    only_state = os.getenv("DISCOVERY_STATE")
+                    only_state = self.settings.DISCOVERY_STATE
                     if only_state:
                         states = [s for s in states if s.get("state", "").lower() == only_state.lower()]
                         logger.info("Limiting discovery to state=%s (via DISCOVERY_STATE)", only_state)

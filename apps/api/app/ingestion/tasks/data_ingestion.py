@@ -17,6 +17,7 @@ from app.services.ingestion.iqair_service import (
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import download_manifest_from_gcs
+from app.core.config import settings as _default_settings
 from app.core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
 
 logger = logging.getLogger(__name__)
@@ -108,35 +109,37 @@ class _AsyncRateLimiter:
 class DataIngestionTask:
     """Manifest-driven data ingestion (station endpoint) with backfill from history.pollution."""
 
-    def __init__(self):
-        self.iqair_client = IQAirClient()
-        self.db_service = DatabaseService()
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None):
+        # Everything is injectable so tests can run without a network or a database.
+        self.settings = s = settings or _default_settings
+        self.iqair_client = iqair_client or IQAirClient()
+        self.db_service = db_service or DatabaseService()
 
         # Concurrency and rate limiting
-        self._concurrency = int(os.getenv("INGEST_CONCURRENCY", "6"))
+        self._concurrency = int(s.INGEST_CONCURRENCY)
         self._sema = asyncio.Semaphore(self._concurrency)
-        self._rate = int(os.getenv("IQAIR_MAX_CALLS_PER_MIN", "90"))
+        self._rate = int(s.IQAIR_MAX_CALLS_PER_MIN)
         self._limiter = _AsyncRateLimiter(self._rate)
 
         # Fallback toggles
-        self._allow_city_fallback   = os.getenv("ALLOW_CITY_FALLBACK", "false").lower() in {"1", "true", "yes"}
-        self._allow_state_alias     = os.getenv("ALLOW_STATE_ALIAS", "true").lower() in {"1", "true", "yes"}
-        self._db_station_fallback   = os.getenv("ALLOW_DB_STATION_FALLBACK", "false").lower() in {"1", "true", "yes"}
+        self._allow_city_fallback   = bool(s.ALLOW_CITY_FALLBACK)
+        self._allow_state_alias     = bool(s.ALLOW_STATE_ALIAS)
+        self._db_station_fallback   = bool(s.ALLOW_DB_STATION_FALLBACK)
 
-        # Filters — supports multi-country ingestion via IQAIR_COUNTRIES env var
-        self._countries      = get_iqair_countries()
-        self._provider_code  = os.getenv("STATION_PROVIDER_CODE", "airvisual")
+        # Filters — supports multi-country ingestion via IQAIR_COUNTRIES
+        self._countries      = get_iqair_countries(s.IQAIR_COUNTRIES)
+        self._provider_code  = s.STATION_PROVIDER_CODE
 
         # Backfill window (hours)
-        self._backfill_hours = int(os.getenv("IQAIR_BACKFILL_HOURS", "48"))
+        self._backfill_hours = int(s.IQAIR_BACKFILL_HOURS)
 
         # Manifest config (written by station_discovery.py)
-        self._manifest_dir = Path(os.getenv("STATION_MANIFEST_DIR", "artifacts/station_manifests"))
+        self._manifest_dir = Path(s.STATION_MANIFEST_DIR)
 
         # Ingest run output
         ts = datetime.now(timezone.utc).isoformat()
         self._run_id = f"ingest-{ts}"
-        self._out_dir = Path(os.getenv("INGEST_OUT_DIR", "artifacts/ingest_runs")) / self._run_id
+        self._out_dir = Path(s.INGEST_OUT_DIR) / self._run_id
         self._out_dir.mkdir(parents=True, exist_ok=True)
 
     # --------------------------- manifest loading ---------------------------

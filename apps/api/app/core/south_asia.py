@@ -8,8 +8,7 @@ single source of truth.
 NOTE: Punjab EPA integration is Pakistan-only and is NOT affected by this module.
 """
 
-import os
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # Target countries – override via IQAIR_COUNTRIES env var (comma-separated).
@@ -23,13 +22,17 @@ DEFAULT_IQAIR_COUNTRIES: List[str] = [
     "Sri Lanka",
 ]
 
-def get_iqair_countries() -> List[str]:
+def get_iqair_countries(raw: Optional[str] = None) -> List[str]:
     """Return the list of countries to ingest from IQAir.
 
-    Reads from IQAIR_COUNTRIES env var (comma-separated) if set,
-    otherwise falls back to DEFAULT_IQAIR_COUNTRIES.
+    `raw` is the comma-separated IQAIR_COUNTRIES setting; when None the value is
+    read from app.core.config.settings. Empty/unset falls back to
+    DEFAULT_IQAIR_COUNTRIES.
     """
-    raw = os.getenv("IQAIR_COUNTRIES", "").strip()
+    if raw is None:
+        from app.core.config import settings  # local import: keep this module importable standalone
+        raw = settings.IQAIR_COUNTRIES
+    raw = (raw or "").strip()
     if raw:
         return [c.strip() for c in raw.split(",") if c.strip()]
     return list(DEFAULT_IQAIR_COUNTRIES)

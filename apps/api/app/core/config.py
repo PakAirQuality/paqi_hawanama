@@ -70,6 +70,51 @@ class Settings(BaseSettings):
     OPS_RUN_REGION: str = "asia-south1"  # Cloud Run region
     OPS_DAILY_JOB_NAME: str = "estimation-daily-pipeline"  # Daily estimation job name
     OPS_RETRAIN_JOB_NAME: str = "estimation-model-retrain"  # Model retrain job name
+
+    # ------------------------------------------------------------------
+    # Ingestion. These are the only source of truth for the ingestion tasks
+    # and provider clients; nothing under app/ingestion reads os.environ.
+    # Env var names are unchanged from what cloudbuild.yaml already sets.
+    # ------------------------------------------------------------------
+    # Provider: IQAir
+    IQAIR_BASE_URL: str = "https://api.airvisual.com/v2"
+    IQAIR_CREDENTIAL_ALIAS: str = "iqair-default"   # shared-quota bucket; change when the key rotates
+    IQAIR_MAX_CALLS_PER_MIN: int = 90                # cloudbuild sets 500; confirm against the IQAir plan
+    IQAIR_CONCURRENCY: int = 6                       # HTTP requests in flight inside the client
+    IQAIR_HTTP_CONNECT_TIMEOUT_S: float = 10.0
+    IQAIR_HTTP_READ_TIMEOUT_S: float = 30.0
+    IQAIR_RETRY_MAX_ATTEMPTS: int = 4
+    IQAIR_RETRY_MAX_WAIT_S: float = 20.0
+    IQAIR_QUOTA_MAX_WAIT_S: float = 180.0            # give up waiting for a shared-quota slot after this
+    IQAIR_BACKFILL_HOURS: int = 48
+    IQAIR_COUNTRIES: Optional[str] = None            # comma-separated; see app.core.south_asia
+    # Provider: OpenAQ v3 (adapter arrives in a later PR; declared so one Settings object exists)
+    OPENAQ_BASE_URL: str = "https://api.openaq.org/v3"
+    OPENAQ_CREDENTIAL_ALIAS: str = "openaq-default"
+    OPENAQ_ENABLED: bool = False
+    # Ingestion behaviour
+    INGEST_CONCURRENCY: int = 6                      # entities (stations/cities) in flight per task
+    ALLOW_DB_STATION_FALLBACK: bool = False
+    ALLOW_DB_CITY_FALLBACK: bool = False
+    ALLOW_CITY_FALLBACK: bool = False
+    ALLOW_STATE_ALIAS: bool = True
+    ALLOW_NEAREST_FALLBACK: bool = False
+    STATION_PROVIDER_CODE: str = "airvisual"
+    DISCOVERY_COUNTRY: Optional[str] = None
+    DISCOVERY_STATE: Optional[str] = None
+    # Manifests / run artifacts
+    MANIFEST_GCS_BUCKET: Optional[str] = None
+    STATION_MANIFEST_DIR: str = "artifacts/station_manifests"
+    CITY_MANIFEST_DIR: str = "artifacts/city_manifests"
+    STATION_MANIFEST_FORMAT: str = "parquet"         # parquet | jsonl
+    CITY_MANIFEST_FORMAT: Optional[str] = None       # defaults to STATION_MANIFEST_FORMAT
+    INGEST_OUT_DIR: str = "artifacts/ingest_runs"
+    # ops schema (db_schema/migrations/001_ops_ingestion.sql)
+    INGEST_LEASE_TTL_S: int = 3300                   # must stay below the Cloud Run request timeout (3600)
+    OPS_TABLES_REQUIRED: bool = True                 # quota: fail loudly if ops.* is missing; runs/leases warn and continue
+    # Health: max observation age per readings.source before /health/freshness reports degraded
+    FRESHNESS_MAX_AGE_MIN: str = '{"airvisual": 180, "punjab": 180, "bam": 180, "default": 360}'
+    LOG_LEVEL: str = "INFO"
     
     @property
     def DATABASE_URL(self) -> str:

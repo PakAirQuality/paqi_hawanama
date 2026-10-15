@@ -24,6 +24,7 @@ from collections import defaultdict
 from app.services.ingestion.iqair_service import IQAirClient
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import ensure_latest_from_gcs
+from app.core.config import settings as _default_settings
 from app.core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
 
 logger = logging.getLogger(__name__)
@@ -105,29 +106,31 @@ class _AsyncRateLimiter:
 class CityIngestionTask:
     """Manifest-driven city-level ingestion (IQAir /v2/city)."""
 
-    def __init__(self):
-        self.iqair_client = IQAirClient()
-        self.db_service = DatabaseService()
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None):
+        # Everything is injectable so tests can run without a network or a database.
+        self.settings = s = settings or _default_settings
+        self.iqair_client = iqair_client or IQAirClient()
+        self.db_service = db_service or DatabaseService()
 
         # Concurrency and rate limiting
-        self._concurrency = int(os.getenv("INGEST_CONCURRENCY", "6"))
+        self._concurrency = int(s.INGEST_CONCURRENCY)
         self._sema = asyncio.Semaphore(self._concurrency)
-        self._rate = int(os.getenv("IQAIR_MAX_CALLS_PER_MIN", "90"))
+        self._rate = int(s.IQAIR_MAX_CALLS_PER_MIN)
         self._limiter = _AsyncRateLimiter(self._rate)
 
         # Toggles
-        self._allow_state_alias      = os.getenv("ALLOW_STATE_ALIAS", "true").lower() in {"1", "true", "yes"}
-        self._allow_nearest_fallback = os.getenv("ALLOW_NEAREST_FALLBACK", "false").lower() in {"1", "true", "yes"}
-        self._db_city_fallback       = os.getenv("ALLOW_DB_CITY_FALLBACK", "false").lower() in {"1", "true", "yes"}
+        self._allow_state_alias      = bool(s.ALLOW_STATE_ALIAS)
+        self._allow_nearest_fallback = bool(s.ALLOW_NEAREST_FALLBACK)
+        self._db_city_fallback       = bool(s.ALLOW_DB_CITY_FALLBACK)
 
         # Manifest locations (produced by station_discovery.py)
-        self._city_manifest_dir    = Path(os.getenv("CITY_MANIFEST_DIR", "artifacts/city_manifests"))
-        self._station_manifest_dir = Path(os.getenv("STATION_MANIFEST_DIR", "artifacts/station_manifests"))
+        self._city_manifest_dir    = Path(s.CITY_MANIFEST_DIR)
+        self._station_manifest_dir = Path(s.STATION_MANIFEST_DIR)
 
         # Ingest run output
         ts = datetime.now(timezone.utc).isoformat()
         self._run_id = f"ingest-city-{ts}"
-        self._out_dir = Path(os.getenv("INGEST_OUT_DIR", "artifacts/ingest_runs")) / self._run_id
+        self._out_dir = Path(s.INGEST_OUT_DIR) / self._run_id
         self._out_dir.mkdir(parents=True, exist_ok=True)
 
     # --------------------------- manifest loading ---------------------------
@@ -270,7 +273,7 @@ class CityIngestionTask:
         If country is None, ingests all countries from IQAIR_COUNTRIES config.
         If country is provided, ingests only that single country (backwards-compatible).
         """
-        target_countries = [country] if country else get_iqair_countries()
+        target_countries = [country] if country else get_iqair_countries(self.settings.IQAIR_COUNTRIES)
         country_set = {c.lower() for c in target_countries}
 
         logger.info(

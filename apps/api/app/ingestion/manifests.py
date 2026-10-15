@@ -1,8 +1,12 @@
-# apps/worker/manifest_utils.py
+"""
+Station/city manifest helpers: GCS sync and the union-manifest writer used by discovery.
+"""
 import os, json, logging
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Tuple, Optional
+
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +20,9 @@ except Exception:
 
 # --------------- GCS manifest sync helpers ---------------
 
-_MANIFEST_GCS_BUCKET = os.getenv("MANIFEST_GCS_BUCKET", "").strip()
+def _bucket_name() -> str:
+    """Read the bucket at call time so tests and settings overrides take effect."""
+    return (settings.MANIFEST_GCS_BUCKET or "").strip()
 
 def _gcs_client():
     """Lazy-load google.cloud.storage; returns None if unavailable."""
@@ -33,7 +39,8 @@ def upload_manifest_to_gcs(local_path: Path, gcs_prefix: str) -> bool:
     Uploads to: gs://<MANIFEST_GCS_BUCKET>/<gcs_prefix>/<filename>
     No-op if MANIFEST_GCS_BUCKET is unset or google-cloud-storage is missing.
     """
-    if not _MANIFEST_GCS_BUCKET:
+    bucket_name = _bucket_name()
+    if not bucket_name:
         return False
     if not local_path.exists():
         logger.warning("upload_manifest_to_gcs: local file does not exist: %s", local_path)
@@ -43,12 +50,12 @@ def upload_manifest_to_gcs(local_path: Path, gcs_prefix: str) -> bool:
         logger.warning("upload_manifest_to_gcs: google-cloud-storage not available")
         return False
     try:
-        bucket = client.bucket(_MANIFEST_GCS_BUCKET)
+        bucket = client.bucket(bucket_name)
         blob_path = f"{gcs_prefix}/{local_path.name}"
         blob = bucket.blob(blob_path)
         blob.cache_control = "no-cache"
         blob.upload_from_filename(str(local_path), content_type="application/octet-stream")
-        logger.info("Uploaded manifest to gs://%s/%s", _MANIFEST_GCS_BUCKET, blob_path)
+        logger.info("Uploaded manifest to gs://%s/%s", bucket_name, blob_path)
         return True
     except Exception as e:
         logger.error("Failed to upload manifest to GCS: %s", e)
@@ -61,22 +68,23 @@ def download_manifest_from_gcs(local_path: Path, gcs_prefix: str) -> bool:
     Downloads from: gs://<MANIFEST_GCS_BUCKET>/<gcs_prefix>/<filename>
     No-op if MANIFEST_GCS_BUCKET is unset or google-cloud-storage is missing.
     """
-    if not _MANIFEST_GCS_BUCKET:
+    bucket_name = _bucket_name()
+    if not bucket_name:
         return False
     client = _gcs_client()
     if client is None:
         logger.warning("download_manifest_from_gcs: google-cloud-storage not available")
         return False
     try:
-        bucket = client.bucket(_MANIFEST_GCS_BUCKET)
+        bucket = client.bucket(bucket_name)
         blob_path = f"{gcs_prefix}/{local_path.name}"
         blob = bucket.blob(blob_path)
         if not blob.exists():
-            logger.info("GCS manifest not found: gs://%s/%s", _MANIFEST_GCS_BUCKET, blob_path)
+            logger.info("GCS manifest not found: gs://%s/%s", bucket_name, blob_path)
             return False
         local_path.parent.mkdir(parents=True, exist_ok=True)
         blob.download_to_filename(str(local_path))
-        logger.info("Downloaded manifest from gs://%s/%s → %s", _MANIFEST_GCS_BUCKET, blob_path, local_path)
+        logger.info("Downloaded manifest from gs://%s/%s → %s", bucket_name, blob_path, local_path)
         return True
     except Exception as e:
         logger.error("Failed to download manifest from GCS: %s", e)

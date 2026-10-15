@@ -2,11 +2,7 @@ import httpx
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 from typing import Dict, List, Optional, Any, Tuple
 
-# Dual-path imports for API container compatibility
-try:
-    from app.core.config import settings
-except ImportError:  # running in pure worker repo layout
-    from config.settings import settings
+from app.core.config import settings
 import json
 import time
 import asyncio
@@ -39,14 +35,14 @@ class IQAirClient:
     """
     
     def __init__(self):
-        self.base_url = "http://api.airvisual.com/v2"  # Official IQAir API URL
+        self.base_url = settings.IQAIR_BASE_URL.rstrip("/")  # https; see Settings.IQAIR_BASE_URL
         self.api_key = settings.IQAIR_API_KEY
         self.cache = cache
         self.rate_limit_key = "iqair:rate_limit"
 
         # === CHANGES: make pacing configurable by calls/min ====================
-        self.max_calls_per_min = int(getattr(settings, "IQAIR_MAX_CALLS_PER_MIN", 90))
-        self.max_concurrency   = int(getattr(settings, "IQAIR_CONCURRENCY", 6))
+        self.max_calls_per_min = int(settings.IQAIR_MAX_CALLS_PER_MIN)
+        self.max_concurrency   = int(settings.IQAIR_CONCURRENCY)
         self._rate_limiter = asyncio.Semaphore(self.max_concurrency)
         self._last_request_time = 0.0
         self._min_interval = max(0.001, 60.0 / float(self.max_calls_per_min))
