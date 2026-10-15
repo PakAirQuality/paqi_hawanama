@@ -60,6 +60,26 @@ def _approx_one_hour(a: datetime, b: datetime) -> bool:
     return abs((a - b) - timedelta(hours=1)) <= timedelta(minutes=10)
 # ----------------------------------------------------------------------
 
+# DB fallback inventory. cities has no latitude/longitude columns (only a
+# centroid geography), and country_id is NOT NULL on cities so it joins
+# directly. Verified against db_schema/initial_schema.sql by
+# tests/ingestion/test_fallback_sql_schema.py.
+CITY_FALLBACK_SQL = """
+    SELECT
+        co.name                         AS country,
+        s.name                          AS state,
+        c.name                          AS city,
+        ST_Y(c.centroid::geometry)      AS lat,
+        ST_X(c.centroid::geometry)      AS lon
+    FROM cities c
+    JOIN states s     ON s.id = c.state_id
+    JOIN countries co ON co.id = c.country_id
+    WHERE c.active = true
+      AND LOWER(co.name) = LOWER(:country)
+    ORDER BY c.name
+"""
+
+
 class _AsyncRateLimiter:
     """
     Smooth global rate limiter (token spacing). Guarantees average <= rate/min.
@@ -231,20 +251,7 @@ class CityIngestionTask:
         """
         from sqlalchemy import text
         async with AsyncSessionLocal() as session:
-            q = text("""
-                SELECT 
-                    co.name  AS country,
-                    s.name   AS state,
-                    c.name   AS city,
-                    c.latitude AS lat,
-                    c.longitude AS lon
-                FROM cities c
-                JOIN states s   ON c.state_id = s.id
-                JOIN countries co ON s.country_id = co.id
-                WHERE LOWER(co.name) = LOWER(:country)
-                ORDER BY c.name
-            """)
-            rs = await session.execute(q, {"country": country})
+            rs = await session.execute(text(CITY_FALLBACK_SQL), {"country": country})
             out: List[Dict[str, Any]] = []
             for row in rs.fetchall():
                 m = dict(row._mapping)

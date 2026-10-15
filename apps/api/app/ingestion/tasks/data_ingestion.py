@@ -52,6 +52,37 @@ def _state_aliases(state: Optional[str], country: Optional[str] = None) -> List[
     return [state]
 
 
+# DB fallback inventory. Every column here exists in db_schema/initial_schema.sql
+# (stations: station_id, source_station_id, name, lat, lon, active, provider_id,
+# city_id, state_id, country_id; providers: id, code; cities: id, name, state_id;
+# states: id, name, country_id; countries: id, name). Stations may lack a
+# state_id/city_id, so the geo hierarchy is LEFT JOINed both directly and via
+# the city. tests/ingestion/test_fallback_sql_schema.py checks this against the DDL.
+STATION_FALLBACK_SQL = """
+    SELECT
+        st.station_id                               AS station_id,
+        st.source_station_id                        AS source_station_id,
+        st.name                                     AS iqair_station_name,
+        st.lat                                      AS lat,
+        st.lon                                      AS lon,
+        st.active                                   AS active,
+        COALESCE(co_direct.name, co_via_state.name) AS country,
+        COALESCE(s_direct.name, s_via_city.name)    AS state,
+        c.name                                      AS city,
+        p.code                                      AS provider_code
+    FROM stations st
+    JOIN providers p                 ON p.id = st.provider_id
+    LEFT JOIN cities c               ON c.id = st.city_id
+    LEFT JOIN states s_direct        ON s_direct.id = st.state_id
+    LEFT JOIN states s_via_city      ON s_via_city.id = c.state_id
+    LEFT JOIN countries co_direct    ON co_direct.id = st.country_id
+    LEFT JOIN countries co_via_state ON co_via_state.id = COALESCE(s_direct.country_id, s_via_city.country_id)
+    WHERE st.active = true
+      AND p.code = :provider_code
+    ORDER BY country, st.name
+"""
+
+
 class _AsyncRateLimiter:
     """
     Smooth global rate limiter (token spacing). Guarantees average <= rate/min.
@@ -165,31 +196,10 @@ class DataIngestionTask:
         """
         from sqlalchemy import text
         async with AsyncSessionLocal() as session:
-            q = text("""
-                SELECT
-                    st.id                     AS station_id,
-                    st.source_station_id      AS source_station_id,
-                    st.name                   AS iqair_station_name,
-                    st.latitude               AS lat,
-                    st.longitude              AS lon,
-                    st.active                 AS active,
-                    co.name                   AS country,
-                    s.name                    AS state,
-                    c.name                    AS city
-                FROM stations st
-                JOIN providers p  ON p.id = st.provider_id
-                JOIN cities c     ON c.id = st.city_id
-                JOIN states s     ON s.id = c.state_id
-                JOIN countries co ON co.id = s.country_id
-                WHERE p.code = :provider_code
-                  AND st.active = true
-                ORDER BY co.name, s.name, c.name, st.name
-            """)
-            rs = await session.execute(q, {"provider_code": self._provider_code})
+            rs = await session.execute(text(STATION_FALLBACK_SQL), {"provider_code": self._provider_code})
             out: List[Dict[str, Any]] = []
             for row in rs.fetchall():
                 m = dict(row._mapping)
-                m["provider_code"] = self._provider_code
                 m["latitude"] = m.get("lat")
                 m["longitude"] = m.get("lon")
                 out.append(m)
