@@ -145,10 +145,12 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
                   -- providers use other qc_state values ('raw', 'OK', NULL) and must all
                   -- pass — so we EXCLUDE the bad states rather than allow-list 'OK'.
                   AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
-                -- Prefer the newest PM2.5-bearing row. IQAir's current.weather.ts is often an
+                -- Prefer the newest *fresh* PM2.5-bearing row. IQAir's current.weather.ts is often an
                 -- hour ahead of current.pollution.ts, leaving a weather-only row at H+1 that
-                -- used to blank the marker/popup while IQAir itself shows a value at H.
-                ORDER BY scope_key, (pm25 IS NOT NULL) DESC, ts_utc DESC
+                -- used to blank the marker/popup while IQAir itself shows a value at H. The
+                -- preference is limited to the 6 h freshness window so a station whose only PM2.5
+                -- rows are days old (AQI-only feed) still shows its newest row instead of vanishing.
+                ORDER BY scope_key, (pm25 IS NOT NULL AND ts_utc > NOW() - INTERVAL '6 hours') DESC, ts_utc DESC
             )
             SELECT
                 s.station_id,
@@ -248,10 +250,12 @@ async def get_station_current_data(
                   AND ts_utc > NOW() - INTERVAL '48 hours'
                   -- QC gate: hide only explicitly-flagged-bad readings (INVALID/SUSPECT).
                   AND (qc_state IS NULL OR qc_state NOT IN ('INVALID', 'SUSPECT'))
-                -- Prefer the newest PM2.5-bearing row. IQAir's current.weather.ts is often an
+                -- Prefer the newest *fresh* PM2.5-bearing row. IQAir's current.weather.ts is often an
                 -- hour ahead of current.pollution.ts, leaving a weather-only row at H+1 that
-                -- used to blank the marker/popup while IQAir itself shows a value at H.
-                ORDER BY scope_key, (pm25 IS NOT NULL) DESC, ts_utc DESC
+                -- used to blank the marker/popup while IQAir itself shows a value at H. The
+                -- preference is limited to the 6 h freshness window so a station whose only PM2.5
+                -- rows are days old (AQI-only feed) still shows its newest row instead of vanishing.
+                ORDER BY scope_key, (pm25 IS NOT NULL AND ts_utc > NOW() - INTERVAL '6 hours') DESC, ts_utc DESC
             )
             SELECT * FROM latest_readings
         """), {"station_id": station_id})
