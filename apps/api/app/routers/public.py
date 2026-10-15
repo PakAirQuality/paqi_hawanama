@@ -26,17 +26,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_database
 from app.core.config import settings
+from app.ingestion.export_membership import (CURSOR_WHERE, KEYSET_ORDER, MEMBERSHIP_WHERE, POLLUTANT_PARAMS,
+                                             READINGS_NOT_OPENAQ, decode_cursor, hardware_label, next_cursor,
+                                             unit_or_unknown)
 from app.services.aqi import category_for
 from app.services.ingestion.bam_service import BAM_AQI_BASIS, pm25_to_aqi_us
 
-# How this network should appear to OpenAQ
+# How this network should appear to partners
 NETWORK_NAME = "PAQI"
 ORGANIZATION = "South Asia Air Quality Initiative (PAQI)"
 PROVIDER_LABEL = "PAQI"
-HARDWARE_TYPE = "IQAIR Airvisual Outdoor"
 
-# How to identify the 210 PAQI stations in your DB
-PROVIDER_DISPLAY_NAME = "Airvisual/PAQI"
+# Membership is explicit per station (metadata_json.export.openaq = true); see
+# app.ingestion.export_membership and db_schema/oneoff/2026-10_export_membership.sql.
 
 # Date cutoff - only data from this date onwards is accessible
 DATA_CUTOFF_DATE = datetime(2025, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -144,7 +146,7 @@ class OpenAQLocation(BaseModel):
     location_id: str           # station_id
     location: str              # station name
     city: Optional[str]
-    country: str               # ISO-2, e.g. "PK"
+    country: Optional[str]      # ISO-2 when known; a country row without iso2 must not break the export
     lat: float
     lon: float
     timezone: Optional[str]
@@ -168,7 +170,7 @@ class OpenAQMeasurement(BaseModel):
     lat: float
     lon: float
     city: Optional[str]
-    country: str
+    country: Optional[str]      # ISO-2 when known; a country row without iso2 must not break the export
     provider: str              # "PAQI"
     network: str               # "PAQI AirVisual Network"
 
@@ -182,7 +184,7 @@ class CurrentStation(BaseModel):
     location_id: str
     location: str              # station name
     city: Optional[str]
-    country: str               # ISO-2, e.g. "PK"
+    country: Optional[str]      # ISO-2 when known; a country row without iso2 must not break the export
     lat: float
     lon: float
     aqi_us: Optional[int]      # US AQI computed from PM2.5 (EPA breakpoints)
@@ -241,15 +243,8 @@ def _enforce_date_cutoff(dt_from: Optional[datetime], dt_to: Optional[datetime])
     return dt_from, dt_to
 
 
-# Pollutants to export and their units.
-POLLUTANTS = [
-    ("pm25", "µg/m³"),
-    ("pm10", "µg/m³"),
-    ("no2", "ppb"),
-    ("so2", "ppb"),
-    ("o3",  "ppb"),
-    ("co",  "ppm"),
-]
+# Pollutants to export; units are read from readings.units_* ('unknown' when not recorded).
+POLLUTANTS = list(POLLUTANT_PARAMS)
 
 
 router = APIRouter(prefix="/public", tags=["public"])
@@ -271,7 +266,7 @@ async def list_locations(
     Requires API key authentication.
     """
     sql = text(
-        """
+        f"""
         SELECT
           s.station_id,
           s.name AS station_name,
@@ -279,18 +274,19 @@ async def list_locations(
           co.iso2 AS country_code,
           s.lat,
           s.lon,
-          COALESCE(s.timezone, 'Asia/Karachi') AS timezone
+          COALESCE(s.timezone, 'Asia/Karachi') AS timezone,
+          s.metadata_json
         FROM stations s
         JOIN providers p   ON s.provider_id = p.id
         LEFT JOIN cities c ON c.id = s.city_id
         JOIN countries co  ON co.id = s.country_id
-        WHERE p.display_name = :provider_display_name
+        WHERE {MEMBERSHIP_WHERE}
           AND s.active = TRUE
         ORDER BY s.station_id;
         """
     )
 
-    result = await db.execute(sql, {"provider_display_name": PROVIDER_DISPLAY_NAME})
+    result = await db.execute(sql)
     rows = result.mappings().all()
 
     locations = [
@@ -304,7 +300,7 @@ async def list_locations(
             timezone=row["timezone"],
             provider=PROVIDER_LABEL,
             network=NETWORK_NAME,
-            hardware=HARDWARE_TYPE,
+            hardware=hardware_label(row["metadata_json"]),
         )
         for row in rows
     ]
@@ -344,29 +340,37 @@ async def list_measurements(
         1000,
         ge=1,
         le=10000,
-        description="Maximum number of rows to fetch from DB before flattening.",
+        description="Maximum number of DB rows per page (each row flattens to ≤ 6 measurements).",
+    ),
+    cursor: Optional[str] = Query(
+        None,
+        description="Opaque keyset cursor from meta.next_cursor of the previous page.",
     ),
 ):
     """
-    List measurements for all PAQI AirVisual stations (flattened per pollutant).
+    List measurements for exported PAQI stations (flattened per pollutant).
     Requires API key authentication.
     Only returns data from January 1, 2025 onwards.
 
     Note:
-    - Filters to provider display_name = 'Airvisual/PAQI'.
+    - Membership is stations.metadata_json.export.openaq = true.
     - Returns one JSON object per (station, timestamp, pollutant).
-    - Use datetime_from / datetime_to to page through time.
+    - Page with `cursor` (meta.next_cursor); ordering is (ts_utc DESC, station DESC) so
+      stations sharing a timestamp are never lost at a page boundary.
     """
     dt_from = _parse_iso8601_optional(datetime_from)
     dt_to = _parse_iso8601_optional(datetime_to)
+    after = decode_cursor(cursor)
     
     # Enforce date cutoff
     dt_from, dt_to = _enforce_date_cutoff(dt_from, dt_to)
 
-    sql = """
+    sql = f"""
         SELECT
           r.ts_utc,
+          r.scope_key,
           r.pm25, r.pm10, r.no2, r.so2, r.o3, r.co,
+          r.units_pm25, r.units_pm10, r.units_no2, r.units_so2, r.units_o3, r.units_co,
           s.station_id,
           s.name      AS station_name,
           s.lat,
@@ -379,14 +383,12 @@ async def list_measurements(
         JOIN providers p   ON s.provider_id = p.id
         LEFT JOIN cities c ON c.id = s.city_id
         JOIN countries co  ON co.id = s.country_id
-        WHERE p.display_name = :provider_display_name
+        WHERE {MEMBERSHIP_WHERE}
+          {READINGS_NOT_OPENAQ}
           AND r.ts_utc >= :cutoff_date
     """
 
-    params = {
-        "provider_display_name": PROVIDER_DISPLAY_NAME,
-        "cutoff_date": DATA_CUTOFF_DATE
-    }
+    params = {"cutoff_date": DATA_CUTOFF_DATE}
 
     if dt_from is not None:
         sql += " AND r.ts_utc >= :dt_from"
@@ -394,8 +396,11 @@ async def list_measurements(
     if dt_to is not None:
         sql += " AND r.ts_utc < :dt_to"
         params["dt_to"] = dt_to
+    if after is not None:
+        sql += CURSOR_WHERE
+        params["c_ts"], params["c_key"] = after
 
-    sql += " ORDER BY r.ts_utc DESC LIMIT :limit"
+    sql += KEYSET_ORDER
     params["limit"] = limit
 
     result = await db.execute(text(sql), params)
@@ -410,7 +415,7 @@ async def list_measurements(
         station_id_raw = row["station_id"]
         station_id = station_id_raw.strip() if isinstance(station_id_raw, str) else station_id_raw
 
-        for param, unit in POLLUTANTS:
+        for param in POLLUTANTS:
             val = row.get(param)
             if val is None:
                 continue
@@ -420,7 +425,7 @@ async def list_measurements(
                     location=row["station_name"],
                     parameter=param,   # type: ignore[arg-type]
                     value=float(val),
-                    unit=unit,
+                    unit=unit_or_unknown(row, param),
                     datetime=ts_iso,
                     lat=row["lat"],
                     lon=row["lon"],
@@ -439,6 +444,8 @@ async def list_measurements(
             "generated": datetime.utcnow().isoformat() + "Z",
             "rows_from_db": len(rows),
             "measurements": len(measurements),
+            "limit": limit,
+            "next_cursor": next_cursor(rows, limit),
             "data_available_from": DATA_CUTOFF_DATE.strftime('%Y-%m-%d'),
         },
         results=measurements,
@@ -505,7 +512,7 @@ async def current_conditions(
     #   chunk-prune the scan instead of walking each station's full history.
     # - pm25 IS NOT NULL skips placeholder/weather-only rows so we return a
     #   usable reading (this network stores pm25; pm10/gases are not populated).
-    base_sql = """
+    base_sql = f"""
         WITH latest AS (
           SELECT DISTINCT ON (s.station_id)
             s.station_id,
@@ -523,7 +530,8 @@ async def current_conditions(
           JOIN countries co  ON co.id = s.country_id
           JOIN readings r    ON r.scope_type = 'station'
                             AND r.scope_key  = s.station_id
-          WHERE p.display_name = :provider_display_name
+          WHERE {MEMBERSHIP_WHERE}
+            {READINGS_NOT_OPENAQ}
             AND s.active = TRUE
             AND r.ts_utc >= NOW() - INTERVAL '24 hours'
             AND r.pm25 IS NOT NULL
@@ -531,7 +539,7 @@ async def current_conditions(
         )
     """
 
-    params: dict = {"provider_display_name": PROVIDER_DISPLAY_NAME}
+    params: dict = {}
 
     if lat is not None and lon is not None:
         # Haversine distance in km; filter by radius, order nearest-first.
