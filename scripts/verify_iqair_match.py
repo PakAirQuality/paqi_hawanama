@@ -204,15 +204,27 @@ class Verifier:
             "cls": "", "note": "", "iq_hour": "", "iq_aqi": "", "iq_pm25": "", "iq_weather_hour": "",
             "site_hour": "", "site_aqi": "", "site_pm25": "", "popup_hour": "", "popup_aqi": "", "popup_pm25": "",
             "db_hour": "", "db_aqi": "", "db_pm25": "", "db_newest_hour": "", "db_newest_has_pm25": "",
-            "hist_n": 0, "eq_T1": 0, "eq_T": 0, "eq_both": 0, "neither": 0, "db_missing": 0,
+            "hist_n": 0, "eq_T1": 0, "eq_T": 0, "eq_both": 0, "neither": 0, "db_null": 0, "db_missing": 0,
             "policy_rows": 0, "policy_eq": 0, "policy_diff": 0, "policy_missing": 0,
             "api_hist_identity": "", "api_pm25_identity": "", "api_ts_format": "",
             "raw_populated": any(r["has_raw"] for r in db_rows),
         }
-        # ---- IQAir
+        # ---- IQAir (same lookup order as DataIngestionTask._fetch_one: exact state, then state aliases)
+        from app.ingestion.tasks.data_ingestion import _state_aliases
+        name_, city_, state_, country_ = (st["iq_name"] or st["name"], st["iq_city"] or st["city"],
+                                          st["iq_state"] or st["state"], st["iq_country"] or st["country"])
         try:
-            env = await client.fetch_station(station=st["iq_name"] or st["name"], city=st["iq_city"] or st["city"],
-                                             state=st["iq_state"] or st["state"], country=st["iq_country"] or st["country"])
+            env = None
+            for state_try in (_state_aliases(state_, country_) or [state_]):
+                try:
+                    env = await client.fetch_station(station=name_, city=city_, state=state_try, country=country_)
+                    if state_try != state_:
+                        row["note"] = f"found under state alias '{state_try}'"
+                    break
+                except StationNotFound:
+                    continue
+            if env is None:
+                raise StationNotFound(f"station_not_found ({name_}, {city_}, {state_})")
         except StationNotFound as exc:
             # Not on IQAir. If the site does not show it either (no row in 6 h) the two agree: absent_both.
             fresh = any(r["ts_utc"] > self.now - timedelta(hours=6) for r in db_rows)
@@ -272,8 +284,9 @@ class Verifier:
             elif e1: row["eq_T1"] += 1
             elif e0: row["eq_T"] += 1
             elif r1 is None and r0 is None: row["db_missing"] += 1
+            elif (r1 is None or r1["aqi_us"] is None) and (r0 is None or r0["aqi_us"] is None): row["db_null"] += 1  # weather-only rows only
             else: row["neither"] += 1
-        for k in ("hist_n", "eq_T1", "eq_T", "eq_both", "neither", "db_missing"):
+        for k in ("hist_n", "eq_T1", "eq_T", "eq_both", "neither", "db_null", "db_missing"):
             self.series[k] += row[k]
 
         # ---- rows the canonical policy would write vs what the DB holds
@@ -536,6 +549,7 @@ class Verifier:
               f"- equal only at T (no shift): {sv.get('eq_T', 0)}",
               f"- equal at both (value repeated): {sv.get('eq_both', 0)}",
               f"- DB row exists but value differs at both: {sv.get('neither', 0)}",
+              f"- DB has only weather-only (NULL AQI) rows at T and T+1: {sv.get('db_null', 0)}",
               f"- no DB row at T or T+1: {sv.get('db_missing', 0)}", "",
               f"- rows the canonical policy would write vs DB: {s['policy_rows_vs_db']}", "",
               "## Read path", "",
