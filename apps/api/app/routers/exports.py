@@ -266,6 +266,9 @@ def _build_station_list_query(
         where_station.append("s.station_id IN :station_ids")
     if provider_codes:
         where_station.append("LOWER(COALESCE(p.code,'')) IN :provider_codes")
+    # Shadow-mode OpenAQ stations are excluded unless provider=openaq is requested explicitly.
+    if "openaq" not in {str(c).lower() for c in (provider_codes or [])}:
+        where_station.append("LOWER(COALESCE(p.code,'')) <> 'openaq'")
 
     station_where_sql = " AND ".join(where_station)
 
@@ -927,6 +930,7 @@ async def export_station_readings_by_city_csv(
         LEFT JOIN countries co ON st.country_id = co.id
         WHERE r.scope_type = 'station'
             AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
+            AND r.source <> 'openaq'
             AND r.ts_utc >= :start_ts
             AND r.ts_utc < :end_ts
         ORDER BY r.scope_key, r.ts_utc ASC

@@ -431,3 +431,96 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
     max_backoff_duration = "600s"
   }
 }
+# ---------------------------------------------------------------------------
+# 8. OpenAQ v3 (independent source, shadow mode). All three jobs start PAUSED:
+#    unpause after OPENAQ_API_KEY exists in Secret Manager, OPENAQ_ENABLED=true is
+#    deployed on hawanama-ingest, and a `discover?dry_run=true` inventory has been
+#    reviewed (stream count vs OPENAQ_RATE_PER_HOUR). The lease on the ingest side
+#    makes a scheduler retry of a live run a no-op.
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_scheduler_job" "openaq_discovery" {
+  name        = "openaq-discover-daily"
+  description = "OpenAQ: discover Pakistan locations → shadow stations + pm25 stream checkpoints (01:10 UTC)"
+  schedule    = "10 1 * * *"
+  time_zone   = "UTC"
+  paused      = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/openaq/discover"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
+    max_backoff_duration = "600s"
+  }
+}
+
+# Hourly at :40 — away from the IQAir station run (:15), the bot (:30), Punjab (:45)
+# and the 03:00–04:00 export jobs.
+resource "google_cloud_scheduler_job" "openaq_ingestion" {
+  name        = "openaq-ingest-hourly"
+  description = "OpenAQ: fetch the next window per active pm25 stream (shadow readings, source='openaq')"
+  schedule    = "40 * * * *"
+  time_zone   = "UTC"
+  paused      = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/openaq/ingest"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
+    max_backoff_duration = "600s"
+  }
+}
+
+resource "google_cloud_scheduler_job" "openaq_reconcile" {
+  name        = "openaq-reconcile-daily"
+  description = "OpenAQ: re-read older windows for late/revised data without moving checkpoints (05:10 UTC)"
+  schedule    = "10 5 * * *"
+  time_zone   = "UTC"
+  paused      = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/openaq/reconcile"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
+    max_backoff_duration = "600s"
+  }
+}

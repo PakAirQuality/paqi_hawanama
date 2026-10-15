@@ -318,6 +318,11 @@ def _build_all_stations_hourly_query(
     if provider_codes:
         where_clauses.append("LOWER(COALESCE(p.code, '')) IN :provider_codes")
         params["provider_codes"] = provider_codes
+    # Shadow-mode OpenAQ data (provider 'openaq' / source 'openaq') is never published
+    # to GCS unless a research caller asks for provider=openaq explicitly.
+    if "openaq" not in {str(c).lower() for c in (provider_codes or [])}:
+        where_clauses.append("COALESCE(p.code, '') <> 'openaq'")
+        where_clauses.append("r.source <> 'openaq'")
 
     where_sql = " AND ".join(where_clauses)
 
