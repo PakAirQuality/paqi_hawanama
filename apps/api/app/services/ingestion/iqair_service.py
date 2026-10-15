@@ -14,6 +14,8 @@ Transport rules:
 import asyncio
 import json
 import logging
+import time
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
@@ -56,6 +58,18 @@ class CityNotFound(IQAirError): pass
 class StateNotFound(IQAirError): pass
 class FeatureNotAvailable(IQAirError): pass
 # ==============================================================================
+
+
+@dataclass
+class FetchEnvelope:
+    """A successful response plus the facts the raw archive and provenance need."""
+    data: Any
+    http_status: int
+    fetched_at: datetime
+    endpoint: str
+    params_redacted: Dict[str, Any] = field(default_factory=dict)
+    elapsed_ms: int = 0
+    attempts: int = 1
 
 
 class IQAirClient:
@@ -113,6 +127,11 @@ class IQAirClient:
 
     async def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Make an HTTP request to the IQAir API with pacing, quota and bounded retries."""
+        return (await self._request_envelope(endpoint, params)).data
+
+    async def _request_envelope(self, endpoint: str, params: Dict[str, Any] = None) -> FetchEnvelope:
+        """Same as _make_request but keeps HTTP status, fetch time and timing for provenance."""
+        attempts = 0
         async for attempt in AsyncRetrying(
             reraise=True,
             stop=stop_after_attempt(self._max_attempts),
@@ -121,7 +140,27 @@ class IQAirClient:
             sleep=self._retry_sleep,
         ):
             with attempt:
-                return await self._request_once(endpoint, params)
+                attempts += 1
+                env = await self._request_once(endpoint, params)
+                env.attempts = attempts
+                return env
+
+    # ---- envelope-returning fetches used by ingestion (raw archive + provenance) ----
+    async def fetch_station(self, station: str, city: str = None, state: str = None, country: str = None) -> FetchEnvelope:
+        params = {"station": station}
+        if city:
+            params["city"] = city
+        if state:
+            params["state"] = state
+        if country:
+            params["country"] = country
+        return await self._request_envelope("station", params)
+
+    async def fetch_city(self, city: str, state: str, country: str) -> FetchEnvelope:
+        return await self._request_envelope("city", {"city": city, "state": state, "country": country})
+
+    async def fetch_nearest_city(self, lat: float, lon: float) -> FetchEnvelope:
+        return await self._request_envelope("nearest_city", {"lat": lat, "lon": lon})
 
     async def _reserve_quota(self) -> None:
         """Reserve one request against the shared per-credential budget (no-op without a quota service)."""
@@ -134,14 +173,17 @@ class IQAirClient:
             # Let the normal bounded retry policy decide whether to try again.
             raise RateLimited("shared_quota_exhausted", retry_after_s=exc.retry_in_s) from exc
 
-    async def _request_once(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
+    async def _request_once(self, endpoint: str, params: Dict[str, Any] = None) -> FetchEnvelope:
         url = f"{self.base_url}/{endpoint}"
         request_params: Dict[str, Any] = dict(params or {})
         request_params["key"] = self.api_key
+        params_redacted = {k: v for k, v in (params or {}).items()}
 
         async with self._pacer:
             await self._reserve_quota()
-            logger.info("IQAir request %s params=%s", endpoint, {k: v for k, v in (params or {}).items()})
+            logger.info("IQAir request %s params=%s", endpoint, params_redacted)
+            fetched_at = datetime.now(timezone.utc)
+            t0 = time.monotonic()
             try:
                 response = await self._client().get(url, params=request_params, timeout=self._timeout)
             except httpx.TimeoutException as e:
@@ -191,7 +233,8 @@ class IQAirClient:
             raise IQAirError(f"unexpected_status:{status}")
 
         logger.debug("IQAir %s ok (%s)", endpoint, redact_url(url))
-        return data  # the API 'data' object, exactly as before
+        return FetchEnvelope(data=data, http_status=status_code, fetched_at=fetched_at, endpoint=endpoint,
+                             params_redacted=params_redacted, elapsed_ms=int((time.monotonic() - t0) * 1000))
 
     # ---------------- History (pollution) ----------------
     async def get_station_history_pollution(

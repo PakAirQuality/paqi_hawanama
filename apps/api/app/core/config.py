@@ -109,6 +109,10 @@ class Settings(BaseSettings):
     STATION_MANIFEST_FORMAT: str = "parquet"         # parquet | jsonl
     CITY_MANIFEST_FORMAT: Optional[str] = None       # defaults to STATION_MANIFEST_FORMAT
     INGEST_OUT_DIR: str = "artifacts/ingest_runs"
+    # Raw provider payload archive (gzip JSON in GCS, indexed in ops.raw_payloads)
+    RAW_ARCHIVE_ENABLED: bool = True
+    OPS_RAW_PAYLOADS_BUCKET: Optional[str] = None     # falls back to MANIFEST_GCS_BUCKET
+    OPS_RAW_PAYLOADS_PREFIX: str = "raw_payloads"
     # ops schema (db_schema/migrations/001_ops_ingestion.sql)
     INGEST_LEASE_TTL_S: int = 3300                   # must stay below the Cloud Run request timeout (3600)
     OPS_TABLES_REQUIRED: bool = True                 # quota: fail loudly if ops.* is missing; runs/leases warn and continue
