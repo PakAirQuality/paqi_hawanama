@@ -144,5 +144,5 @@ async def verify_twitter_endpoint_access(
         return True
     
     # For non-scheduler requests, verify the authorization token
-    await verify_tasks_token(credentials)
+    await verify_tasks_token(request, credentials)
     return True
