@@ -23,7 +23,7 @@ from collections import defaultdict
 
 from app.services.ingestion.iqair_service import IQAirClient, Unauthorized
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
-from app.ingestion.manifests import ensure_latest_from_gcs
+from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
@@ -101,6 +101,7 @@ class CityIngestionTask:
         self._out_dir: Optional[Path] = None
         self._abort: Optional[asyncio.Event] = None
         self._manifest_source: Optional[str] = None
+        self._manifest_ref: Optional[ManifestRef] = None
 
         # Concurrency and rate limiting
         self._concurrency = int(s.INGEST_CONCURRENCY)
@@ -119,26 +120,17 @@ class CityIngestionTask:
     # --------------------------- manifest loading ---------------------------
 
     def _prefer_existing(self, base: Path, gcs_prefix: str = "") -> Optional[Path]:
-        """Return latest.parquet if exists else latest.jsonl if exists, else try GCS, else None."""
-        p_parq = base / "latest.parquet"
-        p_json = base / "latest.jsonl"
-        if p_parq.exists():
-            self._manifest_source = "local"
-            return p_parq
-        if p_json.exists():
-            self._manifest_source = "local"
-            return p_json
-
-        # GCS fallback: try downloading if local files missing
-        if gcs_prefix:
-            gcs_result = ensure_latest_from_gcs(base, "parquet", gcs_prefix)
-            if gcs_result:
-                logger.info("Recovered manifest from GCS: %s", gcs_result)
-                self._manifest_source = "gcs"
-                return gcs_result
-
-        self._manifest_source = None
-        return None
+        """Latest manifest path, synced from GCS when the bucket has a newer generation."""
+        base.mkdir(parents=True, exist_ok=True)
+        ref = sync_latest_from_gcs(base, gcs_prefix, "parquet") if gcs_prefix else None
+        if ref is None:
+            for p in (base / "latest.parquet", base / "latest.jsonl"):
+                if p.exists():
+                    ref = ManifestRef(p, "local")
+                    break
+        self._manifest_ref = ref
+        self._manifest_source = ref.source if ref else None
+        return ref.path if ref else None
 
     def _resolve_latest_city_manifest_path(self) -> Optional[Path]:
         return self._prefer_existing(self._city_manifest_dir, gcs_prefix="manifests/city_manifests")
@@ -322,6 +314,8 @@ class CityIngestionTask:
 
         rows = self._load_city_manifest()
         outcome.manifest_source = self._manifest_source
+        if self._manifest_ref is not None and self._manifest_source in ("gcs", "local"):
+            outcome.manifest_generation = self._manifest_ref.generation
         if not rows and self._db_city_fallback:
             logger.info("City manifest empty → using DB fallback for countries=%s", target_countries)
             for tc in target_countries:

@@ -16,7 +16,7 @@ from app.services.ingestion.iqair_service import (
     BadRequest,
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
-from app.ingestion.manifests import download_manifest_from_gcs
+from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
@@ -106,6 +106,7 @@ class DataIngestionTask:
         self._out_dir: Optional[Path] = None
         self._abort: Optional[asyncio.Event] = None
         self._manifest_source: Optional[str] = None
+        self._manifest_ref: Optional[ManifestRef] = None
 
         # Concurrency and rate limiting
         self._concurrency = int(s.INGEST_CONCURRENCY)
@@ -130,30 +131,13 @@ class DataIngestionTask:
     # --------------------------- manifest loading ---------------------------
 
     def _resolve_latest_manifest_path(self) -> Optional[Path]:
-        # Always sync from GCS first to avoid stale local manifests across container instances
-        gcs_prefix = "manifests/station_manifests"
-        p_parq = self._manifest_dir / "latest.parquet"
-        p_json = self._manifest_dir / "latest.jsonl"
-
+        # GCS is the source of truth across container instances; download only
+        # when the object generation changed since the last sync.
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
-        if download_manifest_from_gcs(p_parq, gcs_prefix):
-            logger.info("Synced station manifest from GCS → %s", p_parq)
-            self._manifest_source = "gcs"
-            return p_parq
-        if download_manifest_from_gcs(p_json, gcs_prefix):
-            logger.info("Synced station manifest from GCS → %s", p_json)
-            self._manifest_source = "gcs"
-            return p_json
-
-        # Fall back to local file if GCS unavailable
-        if p_parq.exists():
-            self._manifest_source = "local"
-            return p_parq
-        if p_json.exists():
-            self._manifest_source = "local"
-            return p_json
-        self._manifest_source = None
-        return None
+        ref = sync_latest_from_gcs(self._manifest_dir, "manifests/station_manifests", "parquet")
+        self._manifest_ref = ref
+        self._manifest_source = ref.source if ref else None
+        return ref.path if ref else None
 
     def _read_parquet(self, path: Path) -> List[Dict[str, Any]]:
         if not _HAVE_PANDAS:
@@ -621,6 +605,8 @@ class DataIngestionTask:
                 return
         rows = self._load_manifest()
         outcome.manifest_source = self._manifest_source
+        if self._manifest_ref is not None:
+            outcome.manifest_generation = self._manifest_ref.generation
         if (not rows) and self._db_station_fallback:
             rows = await self._list_stations_from_db()
             outcome.manifest_source = "db"

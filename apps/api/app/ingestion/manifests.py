@@ -6,9 +6,94 @@ from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Any, Tuple, Optional
 
+from dataclasses import dataclass
+
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ManifestRef:
+    """Where a manifest came from, for the run record."""
+    path: Path
+    source: str                      # 'gcs' (downloaded now) | 'local' (cached/unsynced copy) | 'derived' | 'db'
+    generation: Optional[str] = None  # GCS object generation, when known
+    etag: Optional[str] = None
+    synced_at: Optional[str] = None
+
+
+def _sidecar(path: Path) -> Path:
+    return path.with_name(path.name + ".meta.json")
+
+
+def _read_sidecar(path: Path) -> Dict[str, Any]:
+    try:
+        return json.loads(_sidecar(path).read_text())
+    except Exception:
+        return {}
+
+
+def _write_sidecar(path: Path, generation: Optional[str], etag: Optional[str]) -> str:
+    synced_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    try:
+        _sidecar(path).write_text(json.dumps({"generation": generation, "etag": etag, "synced_at": synced_at}))
+    except Exception as e:  # the sidecar is an optimisation; never fail a run over it
+        logger.warning("Could not write manifest sidecar for %s: %s", path, e)
+    return synced_at
+
+
+def sync_latest_from_gcs(path_root: Path, gcs_prefix: str, fmt_preference: str = "parquet") -> Optional[ManifestRef]:
+    """
+    Make the local latest.(parquet|jsonl) match the GCS object, downloading only
+    when the object generation differs from the sidecar recorded at the last
+    sync. Falls back to whatever local copy exists when GCS is unavailable.
+    Cloud Run instances do not share a disk, so a stale local manifest on one
+    instance used to win over a newer one in the bucket.
+    """
+    names = ["latest.parquet", "latest.jsonl"] if fmt_preference == "parquet" else ["latest.jsonl", "latest.parquet"]
+    candidates = [path_root / n for n in names]
+
+    bucket_name = _bucket_name()
+    client = _gcs_client() if bucket_name else None
+    bucket = None
+    if client is not None:
+        try:
+            bucket = client.bucket(bucket_name)
+        except Exception as e:
+            logger.error("GCS unavailable for manifest sync (bucket %s): %s", bucket_name, e)
+    if bucket is not None:
+        for p in candidates:
+            blob_path = f"{gcs_prefix}/{p.name}"
+            try:
+                blob = bucket.blob(blob_path)
+                if not blob.exists():
+                    continue
+                blob.reload()
+                gen = str(blob.generation) if blob.generation is not None else None
+                etag = getattr(blob, "etag", None)
+                meta = _read_sidecar(p)
+                if p.exists() and gen is not None and meta.get("generation") == gen:
+                    logger.info("Manifest unchanged in GCS (generation %s): using local %s", gen, p)
+                    return ManifestRef(p, "local", gen, etag, meta.get("synced_at"))
+                p.parent.mkdir(parents=True, exist_ok=True)
+                tmp = p.with_name(p.name + ".download.tmp")
+                blob.download_to_filename(str(tmp))
+                os.replace(tmp, p)
+                synced_at = _write_sidecar(p, gen, etag)
+                logger.info("Downloaded manifest gs://%s/%s (generation %s) → %s", bucket_name, blob_path, gen, p)
+                return ManifestRef(p, "gcs", gen, etag, synced_at)
+            except Exception as e:
+                logger.error("GCS manifest sync failed for gs://%s/%s: %s", bucket_name, blob_path, e)
+                continue
+    elif bucket_name:
+        logger.warning("sync_latest_from_gcs: google-cloud-storage not available; using local manifests only")
+
+    for p in candidates:
+        if p.exists():
+            meta = _read_sidecar(p)
+            return ManifestRef(p, "local", meta.get("generation"), meta.get("etag"), meta.get("synced_at"))
+    return None
 
 # Optional pandas (parquet). Falls back to JSONL.
 try:
@@ -55,7 +140,9 @@ def upload_manifest_to_gcs(local_path: Path, gcs_prefix: str) -> bool:
         blob = bucket.blob(blob_path)
         blob.cache_control = "no-cache"
         blob.upload_from_filename(str(local_path), content_type="application/octet-stream")
-        logger.info("Uploaded manifest to gs://%s/%s", bucket_name, blob_path)
+        gen = str(blob.generation) if getattr(blob, "generation", None) is not None else None
+        _write_sidecar(local_path, gen, getattr(blob, "etag", None))
+        logger.info("Uploaded manifest to gs://%s/%s (generation %s)", bucket_name, blob_path, gen)
         return True
     except Exception as e:
         logger.error("Failed to upload manifest to GCS: %s", e)
@@ -92,27 +179,12 @@ def download_manifest_from_gcs(local_path: Path, gcs_prefix: str) -> bool:
 
 def ensure_latest_from_gcs(path_root: Path, fmt: str, gcs_prefix: str) -> Optional[Path]:
     """
-    If latest manifest doesn't exist locally, try downloading from GCS.
-    Tries parquet first if fmt=="parquet", then jsonl.
-    Returns the local Path if found/downloaded, else None.
+    Return the local path of the latest manifest, synced from GCS when the
+    bucket holds a newer generation (previously local-first, which let a stale
+    copy on one instance win). Tries parquet first if fmt=="parquet".
     """
-    candidates = []
-    if fmt == "parquet":
-        candidates = [path_root / "latest.parquet", path_root / "latest.jsonl"]
-    else:
-        candidates = [path_root / "latest.jsonl", path_root / "latest.parquet"]
-
-    # Check local first
-    for p in candidates:
-        if p.exists():
-            return p
-
-    # Try GCS download
-    for p in candidates:
-        if download_manifest_from_gcs(p, gcs_prefix):
-            return p
-
-    return None
+    ref = sync_latest_from_gcs(path_root, gcs_prefix, fmt)
+    return ref.path if ref else None
 
 # ---------------------------------------------------------
 
