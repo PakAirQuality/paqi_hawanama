@@ -44,8 +44,10 @@ node_modules/
 .env.local
 .env
 
-# Database schema (contains credentials in dump)
-db_schema/
+# Database schema dump (contains credentials) — but keep reviewed migrations and one-off SQL
+db_schema/*
+!db_schema/migrations/
+!db_schema/oneoff/
 
 # Editor config
 .vscode/
