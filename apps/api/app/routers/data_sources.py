@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import fsspec
 import numpy as np
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response
 from omfiles import OmFileReader
 
@@ -167,25 +167,26 @@ _refresh_lock = asyncio.Lock()
 
 
 async def _refresh_cache_async() -> None:
-    """Run the S3 read + encode off the event loop; one refresh at a time."""
-    if _refresh_lock.locked():
-        return
+    """Run the S3 read + encode off the event loop; one refresh at a time, callers queue."""
     async with _refresh_lock:
         age = time.time() - _cache["generated_at"]
         if _cache["png_bytes"] is not None and age <= _CACHE_TTL:
-            return  # another waiter already refreshed
+            return  # a previous holder of the lock already refreshed
         await asyncio.to_thread(_refresh_cache)
 
 
 async def _ensure_cache() -> None:
     """
     Ensure the cache is populated. Stale-while-revalidate: a stale cache is served
-    immediately and refreshed in the background; only a cold instance waits, and it
-    waits on a worker thread, not on the event loop (other requests keep flowing).
+    immediately and refreshed in the background; only a cold instance waits (queued
+    behind the warm-up or another request's refresh), and the work runs on a worker
+    thread, not on the event loop, so other requests keep flowing.
     """
     age = time.time() - _cache["generated_at"]
     if _cache["png_bytes"] is None:
-        await _refresh_cache_async()          # cold: must wait, but off-loop
+        await _refresh_cache_async()          # cold: wait for the (shared) refresh
+        if _cache["png_bytes"] is None:
+            raise HTTPException(status_code=503, detail="wind texture unavailable")
     elif age > _CACHE_TTL and not _refresh_lock.locked():
         asyncio.create_task(_refresh_in_background())
 
