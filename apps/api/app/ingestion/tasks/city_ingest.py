@@ -24,6 +24,7 @@ from collections import defaultdict
 from app.services.ingestion.iqair_service import IQAirClient, Unauthorized
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import ensure_latest_from_gcs
+from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
 from app.core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
@@ -88,7 +89,8 @@ class CityIngestionTask:
     def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
-        self.iqair_client = iqair_client or IQAirClient()
+        self.iqair_client = iqair_client or IQAirClient(
+            settings=s, quota=PostgresQuota(AsyncSessionLocal, required=bool(s.OPS_TABLES_REQUIRED)))
         self.db_service = db_service or DatabaseService()
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
@@ -298,6 +300,14 @@ class CityIngestionTask:
 
     async def _run(self, outcome: RunOutcome, recorder: RunRecorder, target_countries: List[str]) -> None:
         c = outcome.counts
+        quota = getattr(self.iqair_client, "quota", None)
+        if quota is not None:
+            try:
+                await quota.healthcheck()
+            except QuotaUnavailable as exc:
+                # Never run unmetered against a shared credential.
+                outcome.fail("quota_unavailable", str(exc))
+                return
         country_set = {x.lower() for x in target_countries}
 
         rows = self._load_city_manifest()

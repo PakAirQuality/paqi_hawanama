@@ -160,5 +160,8 @@ async def test_key_never_appears_in_logs_even_with_verbose_httpx(tmp_path, caplo
 def test_no_arg_constructor_still_works_for_read_path_services(monkeypatch):
     from app.core.config import settings
     monkeypatch.setattr(settings, "IQAIR_API_KEY", "sk-test")
+    from app.ingestion.quota import PostgresQuota
     c = IQAirClient()
-    assert c.quota is None and c.base_url.startswith("https://")
+    assert isinstance(c.quota, PostgresQuota) and c.quota._required is False
+    assert c.base_url.startswith("https://")
+    assert IQAirClient(quota=None).quota is None

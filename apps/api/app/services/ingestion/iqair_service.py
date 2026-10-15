@@ -22,7 +22,10 @@ from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt,
 
 from app.core.config import settings as _settings
 from app.ingestion.http import default_timeout, get_shared_async_client, parse_retry_after, redact_url, register_secret
+from app.ingestion.quota import QuotaExhausted, default_quota
 from app.ingestion.ratelimit import LocalPacer
+
+_UNSET = object()
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +68,7 @@ class IQAirClient:
     """
 
     def __init__(self, *, settings=None, http: Optional[httpx.AsyncClient] = None,
-                 quota=None, pacer: Optional[LocalPacer] = None, retry_sleep=None):
+                 quota=_UNSET, pacer: Optional[LocalPacer] = None, retry_sleep=None):
         s = settings or _settings
         self.settings = s
         self.base_url = s.IQAIR_BASE_URL.rstrip("/")
@@ -80,7 +83,10 @@ class IQAirClient:
 
         self._http = http
         self._pacer = pacer or LocalPacer(self.max_calls_per_min, self.max_concurrency)
-        self._quota = quota
+        # Read-path services construct IQAirClient() with no quota: meter them best-effort
+        # (required=False) so the shared budget counts every request but never breaks a page.
+        # Ingestion tasks pass a required quota explicitly. quota=None disables metering.
+        self._quota = default_quota(required=False) if quota is _UNSET else quota
         self._timeout = default_timeout(connect=float(s.IQAIR_HTTP_CONNECT_TIMEOUT_S),
                                         read=float(s.IQAIR_HTTP_READ_TIMEOUT_S))
         self._max_attempts = max(1, int(s.IQAIR_RETRY_MAX_ATTEMPTS))
@@ -121,8 +127,12 @@ class IQAirClient:
         """Reserve one request against the shared per-credential budget (no-op without a quota service)."""
         if self._quota is None:
             return
-        await self._quota.reserve_or_wait(self.credential_alias, limit_per_min=self.max_calls_per_min,
-                                          max_wait_s=float(self.settings.IQAIR_QUOTA_MAX_WAIT_S))
+        try:
+            await self._quota.reserve_or_wait(self.credential_alias, limit_per_min=self.max_calls_per_min,
+                                              max_wait_s=float(self.settings.IQAIR_QUOTA_MAX_WAIT_S))
+        except QuotaExhausted as exc:
+            # Let the normal bounded retry policy decide whether to try again.
+            raise RateLimited("shared_quota_exhausted", retry_after_s=exc.retry_in_s) from exc
 
     async def _request_once(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         url = f"{self.base_url}/{endpoint}"

@@ -20,6 +20,7 @@ from sqlalchemy import text
 from app.services.ingestion.iqair_service import IQAirClient
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import finalize_union_manifest, upload_manifest_to_gcs
+from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
 from app.core.south_asia import get_iqair_countries, get_state_aliases
@@ -47,7 +48,8 @@ class StationDiscoveryTask:
 
     def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
         self.settings = s = settings or _default_settings
-        self.iqair_client = iqair_client or IQAirClient()
+        self.iqair_client = iqair_client or IQAirClient(
+            settings=s, quota=PostgresQuota(AsyncSessionLocal, required=bool(s.OPS_TABLES_REQUIRED)))
         self.db_service = db_service or DatabaseService()
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
@@ -91,6 +93,9 @@ class StationDiscoveryTask:
                              scope=country or self.settings.DISCOVERY_COUNTRY or "all", trigger=trigger)
         await recorder.start(outcome)
         try:
+            quota = getattr(self.iqair_client, "quota", None)
+            if quota is not None:
+                await quota.healthcheck()
             summary = await self._discover(country, run_id)
             c = outcome.counts
             c.expected = len(summary["countries"])
@@ -114,6 +119,8 @@ class StationDiscoveryTask:
                 outcome.fail("no_stations_discovered", "discovery completed but found zero stations")
             elif summary["states_skipped"] or summary["cities_skipped"] or summary["countries_failed"]:
                 outcome.partial_reason = "entities_skipped"
+        except QuotaUnavailable as exc:
+            outcome.fail("quota_unavailable", str(exc))
         except Exception as exc:
             logger.exception("Discovery run %s crashed", run_id)
             outcome.fail(type(exc).__name__, str(exc))

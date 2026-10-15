@@ -17,6 +17,7 @@ from app.services.ingestion.iqair_service import (
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import download_manifest_from_gcs
+from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
 from app.core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
@@ -91,7 +92,8 @@ class DataIngestionTask:
     def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
-        self.iqair_client = iqair_client or IQAirClient()
+        self.iqair_client = iqair_client or IQAirClient(
+            settings=s, quota=PostgresQuota(AsyncSessionLocal, required=bool(s.OPS_TABLES_REQUIRED)))
         self.db_service = db_service or DatabaseService()
         # A fresh recorder per run (it buffers per-entity failures).
         self._recorder_factory = recorder_factory or (
@@ -598,6 +600,14 @@ class DataIngestionTask:
 
     async def _run(self, outcome: RunOutcome, recorder: RunRecorder) -> None:
         c = outcome.counts
+        quota = getattr(self.iqair_client, "quota", None)
+        if quota is not None:
+            try:
+                await quota.healthcheck()
+            except QuotaUnavailable as exc:
+                # Never run unmetered against a shared credential.
+                outcome.fail("quota_unavailable", str(exc))
+                return
         rows = self._load_manifest()
         outcome.manifest_source = self._manifest_source
         if (not rows) and self._db_station_fallback:

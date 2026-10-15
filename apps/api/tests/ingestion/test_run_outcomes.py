@@ -213,6 +213,34 @@ async def test_unexpected_exception_is_failed_and_recorded(tmp_path, monkeypatch
     assert rec.finished is o
 
 
+class _BrokenQuota:
+    async def healthcheck(self):
+        from app.ingestion.quota import QuotaUnavailable
+        raise QuotaUnavailable("ops.provider_quota unavailable: relation does not exist")
+
+
+async def test_quota_unavailable_fails_run_before_any_request(tmp_path, monkeypatch):
+    t, rec = _station_task(tmp_path, {"*": iqair_payload()}, [station_row(0)], monkeypatch)
+    t.iqair_client.quota = _BrokenQuota()
+    o = await t.fetch_station_readings()
+    assert o.status is RunStatus.failed and o.error_class == "quota_unavailable"
+    assert t.iqair_client.calls == [] and o.http_status() == 500
+
+
+async def test_city_quota_unavailable_fails_run(tmp_path, monkeypatch):
+    t, rec = _city_task(tmp_path, {"*": iqair_payload()}, [city_row(0)], monkeypatch)
+    t.iqair_client.quota = _BrokenQuota()
+    o = await t.fetch_city_readings_hourly()
+    assert o.status is RunStatus.failed and o.error_class == "quota_unavailable" and t.iqair_client.calls == []
+
+
+async def test_discovery_quota_unavailable_fails_run(tmp_path, monkeypatch):
+    t, rec = _discovery(tmp_path, {"states:Pakistan": [{"state": "Punjab"}]}, monkeypatch, countries="Pakistan")
+    t.iqair_client.quota = _BrokenQuota()
+    o = await t.discover_all_stations_comprehensive()
+    assert o.status is RunStatus.failed and o.error_class == "quota_unavailable" and t.iqair_client.calls == []
+
+
 async def test_trigger_is_recorded(tmp_path, monkeypatch):
     t, rec = _station_task(tmp_path, {"*": iqair_payload()}, [station_row(0)], monkeypatch)
     o = await t.fetch_station_readings(trigger="scheduler")
