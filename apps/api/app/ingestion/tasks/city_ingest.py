@@ -21,9 +21,10 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
-from app.services.ingestion.iqair_service import IQAirClient
+from app.services.ingestion.iqair_service import IQAirClient, Unauthorized
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import ensure_latest_from_gcs
+from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
 from app.core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
 
@@ -106,11 +107,18 @@ class _AsyncRateLimiter:
 class CityIngestionTask:
     """Manifest-driven city-level ingestion (IQAir /v2/city)."""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient()
         self.db_service = db_service or DatabaseService()
+        self._recorder_factory = recorder_factory or (
+            lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
+        )
+        self._run_id: Optional[str] = None
+        self._out_dir: Optional[Path] = None
+        self._abort: Optional[asyncio.Event] = None
+        self._manifest_source: Optional[str] = None
 
         # Concurrency and rate limiting
         self._concurrency = int(s.INGEST_CONCURRENCY)
@@ -127,12 +135,6 @@ class CityIngestionTask:
         self._city_manifest_dir    = Path(s.CITY_MANIFEST_DIR)
         self._station_manifest_dir = Path(s.STATION_MANIFEST_DIR)
 
-        # Ingest run output
-        ts = datetime.now(timezone.utc).isoformat()
-        self._run_id = f"ingest-city-{ts}"
-        self._out_dir = Path(s.INGEST_OUT_DIR) / self._run_id
-        self._out_dir.mkdir(parents=True, exist_ok=True)
-
     # --------------------------- manifest loading ---------------------------
 
     def _prefer_existing(self, base: Path, gcs_prefix: str = "") -> Optional[Path]:
@@ -140,8 +142,10 @@ class CityIngestionTask:
         p_parq = base / "latest.parquet"
         p_json = base / "latest.jsonl"
         if p_parq.exists():
+            self._manifest_source = "local"
             return p_parq
         if p_json.exists():
+            self._manifest_source = "local"
             return p_json
 
         # GCS fallback: try downloading if local files missing
@@ -149,8 +153,10 @@ class CityIngestionTask:
             gcs_result = ensure_latest_from_gcs(base, "parquet", gcs_prefix)
             if gcs_result:
                 logger.info("Recovered manifest from GCS: %s", gcs_result)
+                self._manifest_source = "gcs"
                 return gcs_result
 
+        self._manifest_source = None
         return None
 
     def _resolve_latest_city_manifest_path(self) -> Optional[Path]:
@@ -205,6 +211,7 @@ class CityIngestionTask:
             return []
 
         logger.info("Deriving city list from station manifest: %s", ps)
+        self._manifest_source = "derived"
         srows = self._read_parquet(ps) if ps.suffix == ".parquet" else self._read_jsonl(ps)
         if not srows:
             logger.error("Station manifest is empty or unreadable: %s", ps)
@@ -265,39 +272,65 @@ class CityIngestionTask:
 
     # ----------------------------- public API --------------------------------
 
-    async def fetch_city_readings_hourly(self, country: Optional[str] = None) -> Dict[str, Any]:
+    async def fetch_city_readings_hourly(self, country: Optional[str] = None, *, trigger: str = "http") -> RunOutcome:
         """
         Hourly city ingestion job – reads cities from manifest (or derives from station manifest / DB),
         fetches /v2/city for each, normalizes, and bulk upserts readings.
 
         If country is None, ingests all countries from IQAIR_COUNTRIES config.
-        If country is provided, ingests only that single country (backwards-compatible).
+        Returns a RunOutcome (success / partial / failed); never raises for operational failures.
         """
-        target_countries = [country] if country else get_iqair_countries(self.settings.IQAIR_COUNTRIES)
-        country_set = {c.lower() for c in target_countries}
-
-        logger.info(
-            "Starting city ingestion (manifest mode). countries=%s, concurrency=%d, rate<=%d/min, "
-            "alias=%s, nearest_fallback=%s, db_city_fallback=%s",
-            target_countries, self._concurrency, self._rate, self._allow_state_alias, self._allow_nearest_fallback, self._db_city_fallback
+        s = self.settings
+        target_countries = [country] if country else get_iqair_countries(s.IQAIR_COUNTRIES)
+        run_id = new_run_id("ingest-cities")
+        self._run_id = run_id
+        self._out_dir = Path(s.INGEST_OUT_DIR) / run_id
+        self._abort = asyncio.Event()
+        self._manifest_source = None
+        recorder = self._recorder_factory()
+        outcome = RunOutcome(
+            run_id=run_id, task="ingest-cities", provider_code="airvisual",
+            scope=country or ",".join(target_countries), trigger=trigger,
         )
+        outcome.details["config"] = {
+            "rate_limit_per_min": self._rate, "concurrency": self._concurrency,
+            "allow_state_alias": self._allow_state_alias, "allow_nearest_fallback": self._allow_nearest_fallback,
+            "db_city_fallback": self._db_city_fallback, "countries": target_countries,
+        }
+        logger.info(
+            "Starting city ingestion run %s (manifest mode). countries=%s, concurrency=%d, rate<=%d/min, "
+            "alias=%s, nearest_fallback=%s, db_city_fallback=%s",
+            run_id, target_countries, self._concurrency, self._rate, self._allow_state_alias,
+            self._allow_nearest_fallback, self._db_city_fallback,
+        )
+        await recorder.start(outcome)
+        try:
+            await self._run(outcome, recorder, target_countries)
+        except Exception as exc:
+            logger.exception("City ingestion run %s crashed", run_id)
+            outcome.fail(type(exc).__name__, str(exc))
+        finally:
+            outcome.finish()
+            await recorder.finish(outcome)
+        c = outcome.counts
+        logger.info("City ingestion run %s %s. expected=%d attempted=%d completed=%d failed=%d skipped=%d "
+                    "rows_fetched=%d rows_written=%d rows_unchanged=%d (out: %s)",
+                    run_id, outcome.status.value, c.expected, c.attempted, c.completed, c.failed, c.skipped,
+                    c.rows_fetched, c.rows_written, c.rows_unchanged, outcome.report_dir)
+        return outcome
+
+    async def _run(self, outcome: RunOutcome, recorder: RunRecorder, target_countries: List[str]) -> None:
+        c = outcome.counts
+        country_set = {x.lower() for x in target_countries}
 
         rows = self._load_city_manifest()
+        outcome.manifest_source = self._manifest_source
         if not rows and self._db_city_fallback:
             logger.info("City manifest empty → using DB fallback for countries=%s", target_countries)
             for tc in target_countries:
                 rows.extend(await self._list_cities_from_db(tc))
-
-        if not rows:
-            return {
-                "status": "success",
-                "countries": target_countries,
-                "cities_processed": 0,
-                "readings_ingested": 0,
-                "errors": 0,
-                "run_id": self._run_id,
-                "report_dir": str(self._out_dir),
-            }
+            outcome.manifest_source = "db"
+        outcome.manifest_rows = len(rows)
 
         # Filter to target countries + active, dedupe (city,state,country)
         seen = set()
@@ -313,55 +346,49 @@ class CityIngestionTask:
             if tup in seen:
                 continue
             seen.add(tup)
-            # standardize keys we need later
             r["scope_key"] = r.get("scope_key") or _scope_key(r["country"], r["state"], r["city"])
             cities.append(r)
 
+        c.expected = len(cities)
+        if not cities:
+            outcome.fail("empty_inventory",
+                         f"no cities after filters (manifest rows={len(rows)}, source={outcome.manifest_source})")
+            return
+
         logger.info("Will request city endpoint for %d cities.", len(cities))
+        results = await asyncio.gather(*[self._fetch_one_city(ct) for ct in cities], return_exceptions=True)
 
-        tasks = [self._fetch_one_city(c) for c in cities]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        ingested, failed = 0, 0
         buf: List[Dict[str, Any]] = []
-        failures: List[Dict[str, Any]] = []
-
         for i, res in enumerate(results):
-            meta = {
-                "scope_key": cities[i]["scope_key"],
-                "city": cities[i]["city"],
-                "state": cities[i]["state"],
-                "country": cities[i]["country"],
-            }
-            if isinstance(res, Exception):
-                failed += 1
-                failures.append({**meta, "error": f"{type(res).__name__}: {res}"})
+            ct = cities[i]
+            meta = {"scope_key": ct["scope_key"], "city": ct["city"], "state": ct["state"], "country": ct["country"]}
+            if isinstance(res, RunAborted):
+                c.skipped += 1
+                continue
+            c.attempted += 1
+            if isinstance(res, BaseException):
+                c.failed += 1
+                recorder.add_failure(EntityFailure("city", ct["scope_key"], type(res).__name__, str(res)[:500], details=meta))
             elif res:
-                ingested += 1
-                # res is now a list of readings, extend buf with all readings
+                c.completed += 1
                 if isinstance(res, list):
                     buf.extend(res)
+                    c.rows_fetched += len(res)
                 else:
                     buf.append(res)
+                    c.rows_fetched += 1
             else:
-                failed += 1
-                failures.append({**meta, "error": "empty_result"})
+                c.failed += 1
+                recorder.add_failure(EntityFailure("city", ct["scope_key"], "empty_result", "", details=meta))
 
         if buf:
-            await self._bulk_write_readings(buf)
-            logger.info("Bulk upserted %d city readings.", len(buf))
+            written, unchanged, latest_ts = await self._bulk_write_readings(buf)
+            c.rows_written, c.rows_unchanged = written, unchanged
+            outcome.latest_observation_ts = latest_ts
+            logger.info("Bulk upserted %d city readings (%d unchanged).", written, unchanged)
 
-        self._write_report(success_count=ingested, fail_entries=failures)
-
-        logger.info("City ingestion complete. Cities=%d Readings=%d Failed=%d (out: %s)", ingested, len(buf), failed, self._out_dir)
-        return {
-            "status": "success",
-            "cities_processed": len(cities),
-            "readings_ingested": len(buf),
-            "errors": failed,
-            "run_id": self._run_id,
-            "report_dir": str(self._out_dir),
-        }
+        if self._abort is not None and self._abort.is_set():
+            outcome.fail("provider_auth", "IQAir rejected the credential (401/403); remaining cities were skipped")
 
     # --------------------------- helpers -------------------------------------
 
@@ -370,7 +397,11 @@ class CityIngestionTask:
         Fetch one city via /v2/city with optional state-alias retries.
         If enabled and lat/lon present, fallback to /v2/nearest_city.
         """
+        if self._abort is not None and self._abort.is_set():
+            raise RunAborted("run aborted before fetch")
         async with self._sema:
+            if self._abort is not None and self._abort.is_set():
+                raise RunAborted("run aborted before fetch")
             city = row.get("city")
             state = row.get("state")
             country = row.get("country") or ""
@@ -391,6 +422,12 @@ class CityIngestionTask:
                     parsed = self.iqair_client.parse_city_data(raw)
                     readings = self._normalize_city_readings(parsed, scope_key)
                     return readings
+                except Unauthorized as e:
+                    # The credential is bad for every city: stop launching new fetches.
+                    logger.error("Unauthorized for %s (%s, %s): %s — aborting run", city, state_try, country, e)
+                    if self._abort is not None:
+                        self._abort.set()
+                    raise
                 except Exception as e:
                     last_exc = e
                     emsg = str(e).lower()
@@ -773,56 +810,36 @@ class CityIngestionTask:
         return keep
     # ---------------------------------------------------------------------------------
 
-    async def _bulk_write_readings(self, rows: List[Dict[str, Any]]) -> None:
+    async def _bulk_write_readings(self, rows: List[Dict[str, Any]]):
         """
         Apply deduplication and existence filtering before bulk writing to database.
+        Returns (rows_written, rows_unchanged, latest_observation_ts).
         """
         try:
             if not rows:
                 logger.info("No readings to write.")
-                return
-            
+                return 0, 0, None
+
             logger.info("Starting bulk write with %d raw readings", len(rows))
-            
+
             # Apply in-memory deduplication first
             deduplicated_rows = self._dedupe_readings_in_memory(rows)
-            
+
             # Filter out readings that already exist in database
             new_rows = await self._drop_existing_readings(deduplicated_rows)
-            
+            unchanged = len(deduplicated_rows) - len(new_rows)
+
             if not new_rows:
                 logger.info("No new readings to insert after deduplication and existence check.")
-                return
-            
+                return 0, unchanged, None
+
             # Bulk insert the remaining new readings
             async with AsyncSessionLocal() as sess:
                 n = await self.db_service.upsert_readings_bulk(sess, new_rows)
                 await sess.commit()
                 logger.info("Successfully upserted %d new city readings.", n)
-                
+            return int(n or 0), unchanged, max(r["ts_utc"] for r in new_rows)
+
         except Exception as e:
             logger.error("Bulk write failed: %s", e)
             raise
-
-    def _write_report(self, success_count: int, fail_entries: List[Dict[str, Any]]) -> None:
-        try:
-            self._out_dir.mkdir(parents=True, exist_ok=True)
-            metrics = {
-                "run_id": self._run_id,
-                "started_utc": self._run_id.replace("ingest-city-", ""),
-                "success_count": success_count,
-                "fail_count": len(fail_entries),
-                "rate_limit_per_min": self._rate,
-                "concurrency": self._concurrency,
-                "allow_state_alias": self._allow_state_alias,
-                "allow_nearest_fallback": self._allow_nearest_fallback,
-            }
-            with open(self._out_dir / "metrics.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(metrics, indent=2))
-
-            if fail_entries:
-                with open(self._out_dir / "failures.jsonl", "w", encoding="utf-8") as f:
-                    for row in fail_entries:
-                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.warning("Failed writing ingest report: %s", e)

@@ -6,14 +6,40 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 import logging
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from fastapi.responses import JSONResponse
 from typing import Dict, Any, Optional
 from app.core.config import settings
 from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
 from app.ingestion.provenance import describe as describe_provenance
+from app.ingestion.runs import RunOutcome, worst_status
 from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+
+def _trigger(request: Request) -> str:
+    ua = request.headers.get("user-agent", "")
+    if request.headers.get("x-cloudscheduler") or "Google-Cloud-Scheduler" in ua:
+        return "scheduler"
+    return "http"
+
+
+def _outcome_response(outcome: RunOutcome, message: str) -> JSONResponse:
+    """
+    Map the run status to an HTTP status so Cloud Scheduler (which retries only
+    on non-2xx) retries total failures: success/skipped 200, partial 207, failed 500.
+    """
+    return JSONResponse(
+        status_code=outcome.http_status(),
+        content={
+            "status": outcome.status.value,
+            "message": message,
+            "run_id": outcome.run_id,
+            "summary": outcome.to_dict(),
+            "provenance": describe_provenance(),
+        },
+    )
 
 
 @router.post("/tasks/discover")
@@ -30,13 +56,9 @@ async def run_station_discovery(
     try:
         logger.info("Starting station discovery via API endpoint (country=%s)", country or "all")
         discovery_task = StationDiscoveryTask()
-        summary = await discovery_task.discover_all_stations_comprehensive(country=country)
-        logger.info("Station discovery completed successfully: %s", summary)
-        return {
-            "status": "success",
-            "message": "Station discovery completed",
-            "summary": summary
-        }
+        outcome = await discovery_task.discover_all_stations_comprehensive(country=country, trigger=_trigger(request))
+        logger.info("Station discovery finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return _outcome_response(outcome, "Station discovery completed")
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("Station discovery failed: %s", error_msg)
@@ -61,13 +83,9 @@ async def run_station_ingestion(
     try:
         logger.info("Starting station ingestion via API endpoint")
         station_ingestion_task = DataIngestionTask()
-        summary = await station_ingestion_task.fetch_station_readings()
-        logger.info("Station ingestion completed successfully: %s", summary)
-        return {
-            "status": "success", 
-            "message": "Station ingestion completed",
-            "summary": summary
-        }
+        outcome = await station_ingestion_task.fetch_station_readings(trigger=_trigger(request))
+        logger.info("Station ingestion finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return _outcome_response(outcome, "Station ingestion completed")
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("Station ingestion failed: %s", error_msg)
@@ -94,13 +112,9 @@ async def run_city_ingestion(
     try:
         logger.info("Starting city ingestion via API endpoint (country=%s)", country or "all")
         city_ingestion_task = CityIngestionTask()
-        summary = await city_ingestion_task.fetch_city_readings_hourly(country=country)
-        logger.info("City ingestion completed successfully: %s", summary)
-        return {
-            "status": "success",
-            "message": "City ingestion completed", 
-            "summary": summary
-        }
+        outcome = await city_ingestion_task.fetch_city_readings_hourly(country=country, trigger=_trigger(request))
+        logger.info("City ingestion finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return _outcome_response(outcome, "City ingestion completed")
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("City ingestion failed: %s", error_msg)
@@ -131,28 +145,36 @@ async def run_full_pipeline(
         station_ingestion_task = DataIngestionTask()
         city_ingestion_task = CityIngestionTask()
         
+        trigger = _trigger(request)
         # Step 1: Discovery
         logger.info("Pipeline step 1/3: Station discovery")
-        discovery_summary = await discovery_task.discover_all_stations_comprehensive()
+        discovery = await discovery_task.discover_all_stations_comprehensive(trigger=trigger)
         
         # Step 2: Station ingestion
         logger.info("Pipeline step 2/3: Station ingestion")
-        station_summary = await station_ingestion_task.fetch_station_readings()
+        stations = await station_ingestion_task.fetch_station_readings(trigger=trigger)
         
         # Step 3: City ingestion (all configured countries)
         logger.info("Pipeline step 3/3: City ingestion")
-        city_summary = await city_ingestion_task.fetch_city_readings_hourly(country=None)
-        
-        logger.info("Full pipeline completed successfully")
-        return {
-            "status": "success",
-            "message": "Full pipeline completed",
-            "summary": {
-                "discovery": discovery_summary,
-                "station_ingestion": station_summary,
-                "city_ingestion": city_summary
-            }
-        }
+        cities = await city_ingestion_task.fetch_city_readings_hourly(country=None, trigger=trigger)
+
+        status = worst_status(discovery, stations, cities)
+        logger.info("Full pipeline finished with status=%s", status.value)
+        # Reuse the HTTP mapping of whichever step was worst.
+        worst = next(o for o in (discovery, stations, cities) if o.status is status)
+        return JSONResponse(
+            status_code=worst.http_status(),
+            content={
+                "status": status.value,
+                "message": "Full pipeline completed",
+                "summary": {
+                    "discovery": discovery.to_dict(),
+                    "station_ingestion": stations.to_dict(),
+                    "city_ingestion": cities.to_dict(),
+                },
+                "provenance": describe_provenance(),
+            },
+        )
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("Full pipeline failed: %s", error_msg)

@@ -17,6 +17,7 @@ from app.services.ingestion.iqair_service import (
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import download_manifest_from_gcs
+from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
 from app.core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
 
@@ -109,11 +110,20 @@ class _AsyncRateLimiter:
 class DataIngestionTask:
     """Manifest-driven data ingestion (station endpoint) with backfill from history.pollution."""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient()
         self.db_service = db_service or DatabaseService()
+        # A fresh recorder per run (it buffers per-entity failures).
+        self._recorder_factory = recorder_factory or (
+            lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
+        )
+        # Set per run: run id, report dir, abort signal (provider auth failure stops new fetches).
+        self._run_id: Optional[str] = None
+        self._out_dir: Optional[Path] = None
+        self._abort: Optional[asyncio.Event] = None
+        self._manifest_source: Optional[str] = None
 
         # Concurrency and rate limiting
         self._concurrency = int(s.INGEST_CONCURRENCY)
@@ -136,12 +146,6 @@ class DataIngestionTask:
         # Manifest config (written by station_discovery.py)
         self._manifest_dir = Path(s.STATION_MANIFEST_DIR)
 
-        # Ingest run output
-        ts = datetime.now(timezone.utc).isoformat()
-        self._run_id = f"ingest-{ts}"
-        self._out_dir = Path(s.INGEST_OUT_DIR) / self._run_id
-        self._out_dir.mkdir(parents=True, exist_ok=True)
-
     # --------------------------- manifest loading ---------------------------
 
     def _resolve_latest_manifest_path(self) -> Optional[Path]:
@@ -153,16 +157,21 @@ class DataIngestionTask:
         self._manifest_dir.mkdir(parents=True, exist_ok=True)
         if download_manifest_from_gcs(p_parq, gcs_prefix):
             logger.info("Synced station manifest from GCS → %s", p_parq)
+            self._manifest_source = "gcs"
             return p_parq
         if download_manifest_from_gcs(p_json, gcs_prefix):
             logger.info("Synced station manifest from GCS → %s", p_json)
+            self._manifest_source = "gcs"
             return p_json
 
         # Fall back to local file if GCS unavailable
         if p_parq.exists():
+            self._manifest_source = "local"
             return p_parq
         if p_json.exists():
+            self._manifest_source = "local"
             return p_json
+        self._manifest_source = None
         return None
 
     def _read_parquet(self, path: Path) -> List[Dict[str, Any]]:
@@ -564,34 +573,65 @@ class DataIngestionTask:
 
     # ----------------------------- public API --------------------------------
 
-    async def fetch_station_readings(self) -> Dict[str, Any]:
+    async def fetch_station_readings(self, *, trigger: str = "http") -> RunOutcome:
         """
         Station-only ingestion (optionally city-fallback). Reads stations from manifest,
         or from DB if ALLOW_DB_STATION_FALLBACK=true and no manifest is present.
         Backfills using history.pollution within IQAIR_BACKFILL_HOURS.
-        """
-        logger.info(
-            "Starting station ingestion (manifest mode). concurrency=%d, rate<=%d/min, "
-            "fallback=%s, alias=%s, db_station_fallback=%s",
-            self._concurrency, self._rate, self._allow_city_fallback, self._allow_state_alias, self._db_station_fallback
-        )
 
+        Returns a RunOutcome whose status is success / partial / failed; it never
+        raises for operational failures (the caller maps status to HTTP/exit code).
+        """
+        s = self.settings
+        run_id = new_run_id("ingest-stations")
+        self._run_id = run_id
+        self._out_dir = Path(s.INGEST_OUT_DIR) / run_id
+        self._abort = asyncio.Event()
+        self._manifest_source = None
+        recorder = self._recorder_factory()
+        outcome = RunOutcome(
+            run_id=run_id, task="ingest-stations", provider_code=self._provider_code,
+            scope=",".join(self._countries) if self._countries else "all", trigger=trigger,
+        )
+        outcome.details["config"] = {
+            "rate_limit_per_min": self._rate, "concurrency": self._concurrency,
+            "allow_city_fallback": self._allow_city_fallback, "allow_state_alias": self._allow_state_alias,
+            "db_station_fallback": self._db_station_fallback, "countries": self._countries,
+            "provider_code": self._provider_code, "backfill_hours": self._backfill_hours,
+        }
+        logger.info(
+            "Starting station ingestion run %s (manifest mode). concurrency=%d, rate<=%d/min, "
+            "fallback=%s, alias=%s, db_station_fallback=%s",
+            run_id, self._concurrency, self._rate, self._allow_city_fallback, self._allow_state_alias,
+            self._db_station_fallback,
+        )
+        await recorder.start(outcome)
+        try:
+            await self._run(outcome, recorder)
+        except Exception as exc:
+            logger.exception("Station ingestion run %s crashed", run_id)
+            outcome.fail(type(exc).__name__, str(exc))
+        finally:
+            outcome.finish()
+            await recorder.finish(outcome)
+        c = outcome.counts
+        logger.info("Ingestion run %s %s. expected=%d attempted=%d completed=%d failed=%d skipped=%d "
+                    "rows_fetched=%d rows_written=%d rows_unchanged=%d (out: %s)",
+                    run_id, outcome.status.value, c.expected, c.attempted, c.completed, c.failed, c.skipped,
+                    c.rows_fetched, c.rows_written, c.rows_unchanged, outcome.report_dir)
+        return outcome
+
+    async def _run(self, outcome: RunOutcome, recorder: RunRecorder) -> None:
+        c = outcome.counts
         rows = self._load_manifest()
+        outcome.manifest_source = self._manifest_source
         if (not rows) and self._db_station_fallback:
             rows = await self._list_stations_from_db()
-
-        if not rows:
-            return {
-                "status": "success",
-                "stations_processed": 0,
-                "readings_fetched": 0,
-                "readings_failed": 0,
-                "run_id": self._run_id,
-                "report_dir": str(self._out_dir),
-            }
+            outcome.manifest_source = "db"
+        outcome.manifest_rows = len(rows)
 
         # Filter to active <countries,provider> and dedupe (station_name, city, state, country)
-        country_set = {c.lower() for c in self._countries}
+        country_set = {x.lower() for x in self._countries}
         seen = set()
         stations: List[Dict[str, Any]] = []
         for r in rows:
@@ -609,61 +649,58 @@ class DataIngestionTask:
             seen.add(tup)
             stations.append(r)
 
+        c.expected = len(stations)
+        if not stations:
+            # An empty inventory is a failure, not a success with zero work.
+            outcome.fail("empty_inventory",
+                         f"no stations after filters (manifest rows={len(rows)}, source={outcome.manifest_source})")
+            return
+
         logger.info("Will request station endpoint for %d stations.", len(stations))
+        results = await asyncio.gather(*[self._fetch_one(st) for st in stations], return_exceptions=True)
 
-        tasks = [self._fetch_one(s) for s in stations]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        total_rows, failed = 0, 0
         buf: List[Dict[str, Any]] = []
-        failures: List[Dict[str, Any]] = []
-
         for i, res in enumerate(results):
+            st = stations[i]
             meta = {
-                "source_station_id": stations[i].get("source_station_id"),
-                "station": stations[i].get("iqair_station_name") or stations[i].get("name"),
-                "city": stations[i].get("city"),
-                "state": stations[i].get("state"),
-                "country": stations[i].get("country", ""),
+                "source_station_id": st.get("source_station_id"),
+                "station": st.get("iqair_station_name") or st.get("name"),
+                "city": st.get("city"), "state": st.get("state"), "country": st.get("country", ""),
             }
-            if isinstance(res, Exception):
-                failed += 1
-                failures.append({**meta, "error": f"{type(res).__name__}: {res}"})
+            key = st.get("station_id") or st.get("source_station_id") or f"{meta['country']}|{meta['state']}|{meta['city']}|{meta['station']}"
+            if isinstance(res, RunAborted):
+                c.skipped += 1
+                continue
+            c.attempted += 1
+            if isinstance(res, BaseException):
+                c.failed += 1
+                recorder.add_failure(EntityFailure("station", key, type(res).__name__, str(res)[:500], details=meta))
             elif isinstance(res, list):
                 if res:
                     buf.extend(res)
-                    total_rows += len(res)
+                    c.rows_fetched += len(res)
+                    c.completed += 1
                 else:
-                    failures.append({**meta, "error": "no_points_in_response"})
-                    failed += 1
+                    c.failed += 1
+                    recorder.add_failure(EntityFailure("station", key, "no_points_in_response", "", details=meta))
             else:
-                failures.append({**meta, "error": "unexpected_result_type"})
-                failed += 1
+                c.failed += 1
+                recorder.add_failure(EntityFailure("station", key, "unexpected_result_type", type(res).__name__, details=meta))
 
-        # ---------- NEW: de-dup and drop-existing before bulk write ----------
+        # Write whatever was fetched, even if the run is about to be marked failed.
         if buf:
-            buf = self._dedupe_rows_in_memory(buf)
-            buf = await self._drop_existing_rows(buf)
-            if buf:
-                await self._bulk_write_readings(buf)
-                logger.info("Bulk upserted %d readings after de-dup.", len(buf))
+            deduped = self._dedupe_rows_in_memory(buf)
+            new_rows = await self._drop_existing_rows(deduped)
+            c.rows_unchanged = len(deduped) - len(new_rows)
+            if new_rows:
+                c.rows_written = await self._bulk_write_readings(new_rows)
+                outcome.latest_observation_ts = max(r["ts_utc"] for r in new_rows)
+                logger.info("Bulk upserted %d readings after de-dup.", c.rows_written)
             else:
                 logger.info("Nothing new to upsert after de-dup.")
-        # ---------------------------------------------------------------------
 
-        # write a small report for transparency
-        self._write_report(success_count=total_rows, fail_entries=failures)
-
-        logger.info("Ingestion complete. Stations=%d Rows=%d FailedStations=%d (out: %s)",
-                    len(stations), total_rows, failed, self._out_dir)
-        return {
-            "status": "success",
-            "stations_processed": len(stations),
-            "readings_fetched": total_rows,
-            "readings_failed": failed,
-            "run_id": self._run_id,
-            "report_dir": str(self._out_dir),
-        }
+        if self._abort is not None and self._abort.is_set():
+            outcome.fail("provider_auth", "IQAir rejected the credential (401/403); remaining stations were skipped")
 
     # --------------------------- fetch + write helpers -----------------------
 
@@ -672,7 +709,11 @@ class DataIngestionTask:
         Single station fetch using /v2/station. Optional state-alias retry and city fallback.
         Returns a LIST of upsert rows (history + current) or raises.
         """
+        if self._abort is not None and self._abort.is_set():
+            raise RunAborted("run aborted before fetch")
         async with self._sema:
+            if self._abort is not None and self._abort.is_set():
+                raise RunAborted("run aborted before fetch")
             station_name = s.get("iqair_station_name") or s.get("name")
             city = s.get("city")
             state = s.get("state")
@@ -714,8 +755,14 @@ class DataIngestionTask:
                 except RateLimited as e:
                     logger.warning("Rate limited while fetching station '%s': %s", station_name, e)
                     raise
-                except (Unauthorized, BadRequest) as e:
-                    logger.error("Auth/BadRequest for '%s', %s, %s: %s", station_name, city, state_try, e)
+                except Unauthorized as e:
+                    # The credential is bad for every station: stop launching new fetches.
+                    logger.error("Unauthorized for '%s', %s, %s: %s — aborting run", station_name, city, state_try, e)
+                    if self._abort is not None:
+                        self._abort.set()
+                    raise
+                except BadRequest as e:
+                    logger.error("BadRequest for '%s', %s, %s: %s", station_name, city, state_try, e)
                     raise
                 except IQAirError as e:
                     last_exc = e
@@ -747,43 +794,16 @@ class DataIngestionTask:
                 raise last_exc
             raise StationNotFound(f"Unable to resolve station '{station_name}' in {city}, {state}")
 
-    async def _bulk_write_readings(self, rows: List[Dict[str, Any]]) -> None:
+    async def _bulk_write_readings(self, rows: List[Dict[str, Any]]) -> int:
         try:
             async with AsyncSessionLocal() as sess:
                 n = await self.db_service.upsert_readings_bulk(sess, rows)
                 await sess.commit()
                 logger.info("Upserted %d readings.", n)
+                return int(n or 0)
         except Exception as e:
             logger.error("Bulk write failed: %s", e)
             raise
-
-    def _write_report(self, success_count: int, fail_entries: List[Dict[str, Any]]) -> None:
-        try:
-            self._out_dir.mkdir(parents=True, exist_ok=True)
-            metrics = {
-                "run_id": self._run_id,
-                "started_utc": self._run_id.replace("ingest-", ""),
-                "success_count": success_count,
-                "fail_count": len(fail_entries),
-                "rate_limit_per_min": self._rate,
-                "concurrency": self._concurrency,
-                "allow_city_fallback": self._allow_city_fallback,
-                "allow_state_alias": self._allow_state_alias,
-                "db_station_fallback": self._db_station_fallback,
-                "countries": self._countries,
-                "provider_code": self._provider_code,
-                "backfill_hours": self._backfill_hours,
-            }
-            with open(self._out_dir / "metrics.json", "w", encoding="utf-8") as f:
-                f.write(json.dumps(metrics, indent=2))
-
-            if fail_entries:
-                with open(self._out_dir / "failures.jsonl", "w", encoding="utf-8") as f:
-                    for row in fail_entries:
-                        f.write(json.dumps(row, ensure_ascii=False) + "\n")
-        except Exception as e:
-            logger.warning("Failed writing ingest report: %s", e)
-
 
 # small runner to match run_task.py expectations
 async def station_ingestion():

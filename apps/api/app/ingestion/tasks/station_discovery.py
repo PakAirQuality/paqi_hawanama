@@ -20,6 +20,7 @@ from sqlalchemy import text
 from app.services.ingestion.iqair_service import IQAirClient
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import finalize_union_manifest, upload_manifest_to_gcs
+from app.ingestion.runs import EntityFailure, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
 from app.core.south_asia import get_iqair_countries, get_state_aliases
 
@@ -44,10 +45,13 @@ def _scope_key(country: str, state: str, city: str) -> str:
 class StationDiscoveryTask:
     """Task handler for station discovery operations"""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient()
         self.db_service = db_service or DatabaseService()
+        self._recorder_factory = recorder_factory or (
+            lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
+        )
 
         # Station manifest configuration (directory and format)
         self.manifest_root = Path(s.STATION_MANIFEST_DIR)
@@ -68,7 +72,7 @@ class StationDiscoveryTask:
             logger.warning("pandas not available; switching city manifest format to jsonl")
             self.city_manifest_format = "jsonl"
 
-    async def discover_all_stations_comprehensive(self, country: Optional[str] = None):
+    async def discover_all_stations_comprehensive(self, country: Optional[str] = None, *, trigger: str = "http") -> RunOutcome:
         """
         Comprehensive discovery of ALL monitoring stations across South Asia.
         Follows API hierarchy: countries -> states -> cities -> stations
@@ -76,9 +80,51 @@ class StationDiscoveryTask:
 
         Args:
             country: If provided, limit discovery to this single country.
-                     Takes precedence over DISCOVERY_COUNTRY env var.
+                     Takes precedence over the DISCOVERY_COUNTRY setting.
+
+        Returns a RunOutcome: failed when no country could be processed or no
+        station was discovered; partial when any state/city/country was skipped.
         """
+        run_id = new_run_id("discover")
+        recorder = self._recorder_factory()
+        outcome = RunOutcome(run_id=run_id, task="discover", provider_code="airvisual",
+                             scope=country or self.settings.DISCOVERY_COUNTRY or "all", trigger=trigger)
+        await recorder.start(outcome)
         try:
+            summary = await self._discover(country, run_id)
+            c = outcome.counts
+            c.expected = len(summary["countries"])
+            c.attempted = len(summary["countries"])
+            c.failed = len(summary["countries_failed"])
+            c.completed = c.attempted - c.failed
+            c.rows_fetched = summary["stations_discovered"]
+            c.rows_written = summary["stations_created"] + summary["stations_updated"]
+            outcome.details.update(summary)
+            for st in summary["states_skipped"]:
+                recorder.add_failure(EntityFailure("state", f"{st['country']}|{st['state']}", st.get("reason", "skipped"), "", details=st))
+            for ct in summary["cities_skipped"]:
+                recorder.add_failure(EntityFailure("city", f"{ct['country']}|{ct['state']}|{ct['city']}", ct.get("reason", "skipped"), "", details=ct))
+            for cf in summary["countries_failed"]:
+                recorder.add_failure(EntityFailure("country", cf["country"], cf.get("reason", "failed"), cf.get("message", ""), details=cf))
+            if c.expected == 0:
+                outcome.fail("empty_inventory", "no target countries after filtering")
+            elif c.failed == c.attempted:
+                outcome.fail("all_countries_failed", "every target country failed")
+            elif summary["stations_discovered"] == 0:
+                outcome.fail("no_stations_discovered", "discovery completed but found zero stations")
+            elif summary["states_skipped"] or summary["cities_skipped"] or summary["countries_failed"]:
+                outcome.partial_reason = "entities_skipped"
+        except Exception as exc:
+            logger.exception("Discovery run %s crashed", run_id)
+            outcome.fail(type(exc).__name__, str(exc))
+        finally:
+            outcome.finish()
+            await recorder.finish(outcome)
+        logger.info("Discovery run %s %s: %s", run_id, outcome.status.value, outcome.counts)
+        return outcome
+
+    async def _discover(self, country: Optional[str], progress_id: str) -> Dict[str, Any]:
+        if True:
             countries = get_iqair_countries(self.settings.IQAIR_COUNTRIES)
             logger.info("Starting comprehensive station discovery for %d countries: %s",
                         len(countries), countries)
@@ -91,11 +137,10 @@ class StationDiscoveryTask:
             total_states_processed = 0
             skipped_states: List[Dict[str, Any]] = []
             skipped_cities: List[Dict[str, Any]] = []
+            failed_countries: List[Dict[str, Any]] = []
 
             # Collect rows for manifest
             manifest_rows: List[Dict[str, Any]] = []
-
-            progress_id = f"discovery-{datetime.now(timezone.utc).isoformat()}"
 
             # Optionally limit to a single country — query param takes precedence over env var
             only_country = country or self.settings.DISCOVERY_COUNTRY
@@ -281,6 +326,8 @@ class StationDiscoveryTask:
 
                 except Exception as country_error:
                     logger.error("Discovery for country %s failed: %s", country, country_error)
+                    failed_countries.append({"country": country, "reason": type(country_error).__name__,
+                                             "message": str(country_error)[:500]})
                     # Continue with next country instead of aborting entire run
                     continue
 
@@ -288,8 +335,8 @@ class StationDiscoveryTask:
             completion_time = datetime.now(timezone.utc).isoformat()
             logger.info("Discovery run %s completed at %s", progress_id, completion_time)
             final_summary = {
-                'status': 'success',
                 'countries': countries,
+                'countries_failed': failed_countries,
                 'states_processed': total_states_processed,
                 'cities_processed': total_cities_processed,
                 'stations_discovered': total_stations_discovered,
@@ -307,10 +354,6 @@ class StationDiscoveryTask:
             # ------------------------------------------------------------------
 
             return final_summary
-
-        except Exception as exc:
-            logger.error("Comprehensive station discovery failed: %s", exc)
-            raise
 
     def _write_union_manifest_and_summary(self, run_id: str, rows: List[Dict[str, Any]], summary: Dict[str, Any], cities_successfully_fetched: set) -> None:
         """

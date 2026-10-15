@@ -65,22 +65,22 @@ class AirQualityScheduler:
 
     async def job_discover(self):
         logger.info("🚦 Station discovery: start")
-        summary = await self.discovery.discover_all_stations_comprehensive()
-        logger.info("✅ Station discovery: done | %s", summary)
+        summary = await self.discovery.discover_all_stations_comprehensive(trigger="cli")
+        logger.info("✅ Station discovery: done | %s", summary.to_dict())
         return summary
 
     async def job_ingest_station(self):
         await self._ensure_manifests(need_station=True, need_city=False)
         logger.info("🚦 Station ingestion: start")
-        summary = await self.station_ingest.fetch_station_readings()
-        logger.info("✅ Station ingestion: done | %s", summary)
+        summary = await self.station_ingest.fetch_station_readings(trigger="cli")
+        logger.info("✅ Station ingestion: done | %s", summary.to_dict())
         return summary
 
     async def job_ingest_city(self):
         await self._ensure_manifests(need_station=False, need_city=True)
         logger.info("🚦 City ingestion: start")
-        summary = await self.city_ingest.fetch_city_readings_hourly()
-        logger.info("✅ City ingestion: done | %s", summary)
+        summary = await self.city_ingest.fetch_city_readings_hourly(trigger="cli")
+        logger.info("✅ City ingestion: done | %s", summary.to_dict())
         return summary
 
     # -------------------- manifest guard --------------------
