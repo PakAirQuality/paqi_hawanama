@@ -13,12 +13,18 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from app.core.database import engine as async_engine
+from app.ingestion.reconcile import ReconcilePolicy, ReconcileResult, reconcile_and_upsert_readings
 
 logger = logging.getLogger(__name__)
 
 # expire_on_commit=False matches the previous worker session factory, which the
 # ingestion tasks rely on when reading results after commit.
 AsyncSessionLocal = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
+
+
+# cleanup_payload_json (no current callers) only trims legacy raw blobs above this
+# size and never touches rows that carry provenance.
+RAW_TRIM_THRESHOLD = 4000
 
 
 class DatabaseService:
@@ -214,123 +220,14 @@ class DatabaseService:
             'updated': was_existing
         }
     
-    async def upsert_reading(self, session: AsyncSession, reading_data: Dict[str, Any]) -> None:
-        """Insert or update reading data in new TimescaleDB schema"""
-        from sqlalchemy import text
-        
-        query = text("""
-            INSERT INTO readings (
-                scope_type, scope_key, ts_utc,
-                aqi_us, aqi_cn, main_us, main_cn,
-                pm25, pm10, o3, no2, so2, co,
-                units_pm25, units_pm10, units_o3, units_no2, units_so2, units_co,
-                temp_c, humidity, pressure_hpa, wind_speed_ms, wind_dir_deg,
-                weather_icon, heatindex_c, pop_pct,
-                qc_state, source, raw
-            )
-            VALUES (
-                :scope_type, :scope_key, :ts_utc,
-                :aqi_us, :aqi_cn, :main_us, :main_cn,
-                :pm25, :pm10, :o3, :no2, :so2, :co,
-                :units_pm25, :units_pm10, :units_o3, :units_no2, :units_so2, :units_co,
-                :temp_c, :humidity, :pressure_hpa, :wind_speed_ms, :wind_dir_deg,
-                :weather_icon, :heatindex_c, :pop_pct,
-                :qc_state, :source, :raw
-            )
-            ON CONFLICT (scope_type, scope_key, ts_utc) 
-            DO UPDATE SET 
-                aqi_us = EXCLUDED.aqi_us,
-                aqi_cn = EXCLUDED.aqi_cn,
-                main_us = EXCLUDED.main_us,
-                main_cn = EXCLUDED.main_cn,
-                pm25 = EXCLUDED.pm25,
-                pm10 = EXCLUDED.pm10,
-                o3 = EXCLUDED.o3,
-                no2 = EXCLUDED.no2,
-                so2 = EXCLUDED.so2,
-                co = EXCLUDED.co,
-                units_pm25 = EXCLUDED.units_pm25,
-                units_pm10 = EXCLUDED.units_pm10,
-                units_o3 = EXCLUDED.units_o3,
-                units_no2 = EXCLUDED.units_no2,
-                units_so2 = EXCLUDED.units_so2,
-                units_co = EXCLUDED.units_co,
-                temp_c = EXCLUDED.temp_c,
-                humidity = EXCLUDED.humidity,
-                pressure_hpa = EXCLUDED.pressure_hpa,
-                wind_speed_ms = EXCLUDED.wind_speed_ms,
-                wind_dir_deg = EXCLUDED.wind_dir_deg,
-                weather_icon = EXCLUDED.weather_icon,
-                heatindex_c = EXCLUDED.heatindex_c,
-                pop_pct = EXCLUDED.pop_pct,
-                qc_state = EXCLUDED.qc_state,
-                raw = EXCLUDED.raw
-        """)
-        
-        await session.execute(query, reading_data)
+    async def reconcile_and_upsert_readings(self, session: AsyncSession, rows: List[Dict[str, Any]],
+                                            policy: ReconcilePolicy) -> ReconcileResult:
+        """
+        Field-aware write: fills NULLs, revises changed values, never NULLs a stored
+        value, exact replays are no-ops. See app.ingestion.reconcile. Caller commits.
+        """
+        return await reconcile_and_upsert_readings(session, rows, policy)
 
-    async def upsert_readings_bulk(self, session: AsyncSession, readings_data: List[Dict[str, Any]]) -> int:
-        """Bulk insert/update readings data for better performance"""
-        from sqlalchemy import text
-        
-        if not readings_data:
-            return 0
-        
-        query = text("""
-            INSERT INTO readings (
-                scope_type, scope_key, ts_utc,
-                aqi_us, aqi_cn, main_us, main_cn,
-                pm25, pm10, o3, no2, so2, co,
-                units_pm25, units_pm10, units_o3, units_no2, units_so2, units_co,
-                temp_c, humidity, pressure_hpa, wind_speed_ms, wind_dir_deg,
-                weather_icon, heatindex_c, pop_pct,
-                qc_state, source
-            )
-            VALUES (
-                :scope_type, :scope_key, :ts_utc,
-                :aqi_us, :aqi_cn, :main_us, :main_cn,
-                :pm25, :pm10, :o3, :no2, :so2, :co,
-                :units_pm25, :units_pm10, :units_o3, :units_no2, :units_so2, :units_co,
-                :temp_c, :humidity, :pressure_hpa, :wind_speed_ms, :wind_dir_deg,
-                :weather_icon, :heatindex_c, :pop_pct,
-                :qc_state, :source
-            )
-            ON CONFLICT (scope_type, scope_key, ts_utc) 
-            DO UPDATE SET 
-                aqi_us = EXCLUDED.aqi_us,
-                aqi_cn = EXCLUDED.aqi_cn,
-                main_us = EXCLUDED.main_us,
-                main_cn = EXCLUDED.main_cn,
-                pm25 = EXCLUDED.pm25,
-                pm10 = EXCLUDED.pm10,
-                o3 = EXCLUDED.o3,
-                no2 = EXCLUDED.no2,
-                so2 = EXCLUDED.so2,
-                co = EXCLUDED.co,
-                units_pm25 = EXCLUDED.units_pm25,
-                units_pm10 = EXCLUDED.units_pm10,
-                units_o3 = EXCLUDED.units_o3,
-                units_no2 = EXCLUDED.units_no2,
-                units_so2 = EXCLUDED.units_so2,
-                units_co = EXCLUDED.units_co,
-                temp_c = EXCLUDED.temp_c,
-                humidity = EXCLUDED.humidity,
-                pressure_hpa = EXCLUDED.pressure_hpa,
-                wind_speed_ms = EXCLUDED.wind_speed_ms,
-                wind_dir_deg = EXCLUDED.wind_dir_deg,
-                weather_icon = EXCLUDED.weather_icon,
-                heatindex_c = EXCLUDED.heatindex_c,
-                pop_pct = EXCLUDED.pop_pct,
-                qc_state = EXCLUDED.qc_state
-        """)
-        
-        # For PostgreSQL async, we need to execute individually or use bulk_insert_mappings
-        count = 0
-        for reading in readings_data:
-            await session.execute(query, reading)
-            count += 1
-        return count
-    
     async def get_stations_by_provider(self, session: AsyncSession, provider_code: str, country_name: str = 'Pakistan') -> List[Dict[str, Any]]:
         """Get all stations for a specific provider, filtered by country"""
         from sqlalchemy import text
@@ -376,13 +273,15 @@ class DatabaseService:
         from sqlalchemy import text
         
         # Get count of records with large raw JSON
+        # Rows that carry provenance (raw ? 'prov') are never rewritten here.
         count_query = text("""
             SELECT COUNT(*) as large_payloads
             FROM readings 
-            WHERE LENGTH(raw::text) > 1000
+            WHERE LENGTH(raw::text) > :threshold
+              AND NOT (raw ? 'prov')
         """)        
         
-        result = await session.execute(count_query)
+        result = await session.execute(count_query, {"threshold": RAW_TRIM_THRESHOLD})
         total_large = result.scalar()
         
         if total_large == 0:
@@ -414,10 +313,11 @@ class DatabaseService:
                 'api_version', 'v2',
                 'cleaned_up', NOW()::text
             )
-            WHERE LENGTH(raw::text) > 1000
+            WHERE LENGTH(raw::text) > :threshold
+              AND NOT (raw ? 'prov')
         """)
         
-        await session.execute(cleanup_query)
+        await session.execute(cleanup_query, {"threshold": RAW_TRIM_THRESHOLD})
         await session.commit()
         
         logger.info(f"Successfully cleaned up {total_large} oversized raw JSON records")

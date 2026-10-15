@@ -24,7 +24,7 @@ CREATE TABLE IF NOT EXISTS ops.raw_payloads (
     archived            boolean     NOT NULL DEFAULT false,
     archive_error       text,
     parser_version      text        NOT NULL,
-    run_id              text        REFERENCES ops.ingest_runs(run_id) ON DELETE SET NULL,
+    run_id              text,                            -- no FK: a payload must be indexable even if the run row failed to record
     http_status         smallint,
     size_bytes          integer,
     request_meta        jsonb,                           -- redacted endpoint/params
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS ops.reading_revisions (
     reason          text        NOT NULL DEFAULT 'revised' CHECK (reason IN ('revised','withdrawn')),
     source          text        NOT NULL,
     payload_sha256  char(64),
-    run_id          text        REFERENCES ops.ingest_runs(run_id) ON DELETE SET NULL,
+    run_id          text,                                -- no FK: revisions must never be lost because run accounting degraded
     recorded_at     timestamptz NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS reading_revisions_key_idx ON ops.reading_revisions (scope_type, scope_key, ts_utc);

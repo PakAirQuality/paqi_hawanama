@@ -26,7 +26,7 @@ from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.extract import ExtractStats, normalize_envelope
 from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
 from app.ingestion.raw_archive import RawPayloadArchiver
-from app.ingestion.temporal import norm_hour as _norm_hour
+from app.ingestion.reconcile import ReconcilePolicy, ReconcileResult
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
@@ -368,10 +368,16 @@ class CityIngestionTask:
                 recorder.add_failure(EntityFailure("city", ct["scope_key"], "empty_result", "", details=meta))
 
         if buf:
-            written, unchanged, latest_ts = await self._bulk_write_readings(buf)
-            c.rows_written, c.rows_unchanged = written, unchanged
-            outcome.latest_observation_ts = latest_ts
-            logger.info("Bulk upserted %d city readings (%d unchanged).", written, unchanged)
+            wr = await self._write_rows(buf, outcome.run_id)
+            c.rows_written, c.rows_unchanged = wr.rows_written, wr.rows_unchanged
+            outcome.details["reconcile"] = {
+                "inserted": wr.rows_inserted, "updated": wr.rows_updated, "unchanged": wr.rows_unchanged,
+                "withdrawn_fields": wr.rows_withdrawn_fields, "revisions": wr.revisions_recorded,
+                "revisions_failed": wr.revisions_failed,
+            }
+            outcome.latest_observation_ts = max(r["ts_utc"] for r in buf)
+            logger.info("Reconciled %d city rows: %d inserted, %d updated, %d unchanged.",
+                        wr.rows_in, wr.rows_inserted, wr.rows_updated, wr.rows_unchanged)
 
         outcome.details["extraction"] = self._stats.to_dict()
         if self._abort is not None and self._abort.is_set():
@@ -454,109 +460,14 @@ class CityIngestionTask:
             backfill_hours=int(self.settings.IQAIR_BACKFILL_HOURS), stats=self._stats,
         )
 
-    # ---------- NEW: in-memory deduplication (copied from station worker) ----------
-    def _dedupe_readings_in_memory(self, readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        In-memory deduplication by (scope_key, ts_utc). Merges non-null values when duplicates found.
-        """
-        by_key: Dict[tuple, Dict[str, Any]] = {}
-
-        def merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
-            """Prefer non-null values from b to fill a"""
-            for k, v in b.items():
-                if k in ("scope_type", "scope_key", "ts_utc"):
-                    continue
-                if a.get(k) is None and v is not None:
-                    a[k] = v
-            return a
-
-        for reading in readings:
-            # Normalize timestamp defensively
-            reading["ts_utc"] = _norm_hour(reading["ts_utc"])
-            key = (reading["scope_key"], reading["ts_utc"])
-            if key in by_key:
-                by_key[key] = merge(by_key[key], reading)
-                logger.debug("Merged duplicate reading for %s at %s", reading["scope_key"], reading["ts_utc"])
-            else:
-                by_key[key] = reading
-        
-        logger.info("Deduplication: %d → %d readings", len(readings), len(by_key))
-        return list(by_key.values())
-
-    # ---------- NEW: drop rows that already exist in DB (copied from station worker) ----------
-    async def _drop_existing_readings(self, readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Check database and filter out readings that already exist.
-        """
-        if not readings:
-            return readings
-
-        # Group readings by scope_key for efficient range queries
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
-        for r in readings:
-            grouped.setdefault(r["scope_key"], []).append(r)
-
-        keep: List[Dict[str, Any]] = []
-        from sqlalchemy import text  # import here to avoid global dependency
-        
-        async with AsyncSessionLocal() as sess:
-            for scope_key, grp in grouped.items():
-                # Compute a loose window to minimize roundtrips
-                ts_vals = sorted([_norm_hour(x["ts_utc"]) for x in grp])
-                min_ts, max_ts = ts_vals[0], ts_vals[-1]
-
-                q = text("""
-                    SELECT ts_utc
-                    FROM readings
-                    WHERE scope_key = :scope_key
-                      AND scope_type = 'city'
-                      AND ts_utc >= :min_ts
-                      AND ts_utc <= :max_ts
-                """)
-                rs = await sess.execute(q, {"scope_key": scope_key, "min_ts": min_ts, "max_ts": max_ts})
-                existing = { _norm_hour(row[0].astimezone(timezone.utc)) for row in rs.fetchall() }
-
-                for r in grp:
-                    tsn = _norm_hour(r["ts_utc"])
-                    if tsn not in existing:
-                        keep.append(r)
-                    else:
-                        logger.debug("Skipping existing reading for %s at %s", r["scope_key"], tsn)
-        
-        logger.info("Existence check: %d → %d new readings", len(readings), len(keep))
-        return keep
-    # ---------------------------------------------------------------------------------
-
-    async def _bulk_write_readings(self, rows: List[Dict[str, Any]]):
-        """
-        Apply deduplication and existence filtering before bulk writing to database.
-        Returns (rows_written, rows_unchanged, latest_observation_ts).
-        """
+    async def _write_rows(self, rows: List[Dict[str, Any]], run_id: Optional[str]) -> ReconcileResult:
+        """Field-aware reconcile + commit (replaces dedupe → drop-existing → overwrite upsert)."""
         try:
-            if not rows:
-                logger.info("No readings to write.")
-                return 0, 0, None
-
-            logger.info("Starting bulk write with %d raw readings", len(rows))
-
-            # Apply in-memory deduplication first
-            deduplicated_rows = self._dedupe_readings_in_memory(rows)
-
-            # Filter out readings that already exist in database
-            new_rows = await self._drop_existing_readings(deduplicated_rows)
-            unchanged = len(deduplicated_rows) - len(new_rows)
-
-            if not new_rows:
-                logger.info("No new readings to insert after deduplication and existence check.")
-                return 0, unchanged, None
-
-            # Bulk insert the remaining new readings
             async with AsyncSessionLocal() as sess:
-                n = await self.db_service.upsert_readings_bulk(sess, new_rows)
+                result = await self.db_service.reconcile_and_upsert_readings(
+                    sess, rows, ReconcilePolicy(source="airvisual", run_id=run_id))
                 await sess.commit()
-                logger.info("Successfully upserted %d new city readings.", n)
-            return int(n or 0), unchanged, max(r["ts_utc"] for r in new_rows)
-
+                return result
         except Exception as e:
-            logger.error("Bulk write failed: %s", e)
+            logger.error("Readings write failed: %s", e)
             raise

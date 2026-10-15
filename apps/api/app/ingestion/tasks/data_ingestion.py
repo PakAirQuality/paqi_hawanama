@@ -19,7 +19,7 @@ from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.extract import ExtractStats, normalize_envelope
 from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
 from app.ingestion.raw_archive import RawPayloadArchiver
-from app.ingestion.temporal import norm_hour as _norm_hour
+from app.ingestion.reconcile import ReconcilePolicy, ReconcileResult
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
@@ -226,65 +226,6 @@ class DataIngestionTask:
             ]
             return "|".join([p for p in parts if p])
 
-    # ---------- NEW: in-run de-dup ----------
-    def _dedupe_rows_in_memory(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        by_key: Dict[tuple, Dict[str, Any]] = {}
-
-        def merge(a: Dict[str, Any], b: Dict[str, Any]) -> Dict[str, Any]:
-            # prefer non-null values from b to fill a
-            for k, v in b.items():
-                if k in ("scope_type", "scope_key", "ts_utc"):
-                    continue
-                if a.get(k) is None and v is not None:
-                    a[k] = v
-            return a
-
-        for r in rows:
-            # normalize defensively
-            r["ts_utc"] = _norm_hour(r["ts_utc"].astimezone(timezone.utc))
-            key = (r["scope_key"], r["ts_utc"])
-            if key in by_key:
-                by_key[key] = merge(by_key[key], r)
-            else:
-                by_key[key] = r
-        return list(by_key.values())
-    # ----------------------------------------
-
-    # ---------- NEW: drop rows that already exist in DB ----------
-    async def _drop_existing_rows(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        if not rows:
-            return rows
-
-        # Group rows by scope_key for efficient range queries
-        grouped: Dict[str, List[Dict[str, Any]]] = {}
-        for r in rows:
-            grouped.setdefault(r["scope_key"], []).append(r)
-
-        keep: List[Dict[str, Any]] = []
-        from sqlalchemy import text  # import here to avoid global dependency
-        async with AsyncSessionLocal() as sess:
-            for scope_key, grp in grouped.items():
-                # compute a loose window to minimize roundtrips
-                ts_vals = sorted([_norm_hour(x["ts_utc"]) for x in grp])
-                min_ts, max_ts = ts_vals[0], ts_vals[-1]
-
-                q = text("""
-                    SELECT ts_utc
-                    FROM readings
-                    WHERE scope_key = :scope_key
-                      AND ts_utc >= :min_ts
-                      AND ts_utc <= :max_ts
-                """)
-                rs = await sess.execute(q, {"scope_key": scope_key, "min_ts": min_ts, "max_ts": max_ts})
-                existing = { _norm_hour(row[0].astimezone(timezone.utc)) for row in rs.fetchall() }
-
-                for r in grp:
-                    tsn = _norm_hour(r["ts_utc"])
-                    if tsn not in existing:
-                        keep.append(r)
-        return keep
-    # -------------------------------------------------------------
-
     # ----------------------------- public API --------------------------------
 
     async def fetch_station_readings(self, *, trigger: str = "http") -> RunOutcome:
@@ -423,15 +364,16 @@ class DataIngestionTask:
 
         # Write whatever was fetched, even if the run is about to be marked failed.
         if buf:
-            deduped = self._dedupe_rows_in_memory(buf)
-            new_rows = await self._drop_existing_rows(deduped)
-            c.rows_unchanged = len(deduped) - len(new_rows)
-            if new_rows:
-                c.rows_written = await self._bulk_write_readings(new_rows)
-                outcome.latest_observation_ts = max(r["ts_utc"] for r in new_rows)
-                logger.info("Bulk upserted %d readings after de-dup.", c.rows_written)
-            else:
-                logger.info("Nothing new to upsert after de-dup.")
+            wr = await self._write_rows(buf, outcome.run_id)
+            c.rows_written, c.rows_unchanged = wr.rows_written, wr.rows_unchanged
+            outcome.details["reconcile"] = {
+                "inserted": wr.rows_inserted, "updated": wr.rows_updated, "unchanged": wr.rows_unchanged,
+                "withdrawn_fields": wr.rows_withdrawn_fields, "revisions": wr.revisions_recorded,
+                "revisions_failed": wr.revisions_failed,
+            }
+            outcome.latest_observation_ts = max(r["ts_utc"] for r in buf)
+            logger.info("Reconciled %d rows: %d inserted, %d updated, %d unchanged, %d revisions.",
+                        wr.rows_in, wr.rows_inserted, wr.rows_updated, wr.rows_unchanged, wr.revisions_recorded)
 
         outcome.details["extraction"] = self._stats.to_dict()
         if self._abort is not None and self._abort.is_set():
@@ -528,15 +470,16 @@ class DataIngestionTask:
                 raise last_exc
             raise StationNotFound(f"Unable to resolve station '{station_name}' in {city}, {state}")
 
-    async def _bulk_write_readings(self, rows: List[Dict[str, Any]]) -> int:
+    async def _write_rows(self, rows: List[Dict[str, Any]], run_id: Optional[str]) -> ReconcileResult:
+        """Field-aware reconcile + commit (replaces dedupe → drop-existing → overwrite upsert)."""
         try:
             async with AsyncSessionLocal() as sess:
-                n = await self.db_service.upsert_readings_bulk(sess, rows)
+                result = await self.db_service.reconcile_and_upsert_readings(
+                    sess, rows, ReconcilePolicy(source=self._provider_code, run_id=run_id))
                 await sess.commit()
-                logger.info("Upserted %d readings.", n)
-                return int(n or 0)
+                return result
         except Exception as e:
-            logger.error("Bulk write failed: %s", e)
+            logger.error("Readings write failed: %s", e)
             raise
 
 # small runner to match run_task.py expectations

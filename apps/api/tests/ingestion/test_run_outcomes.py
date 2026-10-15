@@ -17,7 +17,7 @@ from app.ingestion.raw_archive import NullArchiver
 from app.services.ingestion.iqair_service import IQAirError, StationNotFound, Unauthorized
 
 from tests.ingestion.fakes import (CapturingRecorder, FakeDatabaseService, FakeIQAirClient, FakeLeases, FakeSessionFactory,
-                                   city_row, identity_drop_existing, iqair_payload, make_settings,
+                                   city_row, iqair_payload, make_settings,
                                    station_row, write_city_manifest, write_station_manifest)
 
 
@@ -125,7 +125,6 @@ def _station_task(tmp_path, script, rows, monkeypatch, **settings_overrides):
     rec = CapturingRecorder(Path(s.INGEST_OUT_DIR))
     t = DataIngestionTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
                           recorder_factory=lambda: rec, leases=FakeLeases(), archiver=NullArchiver())
-    monkeypatch.setattr(DataIngestionTask, "_drop_existing_rows", identity_drop_existing)
     return t, rec
 
 
@@ -153,18 +152,20 @@ async def test_partial_when_some_fail(tmp_path, monkeypatch):
     assert c.rows_fetched == 2 and c.rows_written == 2 and c.rows_unchanged == 0
     assert o.latest_observation_ts is not None and o.observation_lag_s is not None
     assert len(t.db_service.written) == 2
+    assert t.db_service.policies[0].source == "airvisual" and t.db_service.policies[0].run_id == o.run_id
+    w = t.db_service.written[0]
+    assert w["qc_state"] == "raw" and w["raw"]["prov"]["tsp"] == "iqair_station_v1" and w["raw"]["prov"]["run"] == o.run_id
+    assert o.details["extraction"]["rejected"] == {}
 
 
 async def test_success_counts_unchanged_rows(tmp_path, monkeypatch):
     rows = [station_row(i) for i in range(2)]
     t, rec = _station_task(tmp_path, {"*": iqair_payload()}, rows, monkeypatch)
-
-    async def drop_all(self, rows):
-        return []
-    monkeypatch.setattr(DataIngestionTask, "_drop_existing_rows", drop_all)
+    t.db_service.unchanged_all = True            # exact replay: reconcile touches nothing
     o = await t.fetch_station_readings()
     assert o.status is RunStatus.success
     assert o.counts.rows_written == 0 and o.counts.rows_unchanged == 2
+    assert o.details["reconcile"]["unchanged"] == 2
 
 
 async def test_empty_inventory_is_failed_not_success(tmp_path, monkeypatch):
@@ -206,9 +207,9 @@ async def test_unexpected_exception_is_failed_and_recorded(tmp_path, monkeypatch
     rows = [station_row(0)]
     t, rec = _station_task(tmp_path, {"*": iqair_payload()}, rows, monkeypatch)
 
-    async def boom(self, rows):
+    async def boom(self, rows, run_id):
         raise RuntimeError("db exploded")
-    monkeypatch.setattr(DataIngestionTask, "_bulk_write_readings", boom)
+    monkeypatch.setattr(DataIngestionTask, "_write_rows", boom)
     o = await t.fetch_station_readings()
     assert o.status is RunStatus.failed and o.error_class == "RuntimeError"
     assert rec.finished is o
@@ -287,10 +288,6 @@ def _city_task(tmp_path, script, rows, monkeypatch):
     rec = CapturingRecorder(Path(s.INGEST_OUT_DIR))
     t = CityIngestionTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
                           recorder_factory=lambda: rec, leases=FakeLeases(), archiver=NullArchiver())
-
-    async def no_drop(self, rows):
-        return rows
-    monkeypatch.setattr(CityIngestionTask, "_drop_existing_readings", no_drop)
     return t, rec
 
 

@@ -150,9 +150,16 @@ class FakeDatabaseService:
         import hashlib
         return hashlib.sha1(f"{country}|{state}|{city}|{name}|{lat:.6f}|{lon:.6f}".encode()).hexdigest()[:16]
 
-    async def upsert_readings_bulk(self, session, rows):
-        self.written.extend(rows)
-        return len(rows)
+    unchanged_all = False   # tests flip this to simulate an exact replay
+
+    async def reconcile_and_upsert_readings(self, session, rows, policy):
+        from app.ingestion.reconcile import ReconcileResult, dedupe_rows
+        deduped = dedupe_rows(rows)
+        self.policies = getattr(self, "policies", []) + [policy]
+        if self.unchanged_all:
+            return ReconcileResult(rows_in=len(rows), rows_unchanged=len(deduped))
+        self.written.extend(deduped)
+        return ReconcileResult(rows_in=len(rows), rows_inserted=len(deduped))
 
     async def upsert_country(self, session, data): return 1
     async def upsert_state(self, session, data): return 2
@@ -217,10 +224,6 @@ class CapturingRecorder(RunRecorder):
     async def finish(self, outcome):
         await super().finish(outcome)
         self.finished = outcome
-
-
-async def identity_drop_existing(self, rows):
-    return rows
 
 
 class FakeLeases:
