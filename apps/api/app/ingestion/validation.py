@@ -37,13 +37,22 @@ WEATHER_FIELDS = ("temp_c", "humidity", "pressure_hpa", "wind_speed_ms", "wind_d
                   "dewpoint_c", "visibility_km", "uv_index", "pop_pct")
 NUMERIC_FIELDS = POLLUTANT_FIELDS + AQI_FIELDS + WEATHER_FIELDS
 
+# Only a flag on a field the site and the exports actually show makes the whole row INVALID
+# (the map/popup QC gate hides INVALID rows). A flag on any other field quarantines that
+# field (value -> NULL, flag kept in qc_flags / raw.prov.q) but leaves the row 'raw'.
+# Lesson from the 2026-10-15 rollout: a CO bound in the wrong unit flagged 26k rows and
+# removed 316 stations from the map although their PM2.5 was fine.
+PRIMARY_FIELDS = frozenset({"pm25", "aqi_us"})
+
 # Fields that cannot be negative. Temperatures, dew point and heat index can.
 NON_NEGATIVE = frozenset(POLLUTANT_FIELDS + AQI_FIELDS + ("humidity", "pressure_hpa", "wind_speed_ms",
                                                           "wind_dir_deg", "visibility_km", "uv_index", "pop_pct"))
 
 # Generous physical plausibility bounds (anything beyond is a sensor/encoding fault, not air).
 PLAUSIBLE_MAX: Dict[str, float] = {
-    "pm25": 2000.0, "pm10": 5000.0, "o3": 1000.0, "no2": 2000.0, "so2": 2000.0, "co": 100.0,
+    # No upper bound for CO: IQAir reports it in an unattested unit (values up to ~10,000 seen);
+    # a ppm-scale bound flagged almost every row. Only finite/non-negative is checked.
+    "pm25": 2000.0, "pm10": 5000.0, "o3": 1000.0, "no2": 2000.0, "so2": 2000.0,
     "aqi_us": 5000.0, "aqi_cn": 1000.0,
     "temp_c": 80.0, "humidity": 100.0, "pressure_hpa": 1100.0, "wind_speed_ms": 150.0, "wind_dir_deg": 360.0,
     "heatindex_c": 100.0, "dewpoint_c": 60.0, "visibility_km": 500.0, "uv_index": 25.0, "pop_pct": 100.0,
@@ -123,8 +132,13 @@ def validate_reading(row: Dict[str, Any], *, now: Optional[datetime] = None,
     r["_present"] = present
     r["qc_flags"] = sorted(set(out.flags))
     # Raw ingest never produces a curated state.
-    r["qc_state"] = QC_INVALID if out.flags else QC_RAW
+    r["qc_state"] = state_for_flags(out.flags)
     return out
+
+
+def state_for_flags(flags: Iterable[str]) -> str:
+    """INVALID only when a validation flag names a primary field; otherwise 'raw' (flags are still kept)."""
+    return QC_INVALID if any(is_validation_flag(f) and _flag_field(f) in PRIMARY_FIELDS for f in flags) else QC_RAW
 
 
 def is_validation_flag(flag: str) -> bool:
@@ -143,11 +157,13 @@ def merge_qc(existing_state: Optional[str], existing_flags: Optional[Iterable[st
     """
     Decide the stored qc_state/qc_flags when an incoming raw row meets an existing row.
 
-      1. existing is curated (OK/SUSPECT)  → keep it; flags = existing ∪ incoming
-      2. incoming has validation flags       → INVALID; flags = existing ∪ incoming
-      3. existing INVALID with only v: flags → drop flags for fields the incoming row now
-                                               supplies validly; if none remain → raw
-      4. otherwise                           → raw
+      1. existing is curated (OK/SUSPECT)      → keep it; flags = existing ∪ incoming
+      2. existing INVALID by something other than
+         raw validation (e.g. BAM QC)          → leave it alone (flags = existing ∪ incoming)
+      3. otherwise: existing validation flags for fields the incoming row now supplies validly
+         are dropped (the row heals), incoming flags are added, and the state is INVALID only
+         when a remaining flag names a primary field (pm25 / aqi_us); else 'raw' with the
+         remaining flags kept for the record.
     """
     ex_flags = set(existing_flags or [])
     in_flags = set(incoming_flags or [])
@@ -155,12 +171,7 @@ def merge_qc(existing_state: Optional[str], existing_flags: Optional[Iterable[st
 
     if existing_state in CURATED_STATES:
         return existing_state, sorted(ex_flags | in_flags)
-    if in_flags:
+    if existing_state == QC_INVALID and ex_flags and not all(is_validation_flag(f) for f in ex_flags):
         return QC_INVALID, sorted(ex_flags | in_flags)
-    if existing_state == QC_INVALID:
-        if ex_flags and all(is_validation_flag(f) for f in ex_flags):
-            remaining = {f for f in ex_flags if _flag_field(f) not in present}
-            return (QC_INVALID, sorted(remaining)) if remaining else (QC_RAW, [])
-        # INVALID set by something other than raw validation (e.g. BAM QC): leave it alone.
-        return QC_INVALID, sorted(ex_flags)
-    return QC_RAW, []
+    remaining = {f for f in ex_flags if not (is_validation_flag(f) and _flag_field(f) in present)} | in_flags
+    return state_for_flags(remaining), sorted(remaining)

@@ -36,7 +36,9 @@ def test_bad_values_are_quarantined(field, value, reason):
     assert out.row[field] is None
     assert field in out.quarantined and (out.quarantined[field] != out.quarantined[field]  # NaN
                                          or out.quarantined[field] == value)
-    assert out.row["qc_state"] == QC_INVALID and field not in out.row["_present"]
+    # only a flag on a primary field (pm25 / aqi_us) invalidates the row; others just quarantine the field
+    expected_state = QC_INVALID if field in ("pm25", "aqi_us") else QC_RAW
+    assert out.row["qc_state"] == expected_state and field not in out.row["_present"]
 
 
 def test_negative_temperature_is_fine():
@@ -73,15 +75,26 @@ def test_curated_state_is_never_downgraded():
     assert merge_qc(QC_SUSPECT, [], [], {"pm25"}) == (QC_SUSPECT, [])
 
 
-def test_incoming_flags_make_invalid():
+def test_incoming_flags_make_invalid_only_for_primary_fields():
     assert merge_qc(QC_RAW, [], ["v:pm25:negative"], set()) == (QC_INVALID, ["v:pm25:negative"])
-    assert merge_qc(None, None, ["v:pm10:above_max"], {"pm25"}) == (QC_INVALID, ["v:pm10:above_max"])
+    assert merge_qc(None, None, ["v:aqi_us:negative"], {"pm25"}) == (QC_INVALID, ["v:aqi_us:negative"])
+    # a secondary-field flag is recorded but keeps the row visible ('raw')
+    assert merge_qc(None, None, ["v:pm10:above_max"], {"pm25"}) == (QC_RAW, ["v:pm10:above_max"])
+    assert merge_qc(QC_RAW, ["v:co:above_max"], ["v:pressure_hpa:above_max"], {"pm25", "co"}) == (QC_RAW, ["v:pressure_hpa:above_max"])
+
+
+def test_co_has_no_upper_bound_until_units_are_attested():
+    out = validate_reading(_row(co=9606), now=NOW, cutoff=CUTOFF)
+    assert out.flags == [] and out.row["co"] == 9606 and out.row["qc_state"] == QC_RAW
 
 
 def test_invalid_heals_when_corrected_replay_supplies_valid_values():
     assert merge_qc(QC_INVALID, ["v:pm25:negative"], [], {"pm25"}) == (QC_RAW, [])
-    # only one of two flagged fields corrected → still INVALID with the other flag
-    assert merge_qc(QC_INVALID, ["v:pm25:negative", "v:pm10:above_max"], [], {"pm25"}) == (QC_INVALID, ["v:pm10:above_max"])
+    # only the primary flag corrected → row heals to 'raw'; the secondary flag stays on record
+    assert merge_qc(QC_INVALID, ["v:pm25:negative", "v:pm10:above_max"], [], {"pm25"}) == (QC_RAW, ["v:pm10:above_max"])
+    assert merge_qc(QC_INVALID, ["v:pm25:negative", "v:aqi_us:negative"], [], {"pm25"}) == (QC_INVALID, ["v:aqi_us:negative"])
+    # rows the 2026-10-15 run flagged on CO only heal as soon as CO is supplied again
+    assert merge_qc(QC_INVALID, ["v:co:above_max"], [], {"pm25", "co"}) == (QC_RAW, [])
     # incoming does not mention the flagged field → unchanged
     assert merge_qc(QC_INVALID, ["v:pm25:negative"], [], {"temp_c"}) == (QC_INVALID, ["v:pm25:negative"])
 
