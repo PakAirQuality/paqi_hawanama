@@ -17,6 +17,7 @@ from app.services.ingestion.iqair_service import (
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import download_manifest_from_gcs
+from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
@@ -89,7 +90,7 @@ STATION_FALLBACK_SQL = """
 class DataIngestionTask:
     """Manifest-driven data ingestion (station endpoint) with backfill from history.pollution."""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient(
@@ -99,6 +100,7 @@ class DataIngestionTask:
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
+        self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
         # Set per run: run id, report dir, abort signal (provider auth failure stops new fetches).
         self._run_id: Optional[str] = None
         self._out_dir: Optional[Path] = None
@@ -583,14 +585,23 @@ class DataIngestionTask:
             self._db_station_fallback,
         )
         await recorder.start(outcome)
+        lease = None
         try:
-            await self._run(outcome, recorder)
+            lease = await self._leases.acquire(lease_key_for("ingest-stations", self._provider_code, outcome.scope),
+                                               holder_id(run_id), int(s.INGEST_LEASE_TTL_S))
+            if lease is None:
+                # Another instance (or a scheduler retry of a live run) holds it: a visible no-op, not a duplicate.
+                outcome.skip("lease_held", "another ingest-stations run holds the lease")
+            else:
+                outcome.lease_key, outcome.lease_fence = lease.lease_key, lease.fence
+                await self._run(outcome, recorder)
         except Exception as exc:
             logger.exception("Station ingestion run %s crashed", run_id)
             outcome.fail(type(exc).__name__, str(exc))
         finally:
             outcome.finish()
             await recorder.finish(outcome)
+            await self._leases.release(lease)
         c = outcome.counts
         logger.info("Ingestion run %s %s. expected=%d attempted=%d completed=%d failed=%d skipped=%d "
                     "rows_fetched=%d rows_written=%d rows_unchanged=%d (out: %s)",

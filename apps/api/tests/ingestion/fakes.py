@@ -203,3 +203,23 @@ class CapturingRecorder(RunRecorder):
 
 async def identity_drop_existing(self, rows):
     return rows
+
+
+class FakeLeases:
+    """Grants unless deny=True; records acquire/release calls."""
+
+    def __init__(self, deny: bool = False):
+        self.deny = deny
+        self.acquired: List[Any] = []
+        self.released: List[Any] = []
+
+    async def acquire(self, lease_key, holder, ttl_s):
+        from app.ingestion.leases import Lease
+        from datetime import timedelta
+        self.acquired.append((lease_key, holder, ttl_s))
+        if self.deny:
+            return None
+        return Lease(lease_key, holder, 42, datetime.now(timezone.utc) + timedelta(seconds=ttl_s))
+
+    async def release(self, lease):
+        self.released.append(lease)

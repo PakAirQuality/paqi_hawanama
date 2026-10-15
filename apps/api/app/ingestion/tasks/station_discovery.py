@@ -20,6 +20,7 @@ from sqlalchemy import text
 from app.services.ingestion.iqair_service import IQAirClient
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import finalize_union_manifest, upload_manifest_to_gcs
+from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
@@ -43,10 +44,14 @@ def _slug(*parts):
 def _scope_key(country: str, state: str, city: str) -> str:
     return f"{country.lower()}|{state.lower()}|{city.lower()}"
 
+
+class _Skipped(Exception):
+    """Internal control flow: the run was skipped before doing any work."""
+
 class StationDiscoveryTask:
     """Task handler for station discovery operations"""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None):
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient(
             settings=s, quota=PostgresQuota(AsyncSessionLocal, required=bool(s.OPS_TABLES_REQUIRED)))
@@ -54,6 +59,7 @@ class StationDiscoveryTask:
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
+        self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
 
         # Station manifest configuration (directory and format)
         self.manifest_root = Path(s.STATION_MANIFEST_DIR)
@@ -92,7 +98,14 @@ class StationDiscoveryTask:
         outcome = RunOutcome(run_id=run_id, task="discover", provider_code="airvisual",
                              scope=country or self.settings.DISCOVERY_COUNTRY or "all", trigger=trigger)
         await recorder.start(outcome)
+        lease = None
         try:
+            lease = await self._leases.acquire(lease_key_for("discover", "airvisual", outcome.scope),
+                                               holder_id(run_id), int(self.settings.INGEST_LEASE_TTL_S))
+            if lease is None:
+                outcome.skip("lease_held", "another discovery run holds the lease")
+                raise _Skipped()
+            outcome.lease_key, outcome.lease_fence = lease.lease_key, lease.fence
             quota = getattr(self.iqair_client, "quota", None)
             if quota is not None:
                 await quota.healthcheck()
@@ -119,6 +132,8 @@ class StationDiscoveryTask:
                 outcome.fail("no_stations_discovered", "discovery completed but found zero stations")
             elif summary["states_skipped"] or summary["cities_skipped"] or summary["countries_failed"]:
                 outcome.partial_reason = "entities_skipped"
+        except _Skipped:
+            pass
         except QuotaUnavailable as exc:
             outcome.fail("quota_unavailable", str(exc))
         except Exception as exc:
@@ -127,6 +142,7 @@ class StationDiscoveryTask:
         finally:
             outcome.finish()
             await recorder.finish(outcome)
+            await self._leases.release(lease)
         logger.info("Discovery run %s %s: %s", run_id, outcome.status.value, outcome.counts)
         return outcome
 

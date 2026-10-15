@@ -15,7 +15,7 @@ from app.ingestion.tasks.city_ingest import CityIngestionTask
 from app.ingestion.tasks.station_discovery import StationDiscoveryTask
 from app.services.ingestion.iqair_service import IQAirError, StationNotFound, Unauthorized
 
-from tests.ingestion.fakes import (CapturingRecorder, FakeDatabaseService, FakeIQAirClient, FakeSessionFactory,
+from tests.ingestion.fakes import (CapturingRecorder, FakeDatabaseService, FakeIQAirClient, FakeLeases, FakeSessionFactory,
                                    city_row, identity_drop_existing, iqair_payload, make_settings,
                                    station_row, write_city_manifest, write_station_manifest)
 
@@ -123,7 +123,7 @@ def _station_task(tmp_path, script, rows, monkeypatch, **settings_overrides):
     write_station_manifest(s, rows)
     rec = CapturingRecorder(Path(s.INGEST_OUT_DIR))
     t = DataIngestionTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
-                          recorder_factory=lambda: rec)
+                          recorder_factory=lambda: rec, leases=FakeLeases())
     monkeypatch.setattr(DataIngestionTask, "_drop_existing_rows", identity_drop_existing)
     return t, rec
 
@@ -241,6 +241,37 @@ async def test_discovery_quota_unavailable_fails_run(tmp_path, monkeypatch):
     assert o.status is RunStatus.failed and o.error_class == "quota_unavailable" and t.iqair_client.calls == []
 
 
+async def test_lease_held_is_skipped_with_200(tmp_path, monkeypatch):
+    t, rec = _station_task(tmp_path, {"*": iqair_payload()}, [station_row(0)], monkeypatch)
+    t._leases = FakeLeases(deny=True)
+    o = await t.fetch_station_readings()
+    assert o.status is RunStatus.skipped and o.error_class == "lease_held" and o.http_status() == 200
+    assert t.iqair_client.calls == [] and t._leases.released == [None]
+    assert rec.finished is o
+
+
+async def test_lease_is_recorded_and_released(tmp_path, monkeypatch):
+    t, rec = _station_task(tmp_path, {"*": iqair_payload()}, [station_row(0)], monkeypatch)
+    o = await t.fetch_station_readings()
+    assert o.lease_key == "ingest-stations:airvisual:Pakistan" and o.lease_fence == 42
+    assert len(t._leases.released) == 1 and t._leases.released[0].fence == 42
+    assert t._leases.acquired[0][2] == t.settings.INGEST_LEASE_TTL_S
+
+
+async def test_city_lease_held_is_skipped(tmp_path, monkeypatch):
+    t, rec = _city_task(tmp_path, {"*": iqair_payload()}, [city_row(0)], monkeypatch)
+    t._leases = FakeLeases(deny=True)
+    o = await t.fetch_city_readings_hourly()
+    assert o.status is RunStatus.skipped and t.iqair_client.calls == []
+
+
+async def test_discovery_lease_held_is_skipped(tmp_path, monkeypatch):
+    t, rec = _discovery(tmp_path, {"states:Pakistan": [{"state": "Punjab"}]}, monkeypatch, countries="Pakistan")
+    t._leases = FakeLeases(deny=True)
+    o = await t.discover_all_stations_comprehensive()
+    assert o.status is RunStatus.skipped and o.error_class == "lease_held" and t.iqair_client.calls == []
+
+
 async def test_trigger_is_recorded(tmp_path, monkeypatch):
     t, rec = _station_task(tmp_path, {"*": iqair_payload()}, [station_row(0)], monkeypatch)
     o = await t.fetch_station_readings(trigger="scheduler")
@@ -254,7 +285,7 @@ def _city_task(tmp_path, script, rows, monkeypatch):
     write_city_manifest(s, rows)
     rec = CapturingRecorder(Path(s.INGEST_OUT_DIR))
     t = CityIngestionTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
-                          recorder_factory=lambda: rec)
+                          recorder_factory=lambda: rec, leases=FakeLeases())
 
     async def no_drop(self, rows):
         return rows
@@ -299,7 +330,7 @@ def _discovery(tmp_path, script, monkeypatch, countries="Pakistan,India"):
     monkeypatch.setattr(sd, "AsyncSessionLocal", FakeSessionFactory())
     monkeypatch.setattr(sd.asyncio, "sleep", _nosleep)
     t = StationDiscoveryTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
-                             recorder_factory=lambda: rec)
+                             recorder_factory=lambda: rec, leases=FakeLeases())
     return t, rec
 
 

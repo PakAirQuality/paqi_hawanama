@@ -24,6 +24,7 @@ from collections import defaultdict
 from app.services.ingestion.iqair_service import IQAirClient, Unauthorized
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.manifests import ensure_latest_from_gcs
+from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
@@ -86,7 +87,7 @@ CITY_FALLBACK_SQL = """
 class CityIngestionTask:
     """Manifest-driven city-level ingestion (IQAir /v2/city)."""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient(
@@ -95,6 +96,7 @@ class CityIngestionTask:
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
+        self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
         self._run_id: Optional[str] = None
         self._out_dir: Optional[Path] = None
         self._abort: Optional[asyncio.Event] = None
@@ -283,14 +285,22 @@ class CityIngestionTask:
             self._allow_nearest_fallback, self._db_city_fallback,
         )
         await recorder.start(outcome)
+        lease = None
         try:
-            await self._run(outcome, recorder, target_countries)
+            lease = await self._leases.acquire(lease_key_for("ingest-cities", "airvisual", outcome.scope),
+                                               holder_id(run_id), int(s.INGEST_LEASE_TTL_S))
+            if lease is None:
+                outcome.skip("lease_held", "another ingest-cities run holds the lease")
+            else:
+                outcome.lease_key, outcome.lease_fence = lease.lease_key, lease.fence
+                await self._run(outcome, recorder, target_countries)
         except Exception as exc:
             logger.exception("City ingestion run %s crashed", run_id)
             outcome.fail(type(exc).__name__, str(exc))
         finally:
             outcome.finish()
             await recorder.finish(outcome)
+            await self._leases.release(lease)
         c = outcome.counts
         logger.info("City ingestion run %s %s. expected=%d attempted=%d completed=%d failed=%d skipped=%d "
                     "rows_fetched=%d rows_written=%d rows_unchanged=%d (out: %s)",
