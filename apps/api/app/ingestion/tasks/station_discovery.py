@@ -17,15 +17,10 @@ from collections import defaultdict
 
 from sqlalchemy import text
 
-# Dual-path imports for API container compatibility
-try:
-    from app.services.ingestion.iqair_service import IQAirClient
-    from app.services.database import DatabaseService, AsyncSessionLocal
-    from app.manifest_utils import finalize_union_manifest, upload_manifest_to_gcs
-except ImportError:  # running in pure worker repo layout
-    from services.iqair_client import IQAirClient
-    from services.database import DatabaseService, AsyncSessionLocal
-    from manifest_utils import finalize_union_manifest, upload_manifest_to_gcs
+from app.services.ingestion.iqair_service import IQAirClient
+from app.ingestion.db import DatabaseService, AsyncSessionLocal
+from app.ingestion.manifests import finalize_union_manifest, upload_manifest_to_gcs
+from app.core.south_asia import get_iqair_countries, get_state_aliases
 
 logger = logging.getLogger(__name__)
 
@@ -36,11 +31,6 @@ try:
 except Exception:  # pragma: no cover
     pd = None
     _HAVE_PANDAS = False
-
-try:
-    from app.core.south_asia import get_iqair_countries, get_state_aliases
-except ImportError:
-    from core.south_asia import get_iqair_countries, get_state_aliases
 
 def _slug(*parts):
     s = "|".join((p or "").strip().replace("'","'") for p in parts)

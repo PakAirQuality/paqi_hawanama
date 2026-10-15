@@ -1,40 +1,30 @@
-from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, Float, DateTime, JSON, ForeignKey, Text
-from sqlalchemy.orm import sessionmaker, declarative_base
-from sqlalchemy.dialects.postgresql import insert
-from geoalchemy2 import Geometry
-# Dual-path imports for API container compatibility
-try:
-    from app.config.settings import get_settings
-    settings = get_settings()
-except ImportError:  # running in pure worker repo layout
-    from config.settings import settings
+"""
+Database service for ingestion: geo hierarchy and station upserts, readings writes.
+
+Shares the application's async engine (app.core.database) instead of building a
+second one; the previous worker copy also created an unused sync engine.
+"""
+
 from typing import Dict, List, Any, Optional
-import asyncio
 import json
 import logging
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import sessionmaker
+
+from app.core.database import engine as async_engine
 
 logger = logging.getLogger(__name__)
 
-# Create engines
-sync_engine = create_engine(settings.SYNC_DATABASE_URL)
-async_engine = create_async_engine(settings.DATABASE_URL)
-
-# Session makers
-SyncSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=sync_engine)
+# expire_on_commit=False matches the previous worker session factory, which the
+# ingestion tasks rely on when reading results after commit.
 AsyncSessionLocal = sessionmaker(async_engine, class_=AsyncSession, expire_on_commit=False)
 
-Base = declarative_base()
 
 class DatabaseService:
     def __init__(self):
-        self.sync_engine = sync_engine
         self.async_engine = async_engine
-    
-    def get_sync_session(self):
-        """Get synchronous database session"""
-        return SyncSessionLocal()
-    
+
     async def get_async_session(self):
         """Get asynchronous database session"""
         return AsyncSessionLocal()

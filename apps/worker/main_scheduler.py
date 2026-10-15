@@ -17,9 +17,11 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 
-from tasks.station_discovery import StationDiscoveryTask
-from tasks.data_ingestion import DataIngestionTask
-from tasks.city_ingest import CityIngestionTask
+# The worker is a thin shim over the canonical ingestion package in apps/api.
+# It needs the same environment (.env with POSTGRES_* and IQAIR_API_KEY) as the API.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
+from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask  # noqa: E402
 
 # -------- logging --------
 logging.basicConfig(

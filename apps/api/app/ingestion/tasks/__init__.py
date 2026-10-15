@@ -1,6 +1,5 @@
 """
-Tasks Module
-Contains all scheduler task implementations
+Ingestion task implementations (station discovery, station readings, city readings).
 """
 
 from .station_discovery import StationDiscoveryTask

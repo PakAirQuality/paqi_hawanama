@@ -21,6 +21,9 @@ import traceback
 try:
     import app.main as m
     print("APP_IMPORT_OK")
+    from app.ingestion.provenance import assert_canonical, describe
+    assert_canonical()
+    print("PROVENANCE", describe())
 except Exception as e:
     print("APP_IMPORT_FAIL:", e)
     traceback.print_exc()

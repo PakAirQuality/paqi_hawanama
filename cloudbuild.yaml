@@ -9,6 +9,8 @@ steps:
       - 'asia-south1-docker.pkg.dev/hawanama-2/cloud-run-source-deploy/hawanama:latest'
       - '--build-arg'
       - 'HAWANAMA_BOT_ENABLED=true'
+      - '--build-arg'
+      - 'GIT_SHA=$_GIT_SHA'
       - '.'
     env:
       - 'DOCKER_BUILDKIT=1'
@@ -81,6 +83,12 @@ steps:
       - '--max-instances=2'
 
 # Build options for faster builds
+# Pass the source revision into the image so /health and /tasks/status can report it:
+#   gcloud builds submit --config cloudbuild.yaml --project hawanama-2 \
+#     --substitutions=_GIT_SHA=$(git rev-parse --short HEAD)
+substitutions:
+  _GIT_SHA: 'unknown'
+
 options:
   machineType: 'E2_HIGHCPU_8'
   diskSizeGb: 100

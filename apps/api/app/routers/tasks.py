@@ -4,21 +4,16 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 """
 
 import logging
+import os
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
 from typing import Dict, Any, Optional
 from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
+from app.ingestion.provenance import describe as describe_provenance
+from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Setup worker compatibility layer BEFORE importing worker tasks
-try:
-    from app.worker_compat import *  # This sets up the import aliases
-    logger.info("Worker compatibility layer loaded")
-except Exception as e:
-    logger.error("Failed to load worker compatibility layer: %s", e)
-
-# Worker tasks will be imported lazily inside each endpoint to avoid import-time crashes
 
 
 @router.post("/tasks/discover")
@@ -34,7 +29,6 @@ async def run_station_discovery(
     """
     try:
         logger.info("Starting station discovery via API endpoint (country=%s)", country or "all")
-        from app.tasks.station_discovery import StationDiscoveryTask  # lazy import
         discovery_task = StationDiscoveryTask()
         summary = await discovery_task.discover_all_stations_comprehensive(country=country)
         logger.info("Station discovery completed successfully: %s", summary)
@@ -66,7 +60,6 @@ async def run_station_ingestion(
     """
     try:
         logger.info("Starting station ingestion via API endpoint")
-        from app.tasks.data_ingestion import DataIngestionTask  # lazy import
         station_ingestion_task = DataIngestionTask()
         summary = await station_ingestion_task.fetch_station_readings()
         logger.info("Station ingestion completed successfully: %s", summary)
@@ -100,7 +93,6 @@ async def run_city_ingestion(
     """
     try:
         logger.info("Starting city ingestion via API endpoint (country=%s)", country or "all")
-        from app.tasks.city_ingest import CityIngestionTask  # lazy import
         city_ingestion_task = CityIngestionTask()
         summary = await city_ingestion_task.fetch_city_readings_hourly(country=country)
         logger.info("City ingestion completed successfully: %s", summary)
@@ -134,11 +126,6 @@ async def run_full_pipeline(
     """
     try:
         logger.info("Starting full pipeline via API endpoint")
-        
-        # Import tasks lazily
-        from app.tasks.station_discovery import StationDiscoveryTask
-        from app.tasks.data_ingestion import DataIngestionTask
-        from app.tasks.city_ingest import CityIngestionTask
         
         discovery_task = StationDiscoveryTask()
         station_ingestion_task = DataIngestionTask()
@@ -230,12 +217,10 @@ async def get_task_status(
     Get status information about available tasks and recent runs.
     """
     try:
-        # Check if manifests exist
-        from pathlib import Path
-        worker_root = Path(__file__).resolve().parents[3] / "worker"
-        
-        station_manifest_dir = worker_root / "artifacts" / "station_manifests"
-        city_manifest_dir = worker_root / "artifacts" / "city_manifests"
+        # Manifest locations must match what the tasks use (relative to the
+        # process working directory, /app in the image), not a worker checkout.
+        station_manifest_dir = Path(os.getenv("STATION_MANIFEST_DIR", "artifacts/station_manifests"))
+        city_manifest_dir = Path(os.getenv("CITY_MANIFEST_DIR", "artifacts/city_manifests"))
         
         station_manifest_exists = (
             (station_manifest_dir / "latest.parquet").exists() or 
@@ -259,7 +244,8 @@ async def get_task_status(
             "manifest_status": {
                 "station_manifest_exists": station_manifest_exists,
                 "city_manifest_exists": city_manifest_exists
-            }
+            },
+            "provenance": describe_provenance(),
         }
     except Exception as e:
         logger.error("Failed to get task status: %s", str(e))

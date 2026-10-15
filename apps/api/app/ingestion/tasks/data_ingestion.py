@@ -6,29 +6,18 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 
-# Dual-path imports for API container compatibility
-try:
-    from app.services.ingestion.iqair_service import (
-        IQAirClient,
-        IQAirError,
-        StationNotFound,
-        FeatureNotAvailable,
-        RateLimited,
-        Unauthorized,
-        BadRequest,
-    )
-    from app.services.database import DatabaseService, AsyncSessionLocal
-except ImportError:  # running in pure worker repo layout
-    from services.iqair_client import (
-        IQAirClient,
-        IQAirError,
-        StationNotFound,
-        FeatureNotAvailable,
-        RateLimited,
-        Unauthorized,
-        BadRequest,
-    )
-    from services.database import DatabaseService, AsyncSessionLocal
+from app.services.ingestion.iqair_service import (
+    IQAirClient,
+    IQAirError,
+    StationNotFound,
+    FeatureNotAvailable,
+    RateLimited,
+    Unauthorized,
+    BadRequest,
+)
+from app.ingestion.db import DatabaseService, AsyncSessionLocal
+from app.ingestion.manifests import download_manifest_from_gcs
+from app.core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
 
 logger = logging.getLogger(__name__)
 
@@ -54,11 +43,6 @@ def _approx_one_hour(a: datetime, b: datetime) -> bool:
 
 # Aliases to fix label mismatches between /stations and /station endpoints.
 # Uses shared South Asia config for per-country aliases.
-try:
-    from app.core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
-except ImportError:
-    from core.south_asia import get_state_aliases as _get_state_aliases, get_iqair_countries
-
 def _state_aliases(state: Optional[str], country: Optional[str] = None) -> List[str]:
     if not state:
         return []
@@ -128,11 +112,6 @@ class DataIngestionTask:
 
     def _resolve_latest_manifest_path(self) -> Optional[Path]:
         # Always sync from GCS first to avoid stale local manifests across container instances
-        try:
-            from app.manifest_utils import download_manifest_from_gcs
-        except ImportError:
-            from manifest_utils import download_manifest_from_gcs
-
         gcs_prefix = "manifests/station_manifests"
         p_parq = self._manifest_dir / "latest.parquet"
         p_json = self._manifest_dir / "latest.jsonl"
@@ -320,12 +299,6 @@ class DataIngestionTask:
             if s.get("station_id"):
                 return s["station_id"]
             # Fallback: generate hex station_id using database service
-            try:
-                from app.services.database import DatabaseService
-            except ImportError:
-                from services.database import DatabaseService
-            db_service = DatabaseService()
-            
             country = (s.get("country") or "").strip()
             state = (s.get("state") or "").strip()
             city = (s.get("city") or "").strip()
@@ -333,7 +306,7 @@ class DataIngestionTask:
             lat = float(s.get("lat", 0))
             lon = float(s.get("lon", 0))
             
-            return db_service.generate_station_id(country, state, city, name, lat, lon)
+            return self.db_service.generate_station_id(country, state, city, name, lat, lon)
         else:  # city - keep existing pipe-separated format for compatibility
             parts = [
                 (s.get("country") or "").strip().lower(),

@@ -21,28 +21,11 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone, timedelta
 from collections import defaultdict
 
-# --- PATH SHIM: allows `python tasks/run_city_now.py` to import `services.*` ---
-import sys as _sys, pathlib as _pl
-_root = str(_pl.Path(__file__).resolve().parents[1])
-if _root not in _sys.path:
-    _sys.path.insert(0, _root)
-# ------------------------------------------------------------------------------------
+from app.services.ingestion.iqair_service import IQAirClient
+from app.ingestion.db import DatabaseService, AsyncSessionLocal
+from app.ingestion.manifests import ensure_latest_from_gcs
+from app.core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
 
-# Dual-path imports for API container compatibility
-try:
-    from app.services.ingestion.iqair_service import IQAirClient
-    from app.services.database import DatabaseService, AsyncSessionLocal
-except ImportError:  # running in pure worker repo layout
-    from services.iqair_client import IQAirClient
-    from services.database import DatabaseService, AsyncSessionLocal
-
-# -------- logging: ensure something shows up even if caller didn't configure --------
-if not logging.getLogger().handlers:
-    _lvl = os.getenv("LOG_LEVEL", "INFO").upper()
-    logging.basicConfig(
-        level=getattr(logging, _lvl, logging.INFO),
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-    )
 logger = logging.getLogger(__name__)
 
 # Optional pandas (for Parquet manifest)
@@ -55,11 +38,6 @@ except Exception:
 
 # ---- aliasing to deal with label mismatches between /cities and /city endpoints ----
 # Uses shared South Asia config for per-country aliases.
-try:
-    from app.core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
-except ImportError:
-    from core.south_asia import get_state_aliases as _get_state_aliases_sa, get_iqair_countries
-
 def _state_aliases(state: Optional[str], country: Optional[str] = None) -> List[str]:
     if not state:
         return []
@@ -134,21 +112,29 @@ class CityIngestionTask:
 
     # --------------------------- manifest loading ---------------------------
 
-    def _prefer_existing(self, base: Path) -> Optional[Path]:
-        """Return latest.parquet if exists else latest.jsonl if exists, else None."""
+    def _prefer_existing(self, base: Path, gcs_prefix: str = "") -> Optional[Path]:
+        """Return latest.parquet if exists else latest.jsonl if exists, else try GCS, else None."""
         p_parq = base / "latest.parquet"
         p_json = base / "latest.jsonl"
         if p_parq.exists():
             return p_parq
         if p_json.exists():
             return p_json
+
+        # GCS fallback: try downloading if local files missing
+        if gcs_prefix:
+            gcs_result = ensure_latest_from_gcs(base, "parquet", gcs_prefix)
+            if gcs_result:
+                logger.info("Recovered manifest from GCS: %s", gcs_result)
+                return gcs_result
+
         return None
 
     def _resolve_latest_city_manifest_path(self) -> Optional[Path]:
-        return self._prefer_existing(self._city_manifest_dir)
+        return self._prefer_existing(self._city_manifest_dir, gcs_prefix="manifests/city_manifests")
 
     def _resolve_latest_station_manifest_path(self) -> Optional[Path]:
-        return self._prefer_existing(self._station_manifest_dir)
+        return self._prefer_existing(self._station_manifest_dir, gcs_prefix="manifests/station_manifests")
 
     def _read_parquet(self, path: Path) -> List[Dict[str, Any]]:
         if not _HAVE_PANDAS:
