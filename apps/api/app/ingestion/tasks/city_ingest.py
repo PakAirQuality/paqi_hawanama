@@ -23,7 +23,10 @@ from collections import defaultdict
 
 from app.services.ingestion.iqair_service import IQAirClient, Unauthorized
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
+from app.ingestion.extract import ExtractStats, normalize_envelope
 from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
+from app.ingestion.raw_archive import RawPayloadArchiver
+from app.ingestion.temporal import norm_hour as _norm_hour
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
@@ -52,18 +55,6 @@ def _state_aliases(state: Optional[str], country: Optional[str] = None) -> List[
 def _scope_key(country: str, state: str, city: str) -> str:
     return f"{country.lower()}|{state.lower()}|{city.lower()}"
 
-# ---------- Time helpers (copied from station worker) ----------
-def _norm_hour(dt: datetime) -> datetime:
-    """Floor to the exact hour (UTC-aware in/out)."""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-def _approx_one_hour(a: datetime, b: datetime) -> bool:
-    """True if a - b ≈ 1h (tolerates small jitters)."""
-    return abs((a - b) - timedelta(hours=1)) <= timedelta(minutes=10)
-# ----------------------------------------------------------------------
-
 # DB fallback inventory. cities has no latitude/longitude columns (only a
 # centroid geography), and country_id is NOT NULL on cities so it joins
 # directly. Verified against db_schema/initial_schema.sql by
@@ -87,7 +78,8 @@ CITY_FALLBACK_SQL = """
 class CityIngestionTask:
     """Manifest-driven city-level ingestion (IQAir /v2/city)."""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None,
+                 archiver=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient(
@@ -97,6 +89,8 @@ class CityIngestionTask:
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
         self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
+        self._archiver = archiver or RawPayloadArchiver(s)
+        self._stats = ExtractStats()
         self._run_id: Optional[str] = None
         self._out_dir: Optional[Path] = None
         self._abort: Optional[asyncio.Event] = None
@@ -260,6 +254,7 @@ class CityIngestionTask:
         self._out_dir = Path(s.INGEST_OUT_DIR) / run_id
         self._abort = asyncio.Event()
         self._manifest_source = None
+        self._stats.reset()
         recorder = self._recorder_factory()
         outcome = RunOutcome(
             run_id=run_id, task="ingest-cities", provider_code="airvisual",
@@ -378,6 +373,7 @@ class CityIngestionTask:
             outcome.latest_observation_ts = latest_ts
             logger.info("Bulk upserted %d city readings (%d unchanged).", written, unchanged)
 
+        outcome.details["extraction"] = self._stats.to_dict()
         if self._abort is not None and self._abort.is_set():
             outcome.fail("provider_auth", "IQAir rejected the credential (401/403); remaining cities were skipped")
 
@@ -408,10 +404,9 @@ class CityIngestionTask:
             # Try exact + alias states
             for idx, state_try in enumerate(states_to_try or [state]):
                 try:
-                    raw = await self.iqair_client.get_city_data(city=city, state=state_try, country=country)
-                    parsed = self.iqair_client.parse_city_data(raw)
-                    readings = self._normalize_city_readings(parsed, scope_key)
-                    return readings
+                    env = await self.iqair_client.fetch_city(city=city, state=state_try, country=country)
+                    parsed = self.iqair_client.parse_city_data(env.data)
+                    return await self._normalize(env, parsed, scope_key)
                 except Unauthorized as e:
                     # The credential is bad for every city: stop launching new fetches.
                     logger.error("Unauthorized for %s (%s, %s): %s — aborting run", city, state_try, country, e)
@@ -436,11 +431,10 @@ class CityIngestionTask:
                 lon = row.get("lon") or row.get("longitude")
                 if lat is not None and lon is not None:
                     try:
-                        raw = await self.iqair_client.get_nearest_city_data(lat=float(lat), lon=float(lon))
-                        parsed = self.iqair_client.parse_city_data(raw)
-                        readings = self._normalize_city_readings(parsed, scope_key)
+                        env = await self.iqair_client.fetch_nearest_city(lat=float(lat), lon=float(lon))
+                        parsed = self.iqair_client.parse_city_data(env.data)
                         logger.info("Used nearest_city fallback for %s (%.4f, %.4f)", scope_key, lat, lon)
-                        return readings
+                        return await self._normalize(env, parsed, scope_key)
                     except Exception as e2:
                         logger.warning("Nearest-city fallback failed for %s: %s", scope_key, e2)
                         if last_exc:
@@ -451,280 +445,14 @@ class CityIngestionTask:
                 raise last_exc
             return None
 
-    def _normalize_city_current(self, parsed: Dict[str, Any], scope_key: str) -> Optional[Dict[str, Any]]:
-        """
-        Normalize IQAir city parsed payload (from IQAirClient.parse_city_data)
-        into the new Timescale schema (scope_type='city').
-        """
-        try:
-            # Extract from current data (city API provides current + history structure)
-            current = parsed.get("current", {}) or {}
-            pollution = current.get("pollution", {}) or {}
-            weather = current.get("weather", {}) or {}
-            ts_str = pollution.get("ts") or parsed.get("timestamp")
-
-            if ts_str:
-                try:
-                    if ts_str.endswith("Z"):
-                        ts_utc = datetime.fromisoformat(ts_str[:-1]).replace(tzinfo=timezone.utc)
-                    else:
-                        ts_utc = datetime.fromisoformat(ts_str.replace("Z", "")).replace(tzinfo=timezone.utc)
-                except Exception:
-                    ts_utc = datetime.now(timezone.utc)
-            else:
-                ts_utc = datetime.now(timezone.utc)
-
-            ts_utc = ts_utc.replace(minute=0, second=0, microsecond=0)  # hour-floor
-
-            # Map main pollutant codes p1->pm10, p2->pm25 like station path
-            pollutant_mapping = {"p1": "pm10", "p2": "pm25", "o3": "o3", "n2": "no2", "s2": "so2", "co": "co"}
-            main_us = pollution.get("mainus")
-            main_cn = pollution.get("maincn")
-
-            # Some IQAir plans expose p2/p1 details as {conc:...} under pollution; your parser already surfaces:
-            # Extract PM2.5 from the nested p2 structure that IQAir uses
-            pm25 = (pollution.get("p2") or {}).get("conc")
-            # Fallback to direct key if nested structure not available  
-            if pm25 is None:
-                pm25 = pollution.get("pm25_conc")
-            # Extract PM10 from the nested p1 structure
-            pm10 = (pollution.get("p1") or {}).get("conc")
-            if pm10 is None:
-                pm10 = pollution.get("pm10_conc")
-
-            # If your parse_city_data didn’t materialize *_conc, try fallback keys:
-            # Remove redundant fallback code (already handled above)
-
-            return {
-                "scope_type": "city",
-                "scope_key": scope_key,
-                "ts_utc": ts_utc,
-
-                # AQI
-                "aqi_us": pollution.get("aqius"),
-                "aqi_cn": pollution.get("aqicn"),
-                "main_us": pollutant_mapping.get(main_us, main_us) if main_us else None,
-                "main_cn": pollutant_mapping.get(main_cn, main_cn) if main_cn else None,
-
-                # Pollutants (concentrations)
-                "pm25": pm25,
-                "pm10": pm10,
-                "o3": pollution.get("o3_conc"),
-                "no2": pollution.get("no2_conc"),
-                "so2": pollution.get("so2_conc"),
-                "co": pollution.get("co_conc"),
-
-                # Units
-                "units_pm25": "µg/m³",
-                "units_pm10": "µg/m³",
-                "units_o3": "ppb",
-                "units_no2": "ppb",
-                "units_so2": "ppb",
-                "units_co": "ppm",
-
-                # Weather
-                "temp_c": weather.get("tp"),  # IQAir uses 'tp' for temperature
-                "humidity": weather.get("hu"),  # IQAir uses 'hu' for humidity
-                "pressure_hpa": weather.get("pr"),  # IQAir uses 'pr' for pressure
-                "wind_speed_ms": weather.get("ws"),  # IQAir uses 'ws' for wind speed
-                "wind_dir_deg": weather.get("wd"),  # IQAir uses 'wd' for wind direction
-                "weather_icon": weather.get("ic"),  # IQAir uses 'ic' for icon
-                "heatindex_c": weather.get("heatIndex"),  # IQAir uses 'heatIndex'
-                "pop_pct": weather.get("precipitation_probability"),
-
-                # QC + provenance
-                "qc_state": "OK",
-                "source": "airvisual",
-                "raw": json.dumps(parsed.get("raw_response", {})),
-            }
-        except Exception as e:
-            logger.warning("Failed to normalize city payload for %s: %s", scope_key, e)
-            return None
-
-    def _normalize_city_readings(self, parsed: Dict[str, Any], scope_key: str) -> List[Dict[str, Any]]:
-        """
-        Normalize IQAir city parsed payload into multiple readings from both current and history.pollution.
-        Includes lag handling to prevent duplicates between current and historical data.
-        Returns a list of readings for all available timestamps.
-        """
-        readings = []
-        
-        try:
-            # Get raw response for fallback data
-            raw_response = parsed.get("raw_response", {})
-            
-            # Process current reading first and extract its timestamp
-            current = parsed.get("current", {}) or {}
-            current_ts = None
-            if current:
-                reading = self._normalize_single_city_reading(current, scope_key, raw_response, is_current=True)
-                if reading:
-                    readings.append(reading)
-                    current_ts = reading["ts_utc"]
-            
-            # Process historical readings from history.pollution with lag handling
-            history = raw_response.get("history", {}) if raw_response else {}
-            pollution_history = history.get("pollution", []) if history else []
-            weather_history = history.get("weather", []) if history else []
-            
-            # Create weather lookup by timestamp for matching
-            weather_by_ts = {}
-            for w in weather_history:
-                ts = w.get("ts")
-                if ts:
-                    weather_by_ts[ts] = w
-            
-            # Process each historical pollution reading with lag handling
-            for pollution_entry in pollution_history:
-                ts_str = pollution_entry.get("ts")
-                if not ts_str:
-                    continue
-                
-                # Parse original timestamp
-                try:
-                    if ts_str.endswith("Z"):
-                        original_ts = datetime.fromisoformat(ts_str[:-1]).replace(tzinfo=timezone.utc)
-                    else:
-                        original_ts = datetime.fromisoformat(ts_str.replace("Z", "")).replace(tzinfo=timezone.utc)
-                except Exception:
-                    continue
-                
-                # Skip the history entry that corresponds to "current - 1h" (lag handling)
-                if current_ts and _approx_one_hour(current_ts, original_ts):
-                    logger.debug("Skipping historical entry at %s (overlaps with current at %s)", original_ts, current_ts)
-                    continue
-                
-                # Shift forward by +1h (correct the IQAir lag) - same as station worker
-                corrected_ts = _norm_hour(original_ts + timedelta(hours=1))
-                
-                # Find matching weather data for this timestamp
-                weather_entry = weather_by_ts.get(ts_str, {})
-                
-                # Create combined reading entry with corrected timestamp
-                combined_reading = {
-                    "pollution": pollution_entry.copy(),
-                    "weather": weather_entry
-                }
-                # Update the timestamp in pollution data to corrected one
-                combined_reading["pollution"]["ts"] = corrected_ts.isoformat().replace("+00:00", "Z")
-                
-                reading = self._normalize_single_city_reading(combined_reading, scope_key, raw_response, is_current=False)
-                if reading:
-                    # Ensure the corrected timestamp is used
-                    reading["ts_utc"] = corrected_ts
-                    readings.append(reading)
-            
-            logger.debug("Normalized %d readings for city %s (%d current + %d historical after lag handling)", 
-                        len(readings), scope_key, 1 if current else 0, len([r for r in readings if not getattr(r, 'is_current', True)]))
-            
-            return readings
-            
-        except Exception as e:
-            logger.warning("Failed to normalize city readings for %s: %s", scope_key, e)
-            return []
-
-    def _normalize_single_city_reading(self, reading_data: Dict[str, Any], scope_key: str, 
-                                     raw_response: Dict[str, Any], is_current: bool = False) -> Optional[Dict[str, Any]]:
-        """
-        Normalize a single city reading entry (current or historical) into the Timescale schema.
-        """
-        try:
-            # Extract pollution and weather data
-            pollution = reading_data.get("pollution", {}) or {}
-            weather = reading_data.get("weather", {}) or {}
-            
-            # Get timestamp
-            ts_str = pollution.get("ts") or weather.get("ts")
-            if not ts_str:
-                if is_current:
-                    ts_utc = datetime.now(timezone.utc)
-                else:
-                    return None  # Skip historical entries without timestamps
-            else:
-                try:
-                    if ts_str.endswith("Z"):
-                        ts_utc = datetime.fromisoformat(ts_str[:-1]).replace(tzinfo=timezone.utc)
-                    else:
-                        ts_utc = datetime.fromisoformat(ts_str.replace("Z", "")).replace(tzinfo=timezone.utc)
-                except Exception:
-                    if is_current:
-                        ts_utc = datetime.now(timezone.utc)
-                    else:
-                        return None
-
-            # Floor to hour for consistency using station worker's helper
-            ts_utc = _norm_hour(ts_utc)
-
-            # Map main pollutant codes
-            pollutant_mapping = {"p1": "pm10", "p2": "pm25", "o3": "o3", "n2": "no2", "s2": "so2", "co": "co"}
-            main_us = pollution.get("mainus")
-            main_cn = pollution.get("maincn")
-
-            # Extract PM2.5 and PM10 concentrations
-            pm25 = None
-            pm10 = None
-            
-            # Try nested p2 structure first
-            p2_data = pollution.get("p2")
-            if isinstance(p2_data, dict):
-                pm25 = p2_data.get("conc")
-            
-            # Try nested p1 structure
-            p1_data = pollution.get("p1")
-            if isinstance(p1_data, dict):
-                pm10 = p1_data.get("conc")
-            
-            # Fallback to direct keys
-            if pm25 is None:
-                pm25 = pollution.get("pm25_conc") or pollution.get("conc")
-            if pm10 is None:
-                pm10 = pollution.get("pm10_conc")
-
-            return {
-                "scope_type": "city",
-                "scope_key": scope_key,
-                "ts_utc": ts_utc,
-
-                # AQI
-                "aqi_us": pollution.get("aqius"),
-                "aqi_cn": pollution.get("aqicn"),
-                "main_us": pollutant_mapping.get(main_us, main_us) if main_us else None,
-                "main_cn": pollutant_mapping.get(main_cn, main_cn) if main_cn else None,
-
-                # Pollutants (concentrations)
-                "pm25": pm25,
-                "pm10": pm10,
-                "o3": pollution.get("o3_conc"),
-                "no2": pollution.get("no2_conc"),
-                "so2": pollution.get("so2_conc"),
-                "co": pollution.get("co_conc"),
-
-                # Units
-                "units_pm25": "µg/m³",
-                "units_pm10": "µg/m³",
-                "units_o3": "ppb",
-                "units_no2": "ppb",
-                "units_so2": "ppb",
-                "units_co": "ppm",
-
-                # Weather
-                "temp_c": weather.get("tp"),  # IQAir uses 'tp' for temperature
-                "humidity": weather.get("hu"),  # IQAir uses 'hu' for humidity
-                "pressure_hpa": weather.get("pr"),  # IQAir uses 'pr' for pressure
-                "wind_speed_ms": weather.get("ws"),  # IQAir uses 'ws' for wind speed
-                "wind_dir_deg": weather.get("wd"),  # IQAir uses 'wd' for wind direction
-                "weather_icon": weather.get("ic"),  # IQAir uses 'ic' for icon
-                "heatindex_c": weather.get("heatIndex"),  # IQAir uses 'heatIndex'
-                "pop_pct": weather.get("precipitation_probability"),
-
-                # QC + provenance
-                "qc_state": "OK",
-                "source": "airvisual",
-                "raw": json.dumps({"timestamp": ts_str, "is_current": is_current}),
-            }
-        except Exception as e:
-            logger.warning("Failed to normalize single city reading for %s: %s", scope_key, e)
-            return None
+    async def _normalize(self, env, parsed: Dict[str, Any], scope_key: str) -> List[Dict[str, Any]]:
+        """Archive the response, extract rows under iqair_city_v1, validate; qc_state is never 'OK' here."""
+        return await normalize_envelope(
+            env, parsed, scope_type="city", scope_key=scope_key, provider="airvisual",
+            native_id=scope_key, stream="city",
+            archiver=self._archiver, session_factory=AsyncSessionLocal, run_id=self._run_id,
+            backfill_hours=int(self.settings.IQAIR_BACKFILL_HOURS), stats=self._stats,
+        )
 
     # ---------- NEW: in-memory deduplication (copied from station worker) ----------
     def _dedupe_readings_in_memory(self, readings: List[Dict[str, Any]]) -> List[Dict[str, Any]]:

@@ -84,6 +84,24 @@ class FakeIQAirClient:
     def __init__(self, script: Dict[str, Any]):
         self.script = script
         self.calls: List[Dict[str, Any]] = []
+        self.quota = None
+
+    def _envelope(self, endpoint, data, params):
+        from app.services.ingestion.iqair_service import FetchEnvelope
+        return FetchEnvelope(data=data, http_status=200, fetched_at=datetime.now(timezone.utc), endpoint=endpoint,
+                             params_redacted=params, elapsed_ms=1)
+
+    async def fetch_station(self, station=None, city=None, state=None, country=None):
+        data = await self.get_station_data(station=station, city=city, state=state, country=country)
+        return self._envelope("station", data, {"station": station, "city": city, "state": state, "country": country})
+
+    async def fetch_city(self, city=None, state=None, country=None):
+        data = await self.get_city_data(city=city, state=state, country=country)
+        return self._envelope("city", data, {"city": city, "state": state, "country": country})
+
+    async def fetch_nearest_city(self, lat=None, lon=None):
+        data = await self.get_nearest_city_data(lat=lat, lon=lon)
+        return self._envelope("nearest_city", data, {"lat": lat, "lon": lon})
 
     def _lookup(self, key: str):
         res = self.script.get(key, self.script.get("*"))

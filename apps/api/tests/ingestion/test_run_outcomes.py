@@ -13,6 +13,7 @@ from app.ingestion.runs import (RunCounts, RunOutcome, RunRecorder, RunStatus, c
 from app.ingestion.tasks.data_ingestion import DataIngestionTask
 from app.ingestion.tasks.city_ingest import CityIngestionTask
 from app.ingestion.tasks.station_discovery import StationDiscoveryTask
+from app.ingestion.raw_archive import NullArchiver
 from app.services.ingestion.iqair_service import IQAirError, StationNotFound, Unauthorized
 
 from tests.ingestion.fakes import (CapturingRecorder, FakeDatabaseService, FakeIQAirClient, FakeLeases, FakeSessionFactory,
@@ -123,7 +124,7 @@ def _station_task(tmp_path, script, rows, monkeypatch, **settings_overrides):
     write_station_manifest(s, rows)
     rec = CapturingRecorder(Path(s.INGEST_OUT_DIR))
     t = DataIngestionTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
-                          recorder_factory=lambda: rec, leases=FakeLeases())
+                          recorder_factory=lambda: rec, leases=FakeLeases(), archiver=NullArchiver())
     monkeypatch.setattr(DataIngestionTask, "_drop_existing_rows", identity_drop_existing)
     return t, rec
 
@@ -285,7 +286,7 @@ def _city_task(tmp_path, script, rows, monkeypatch):
     write_city_manifest(s, rows)
     rec = CapturingRecorder(Path(s.INGEST_OUT_DIR))
     t = CityIngestionTask(settings=s, iqair_client=FakeIQAirClient(script), db_service=FakeDatabaseService(),
-                          recorder_factory=lambda: rec, leases=FakeLeases())
+                          recorder_factory=lambda: rec, leases=FakeLeases(), archiver=NullArchiver())
 
     async def no_drop(self, rows):
         return rows

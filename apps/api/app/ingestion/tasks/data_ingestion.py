@@ -16,7 +16,10 @@ from app.services.ingestion.iqair_service import (
     BadRequest,
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
+from app.ingestion.extract import ExtractStats, normalize_envelope
 from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
+from app.ingestion.raw_archive import RawPayloadArchiver
+from app.ingestion.temporal import norm_hour as _norm_hour
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunAborted, RunOutcome, RunRecorder, new_run_id
@@ -32,18 +35,6 @@ try:
 except Exception:
     pd = None
     _HAVE_PANDAS = False
-
-# ---------- NEW: time helpers ----------
-def _norm_hour(dt: datetime) -> datetime:
-    """Floor to the exact hour (UTC-aware in/out)."""
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc).replace(minute=0, second=0, microsecond=0)
-
-def _approx_one_hour(a: datetime, b: datetime) -> bool:
-    """True if a - b ≈ 1h (tolerates small jitters)."""
-    return abs((a - b) - timedelta(hours=1)) <= timedelta(minutes=10)
-# ---------------------------------------
 
 # Aliases to fix label mismatches between /stations and /station endpoints.
 # Uses shared South Asia config for per-country aliases.
@@ -90,7 +81,8 @@ STATION_FALLBACK_SQL = """
 class DataIngestionTask:
     """Manifest-driven data ingestion (station endpoint) with backfill from history.pollution."""
 
-    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None):
+    def __init__(self, *, settings=None, iqair_client=None, db_service=None, recorder_factory=None, leases=None,
+                 archiver=None):
         # Everything is injectable so tests can run without a network or a database.
         self.settings = s = settings or _default_settings
         self.iqair_client = iqair_client or IQAirClient(
@@ -101,6 +93,8 @@ class DataIngestionTask:
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
         self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
+        self._archiver = archiver or RawPayloadArchiver(s)
+        self._stats = ExtractStats()
         # Set per run: run id, report dir, abort signal (provider auth failure stops new fetches).
         self._run_id: Optional[str] = None
         self._out_dir: Optional[Path] = None
@@ -209,74 +203,6 @@ class DataIngestionTask:
                 r["lon"] = r["longitude"]
         return rows
 
-    # ----------------------------- backfill helpers --------------------------
-
-    async def _fetch_and_merge_history_pollution(
-        self,
-        station_name: str,
-        city: Optional[str],
-        state_try: Optional[str],
-        country: Optional[str],
-        parsed: Dict[str, Any],
-    ) -> None:
-        """Pull history.pollution for the configured window and merge into `parsed`."""
-        end_utc = datetime.now(timezone.utc)
-        start_utc = end_utc - timedelta(hours=self._backfill_hours)
-        try:
-            hist_raw = await self.iqair_client.get_station_history_pollution(
-                station=station_name,
-                city=city,
-                state=state_try,
-                country=country,
-                start_utc=start_utc,
-                end_utc=end_utc,
-            )
-            hist_list = self.iqair_client.parse_history_pollution(hist_raw) or []
-            parsed.setdefault("history", {}).setdefault("pollution", []).extend(hist_list)
-        except FeatureNotAvailable:
-            logger.info("history.pollution not available for '%s' (%s, %s).", station_name, city, state_try)
-        except RateLimited:
-            raise
-        except Exception as e:
-            logger.warning("Failed fetching history.pollution for '%s' (%s, %s): %s",
-                           station_name, city, state_try, e)
-
-    async def _fetch_and_merge_history_weather(
-        self,
-        station_name: str,
-        city: Optional[str],
-        state_try: Optional[str],
-        country: Optional[str],
-        parsed: Dict[str, Any],
-    ) -> None:
-        """Pull history.weather for the configured window and merge into `parsed`."""
-        end_utc = datetime.now(timezone.utc)
-        start_utc = end_utc - timedelta(hours=self._backfill_hours)
-        try:
-            hist_raw = await self.iqair_client.get_station_history_weather(
-                station=station_name, city=city, state=state_try, country=country,
-                start_utc=start_utc, end_utc=end_utc,
-            )
-            hist_list = self.iqair_client.parse_history_weather(hist_raw) or []
-            parsed.setdefault("history", {}).setdefault("weather", []).extend(hist_list)
-        except FeatureNotAvailable:
-            logger.info("history.weather not available for '%s' (%s, %s).", station_name, city, state_try)
-        except RateLimited:
-            raise
-        except Exception as e:
-            logger.warning("Failed fetching history.weather for '%s' (%s, %s): %s",
-                           station_name, city, state_try, e)
-
-    @staticmethod
-    def _parse_ts(ts: str) -> datetime:
-        # Handle both Z and explicit offsets, produce tz-aware UTC
-        if ts.endswith("Z"):
-            ts = ts.replace("Z", "+00:00")
-        dt = datetime.fromisoformat(ts)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-
     def _build_scope_key(self, s: Dict[str, Any], scope_type: str) -> str:
         # Use hex station_id for stations, keep existing logic for cities
         if scope_type == "station":
@@ -299,181 +225,6 @@ class DataIngestionTask:
                 (s.get("city") or "").strip().lower(),
             ]
             return "|".join([p for p in parts if p])
-
-    def _extract_rows_from_parsed(
-        self,
-        parsed: Dict[str, Any],
-        scope_type: str,
-        scope_key: str,
-        station_blob_for_raw: Dict[str, Any],
-    ) -> List[Dict[str, Any]]:
-        """
-        Merge current + history for both pollution and weather by timestamp.
-        Accepts payload from IQAirClient.parse_* which preserves:
-          current.pollution, current.weather
-          history.pollution (list), history.weather (list)
-        """
-        rows: List[Dict[str, Any]] = []
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=self._backfill_hours)
-
-        # Aggregate by UTC timestamp
-        bucket: Dict[datetime, Dict[str, Any]] = {}
-
-        def _entry(ts: datetime) -> Dict[str, Any]:
-            ts = _norm_hour(ts)  # ---------- NEW ----------
-            e = bucket.get(ts)
-            if e:
-                return e
-            e = {
-                "scope_type": (scope_type or "").strip(),
-                "scope_key": scope_key,
-                "ts_utc": ts,
-                # pollution fields (default None)
-                "aqi_us": None, "aqi_cn": None, "main_us": None, "main_cn": None,
-                "pm25": None, "pm10": None, "o3": None, "no2": None, "so2": None, "co": None,
-                # pollution units (default None)
-                "units_pm25": None, "units_pm10": None, "units_o3": None, 
-                "units_no2": None, "units_so2": None, "units_co": None,
-                # weather fields (default None)
-                "temp_c": None, "humidity": None, "pressure_hpa": None,
-                "wind_speed_ms": None, "wind_dir_deg": None, "weather_icon": None,
-                "heatindex_c": None, "pop_pct": None,
-                "source": "airvisual",
-                "raw": None,  # Exclude massive API response to prevent SQLAlchemy errors
-            }
-            bucket[ts] = e
-            return e
-
-        def _add_pollution(obj: Dict[str, Any]):
-            ts_raw = obj.get("ts")
-            if not ts_raw:
-                return
-            try:
-                ts = self._parse_ts(ts_raw)
-                ts = _norm_hour(ts)  # ---------- NEW ----------
-            except Exception:
-                return
-            if ts < cutoff:
-                return
-            aqius = obj.get("aqius")
-            aqicn = obj.get("aqicn")
-            # Map IQAir pollutant codes to database enum values
-            def map_pollutant_code(code):
-                if not code:
-                    return None
-                mapping = {"p1": "pm10", "p2": "pm25", "o3": "o3", "n2": "no2", "s2": "so2", "co": "co"}
-                return mapping.get(code, code)
-            
-            mainus = map_pollutant_code(obj.get("mainus"))
-            maincn = map_pollutant_code(obj.get("maincn"))
-            def conc(d, k):
-                v = d.get(k)
-                if isinstance(v, dict):
-                    return v.get("conc")
-                return v
-            entry = _entry(ts)
-            entry.update({
-                "aqi_us": aqius if aqius is not None else entry["aqi_us"],
-                "aqi_cn": aqicn if aqicn is not None else entry["aqi_cn"],
-                "main_us": mainus if mainus is not None else entry["main_us"],
-                "main_cn": maincn if maincn is not None else entry["main_cn"],
-                "pm25": conc(obj, "p2") if conc(obj, "p2") is not None else entry["pm25"],
-                "pm10": conc(obj, "p1") if conc(obj, "p1") is not None else entry["pm10"],
-                "o3":   conc(obj, "o3") if conc(obj, "o3") is not None else entry["o3"],
-                "no2":  conc(obj, "n2") if conc(obj, "n2") is not None else entry["no2"],
-                "so2":  conc(obj, "s2") if conc(obj, "s2") is not None else entry["so2"],
-                "co":   conc(obj, "co") if conc(obj, "co") is not None else entry["co"],
-            })
-
-        def _add_weather(obj: Dict[str, Any]):
-            ts_raw = obj.get("ts")
-            if not ts_raw:
-                return
-            try:
-                ts = self._parse_ts(ts_raw)
-                ts = _norm_hour(ts)  # ---------- NEW ----------
-            except Exception:
-                return
-            if ts < cutoff:
-                return
-            tp = obj.get("tp")
-            pr = obj.get("pr")
-            hu = obj.get("hu")
-            ws = obj.get("ws")
-            wd = obj.get("wd")
-            ic = obj.get("ic")
-            hi = obj.get("heatIndex") or obj.get("heatindex")  # defensive casing
-            pop = obj.get("pop") or obj.get("precipitation_probability")
-            entry = _entry(ts)
-            entry.update({
-                "temp_c": tp if tp is not None else entry["temp_c"],
-                "pressure_hpa": pr if pr is not None else entry["pressure_hpa"],
-                "humidity": hu if hu is not None else entry["humidity"],
-                "wind_speed_ms": ws if ws is not None else entry["wind_speed_ms"],
-                "wind_dir_deg": wd if wd is not None else entry["wind_dir_deg"],
-                "weather_icon": ic if ic is not None else entry["weather_icon"],
-                "heatindex_c": hi if hi is not None else entry["heatindex_c"],
-                "pop_pct": pop if pop is not None else entry["pop_pct"],
-            })
-
-        # ---- current ----
-        cur_p = (parsed.get("current") or {}).get("pollution")
-        current_ts = None  # ---------- NEW ----------
-        if isinstance(cur_p, dict):
-            # capture normalized current ts for robust history skip
-            ts_raw = cur_p.get("ts")
-            if ts_raw:
-                try:
-                    current_ts = _norm_hour(self._parse_ts(ts_raw))
-                except Exception:
-                    current_ts = None
-            _add_pollution(cur_p)
-        cur_w = (parsed.get("current") or {}).get("weather")
-        if isinstance(cur_w, dict):
-            _add_weather(cur_w)
-
-        # ---- history ----
-        hist_p = (parsed.get("history") or {}).get("pollution") or []
-        if isinstance(hist_p, list):
-            # IQAir history timestamps are systematically lagged by ~1 hour.
-            for p in hist_p:
-                if not isinstance(p, dict):
-                    continue
-                ts_raw = p.get("ts")
-                if not ts_raw:
-                    continue
-                try:
-                    original_ts = _norm_hour(self._parse_ts(ts_raw))
-                except Exception:
-                    continue
-
-                # Skip the history entry that corresponds to "current - 1h"
-                if current_ts and _approx_one_hour(current_ts, original_ts):
-                    continue
-
-                # Shift forward by +1h (correct the IQAir lag)
-                corrected_ts = _norm_hour(original_ts + timedelta(hours=1))
-
-                p_corrected = p.copy()
-                p_corrected["ts"] = corrected_ts.isoformat().replace("+00:00", "Z")
-                _add_pollution(p_corrected)
-
-        hist_w = (parsed.get("history") or {}).get("weather") or []
-        if isinstance(hist_w, list):
-            for w in hist_w:
-                if isinstance(w, dict):
-                    _add_weather(w)
-
-        # Emit combined rows (order not important), clean up for database
-        for row in bucket.values():
-            # Remove raw field and add missing defaults for database compatibility
-            if 'raw' in row:
-                del row['raw']
-            if 'qc_state' not in row or row['qc_state'] is None:
-                row['qc_state'] = 'raw'
-        
-        rows.extend(bucket.values())
-        return rows
 
     # ---------- NEW: in-run de-dup ----------
     def _dedupe_rows_in_memory(self, rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -551,6 +302,7 @@ class DataIngestionTask:
         self._out_dir = Path(s.INGEST_OUT_DIR) / run_id
         self._abort = asyncio.Event()
         self._manifest_source = None
+        self._stats.reset()
         recorder = self._recorder_factory()
         outcome = RunOutcome(
             run_id=run_id, task="ingest-stations", provider_code=self._provider_code,
@@ -681,6 +433,7 @@ class DataIngestionTask:
             else:
                 logger.info("Nothing new to upsert after de-dup.")
 
+        outcome.details["extraction"] = self._stats.to_dict()
         if self._abort is not None and self._abort.is_set():
             outcome.fail("provider_auth", "IQAir rejected the credential (401/403); remaining stations were skipped")
 
@@ -711,18 +464,19 @@ class DataIngestionTask:
 
             for idx, state_try in enumerate(states_to_try or [state]):
                 try:
-                    raw = await self.iqair_client.get_station_data(
+                    env = await self.iqair_client.fetch_station(
                         station=station_name, city=city, state=state_try, country=country
                     )
-                    parsed = self.iqair_client.parse_station_data(raw)
+                    parsed = self.iqair_client.parse_station_data(env.data)
                     # History data is already included in the station response
-
                     scope_type = "station"
                     scope_key = self._build_scope_key(s, scope_type)
-                    rows = self._extract_rows_from_parsed(
-                        parsed, scope_type, scope_key, parsed.get("raw_response", parsed)
+                    return await normalize_envelope(
+                        env, parsed, scope_type=scope_type, scope_key=scope_key, provider=self._provider_code,
+                        native_id=s.get("source_station_id") or scope_key, stream="station",
+                        archiver=self._archiver, session_factory=AsyncSessionLocal, run_id=self._run_id,
+                        backfill_hours=self._backfill_hours, stats=self._stats,
                     )
-                    return rows if rows else []
                 except StationNotFound as e:
                     last_exc = e
                     logger.info(
@@ -756,16 +510,16 @@ class DataIngestionTask:
             # Optional: city fallback
             if self._allow_city_fallback:
                 try:
-                    raw = await self.iqair_client.get_city_data(city=city, state=state, country=country)
-                    parsed = self.iqair_client.parse_city_data(raw)
-                    # History data is already included in the city response if available
-
+                    env = await self.iqair_client.fetch_city(city=city, state=state, country=country)
+                    parsed = self.iqair_client.parse_city_data(env.data)
                     scope_type = "city"
                     scope_key = self._build_scope_key(s, scope_type)
-                    rows = self._extract_rows_from_parsed(
-                        parsed, scope_type, scope_key, parsed.get("raw_response", parsed)
+                    return await normalize_envelope(
+                        env, parsed, scope_type=scope_type, scope_key=scope_key, provider=self._provider_code,
+                        native_id=scope_key, stream="city",
+                        archiver=self._archiver, session_factory=AsyncSessionLocal, run_id=self._run_id,
+                        backfill_hours=self._backfill_hours, stats=self._stats,
                     )
-                    return rows if rows else []
                 except Exception as e2:
                     logger.warning("City fallback failed for '%s' (%s, %s): %s", station_name, city, state, e2)
                     raise (last_exc or e2)

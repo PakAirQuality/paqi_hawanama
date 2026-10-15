@@ -116,6 +116,8 @@ def validate_reading(row: Dict[str, Any], *, now: Optional[datetime] = None,
             out.flags.append(_flag(f, reason))
             out.quarantined[f] = v
             r[f] = None
+            if f in POLLUTANT_FIELDS:
+                r[f"units_{f}"] = None
 
     present: Set[str] = {f for f in NUMERIC_FIELDS if r.get(f) is not None}
     r["_present"] = present
