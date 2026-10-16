@@ -1,8 +1,26 @@
-# Hawanama
+# Hawanama: Pakistan air quality monitoring platform
 
-Real-time air quality monitoring platform for South Asia. Collects, analyzes, and visualizes pollution data from 1,000+ monitoring stations across Pakistan, India, Bangladesh, Nepal, and Sri Lanka.
+Real-time air quality map and open PM2.5 / AQI data for Pakistan and South Asia, built by the
+[Pakistan Air Quality Initiative (PAQI)](https://pakairquality.com). Hawanama collects hourly readings
+from 1,200+ monitoring stations in 600+ cities across Pakistan, India, Bangladesh, Nepal and Sri Lanka,
+stores them in TimescaleDB, and serves them through a FastAPI backend, a public Next.js map and an
+internal operations dashboard.
 
-**Live:** [hawanama.org](https://hawanama.org) | **Dashboard:** [hawanama-dashboard.web.app](https://hawanama-dashboard.web.app)
+**Live:** [hawanama.org](https://hawanama.org) · [About and data downloads](https://hawanama.org/about/) ·
+**Dashboard:** [hawanama-dashboard.web.app](https://hawanama-dashboard.web.app) ·
+**Updates:** [@pakairquality](https://twitter.com/pakairquality)
+
+Related PAQI projects:
+
+- [pakistan-emissions-sectors](https://github.com/PakAirQuality/pakistan-emissions-sectors): PakEmis, the
+  ten-sector greenhouse gas and air pollutant emissions inventory for Pakistan
+  ([emissions.hawanama.org](https://emissions.hawanama.org)).
+- [pak_quality_estimation](https://github.com/PakAirQuality/pak_quality_estimation): satellite-supported daily
+  PM2.5 mapping for Pakistan under sparse monitoring ([doi:10.5281/zenodo.20824536](https://doi.org/10.5281/zenodo.20824536)),
+  the source of the map's "Estimated" mode.
+- [Unveiling Pakistan's Air Pollution](https://doi.org/10.5281/zenodo.17629179): PAQI's national landscape report.
+
+Data on Hawanama is open under CC BY 4.0; the code is MIT (see `LICENSE`, `DATA.md` and `CITATION.cff`).
 
 ---
 
