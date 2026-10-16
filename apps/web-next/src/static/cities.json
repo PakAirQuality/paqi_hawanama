@@ -1,0 +1,5591 @@
+[
+  {
+    "slug": "cox's-bazar",
+    "name": "Cox's Bazar",
+    "state": "Chittagong",
+    "country": "Bangladesh",
+    "station_count": 1,
+    "lat": 21.1533,
+    "lon": 92.0731
+  },
+  {
+    "slug": "azimpur",
+    "name": "Azimpur",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 2,
+    "lat": 23.74271,
+    "lon": 90.37854
+  },
+  {
+    "slug": "dhaka",
+    "name": "Dhaka",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 17,
+    "lat": 23.78265,
+    "lon": 90.40566
+  },
+  {
+    "slug": "gazipur",
+    "name": "Gazipur",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 1,
+    "lat": 24.2303,
+    "lon": 90.6769
+  },
+  {
+    "slug": "paltan",
+    "name": "Paltan",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "savar",
+    "name": "Savar",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 2,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "sreepur",
+    "name": "Sreepur",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "tungi",
+    "name": "Tungi",
+    "state": "Dhaka",
+    "country": "Bangladesh",
+    "station_count": 2,
+    "lat": 23.87829,
+    "lon": 90.44807
+  },
+  {
+    "slug": "khulna",
+    "name": "Khulna",
+    "state": "Khulna",
+    "country": "Bangladesh",
+    "station_count": 2,
+    "lat": 22.8116,
+    "lon": 89.56869
+  },
+  {
+    "slug": "jamalpur",
+    "name": "Jamalpur",
+    "state": "Mymensingh Division",
+    "country": "Bangladesh",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "joypur-hat",
+    "name": "Joypur Hat",
+    "state": "Rajshahi Division",
+    "country": "Bangladesh",
+    "station_count": 1,
+    "lat": 25.27817,
+    "lon": 88.99265
+  },
+  {
+    "slug": "port-blair",
+    "name": "Port Blair",
+    "state": "Andaman and Nicobar Islands",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.65405,
+    "lon": 92.73406
+  },
+  {
+    "slug": "anantapur",
+    "name": "Anantapur",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 14.67589,
+    "lon": 77.59303
+  },
+  {
+    "slug": "chittoor",
+    "name": "Chittoor",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.20488,
+    "lon": 79.09789
+  },
+  {
+    "slug": "ellore",
+    "name": "Ellore",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.7107,
+    "lon": 81.0952
+  },
+  {
+    "slug": "guntur",
+    "name": "Guntur",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.3067,
+    "lon": 80.4365
+  },
+  {
+    "slug": "kadapa",
+    "name": "Kadapa",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 14.46505,
+    "lon": 78.82419
+  },
+  {
+    "slug": "machilipatnam",
+    "name": "Machilipatnam",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.1875,
+    "lon": 81.1317
+  },
+  {
+    "slug": "nellore",
+    "name": "Nellore",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "rajamahendravaram",
+    "name": "Rajamahendravaram",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.98729,
+    "lon": 81.73632
+  },
+  {
+    "slug": "tirupati",
+    "name": "Tirupati",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 3,
+    "lat": 13.66446,
+    "lon": 79.45044
+  },
+  {
+    "slug": "vijayawada",
+    "name": "Vijayawada",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 16.52166,
+    "lon": 80.63772
+  },
+  {
+    "slug": "visakhapatnam",
+    "name": "Visakhapatnam",
+    "state": "Andhra Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 17.72,
+    "lon": 83.3
+  },
+  {
+    "slug": "byrnihat",
+    "name": "Byrnihat",
+    "state": "Assam",
+    "country": "India",
+    "station_count": 2,
+    "lat": 26.07132,
+    "lon": 91.87488
+  },
+  {
+    "slug": "guwahati",
+    "name": "Guwahati",
+    "state": "Assam",
+    "country": "India",
+    "station_count": 4,
+    "lat": 26.16093,
+    "lon": 91.69261
+  },
+  {
+    "slug": "nagaon",
+    "name": "Nagaon",
+    "state": "Assam",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.34908,
+    "lon": 92.68449
+  },
+  {
+    "slug": "nalbari",
+    "name": "Nalbari",
+    "state": "Assam",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.44691,
+    "lon": 91.43906
+  },
+  {
+    "slug": "silchar",
+    "name": "Silchar",
+    "state": "Assam",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.82827,
+    "lon": 92.79525
+  },
+  {
+    "slug": "sivasagar",
+    "name": "Sivasagar",
+    "state": "Assam",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.98763,
+    "lon": 94.63657
+  },
+  {
+    "slug": "araria",
+    "name": "Araria",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 2,
+    "lat": 26.14226,
+    "lon": 87.45598
+  },
+  {
+    "slug": "arrah",
+    "name": "Arrah",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.56261,
+    "lon": 84.66326
+  },
+  {
+    "slug": "begusarai",
+    "name": "Begusarai",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.44427,
+    "lon": 86.14017
+  },
+  {
+    "slug": "bettiah",
+    "name": "Bettiah",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "bhagalpur",
+    "name": "Bhagalpur",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 2,
+    "lat": 25.2581,
+    "lon": 87.00098
+  },
+  {
+    "slug": "bihar-sharif",
+    "name": "Bihar Sharif",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.20476,
+    "lon": 85.51496
+  },
+  {
+    "slug": "buxar",
+    "name": "Buxar",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.55561,
+    "lon": 83.95094
+  },
+  {
+    "slug": "chhapra",
+    "name": "Chhapra",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.78083,
+    "lon": 84.74468
+  },
+  {
+    "slug": "darbhanga",
+    "name": "Darbhanga",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.15146,
+    "lon": 85.89342
+  },
+  {
+    "slug": "gaya",
+    "name": "Gaya",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 3,
+    "lat": 24.78347,
+    "lon": 84.99139
+  },
+  {
+    "slug": "hajipur",
+    "name": "Hajipur",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.69719,
+    "lon": 85.2459
+  },
+  {
+    "slug": "katihar",
+    "name": "Katihar",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.56008,
+    "lon": 87.55327
+  },
+  {
+    "slug": "kishanganj",
+    "name": "Kishanganj",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 4,
+    "lat": 26.06807,
+    "lon": 88.00372
+  },
+  {
+    "slug": "motihari",
+    "name": "Motihari",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "munger",
+    "name": "Munger",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.37678,
+    "lon": 86.47152
+  },
+  {
+    "slug": "muzaffarpur",
+    "name": "Muzaffarpur",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 3,
+    "lat": 26.12522,
+    "lon": 85.37595
+  },
+  {
+    "slug": "patna",
+    "name": "Patna",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 6,
+    "lat": 25.59818,
+    "lon": 85.12584
+  },
+  {
+    "slug": "purnia",
+    "name": "Purnia",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.36634,
+    "lon": 87.11747
+  },
+  {
+    "slug": "rajgir",
+    "name": "Rajgir",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.0328,
+    "lon": 85.41948
+  },
+  {
+    "slug": "raxaul",
+    "name": "Raxaul",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 2,
+    "lat": 27.01914,
+    "lon": 84.86153
+  },
+  {
+    "slug": "saharsa",
+    "name": "Saharsa",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.89236,
+    "lon": 86.59033
+  },
+  {
+    "slug": "samastipur",
+    "name": "Samastipur",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.85966,
+    "lon": 85.77944
+  },
+  {
+    "slug": "sasaram",
+    "name": "Sasaram",
+    "state": "Bihar",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.95282,
+    "lon": 84.0024
+  },
+  {
+    "slug": "chandigarh",
+    "name": "Chandigarh",
+    "state": "Chandigarh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 30.73292,
+    "lon": 76.75668
+  },
+  {
+    "slug": "bhilai",
+    "name": "Bhilai",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 3,
+    "lat": 21.20154,
+    "lon": 81.35543
+  },
+  {
+    "slug": "bilaspur",
+    "name": "Bilaspur",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.08815,
+    "lon": 82.13737
+  },
+  {
+    "slug": "chhal",
+    "name": "Chhal",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.11813,
+    "lon": 83.14061
+  },
+  {
+    "slug": "korba",
+    "name": "Korba",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.35832,
+    "lon": 82.64802
+  },
+  {
+    "slug": "kunjemura",
+    "name": "Kunjemura",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.12665,
+    "lon": 83.48321
+  },
+  {
+    "slug": "milupara",
+    "name": "Milupara",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.19102,
+    "lon": 83.5197
+  },
+  {
+    "slug": "raipur",
+    "name": "Raipur",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 21.272,
+    "lon": 81.64483
+  },
+  {
+    "slug": "tumidih",
+    "name": "Tumidih",
+    "state": "Chhattisgarh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.06631,
+    "lon": 83.3382
+  },
+  {
+    "slug": "defence-colony",
+    "name": "Defence Colony",
+    "state": "Delhi",
+    "country": "India",
+    "station_count": 5,
+    "lat": 28.54373,
+    "lon": 77.2018
+  },
+  {
+    "slug": "delhi",
+    "name": "Delhi",
+    "state": "Delhi",
+    "country": "India",
+    "station_count": 32,
+    "lat": 28.64998,
+    "lon": 77.16394
+  },
+  {
+    "slug": "deoli",
+    "name": "Deoli",
+    "state": "Delhi",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.5266,
+    "lon": 77.1493
+  },
+  {
+    "slug": "new-delhi",
+    "name": "New Delhi",
+    "state": "Delhi",
+    "country": "India",
+    "station_count": 35,
+    "lat": 28.61164,
+    "lon": 77.19598
+  },
+  {
+    "slug": "shahdara",
+    "name": "Shahdara",
+    "state": "Delhi",
+    "country": "India",
+    "station_count": 3,
+    "lat": 28.5845,
+    "lon": 77.14835
+  },
+  {
+    "slug": "calangute",
+    "name": "Calangute",
+    "state": "Goa",
+    "country": "India",
+    "station_count": 1,
+    "lat": 15.5318,
+    "lon": 73.7618
+  },
+  {
+    "slug": "morjim",
+    "name": "Morjim",
+    "state": "Goa",
+    "country": "India",
+    "station_count": 1,
+    "lat": 15.6445,
+    "lon": 73.7232
+  },
+  {
+    "slug": "ahmedabad",
+    "name": "Ahmedabad",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 9,
+    "lat": 23.03439,
+    "lon": 72.56526
+  },
+  {
+    "slug": "ankleshwar",
+    "name": "Ankleshwar",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.64364,
+    "lon": 73.01154
+  },
+  {
+    "slug": "bhavnagar",
+    "name": "Bhavnagar",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.75542,
+    "lon": 72.13906
+  },
+  {
+    "slug": "gandhinagar",
+    "name": "Gandhinagar",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 3,
+    "lat": 23.20972,
+    "lon": 72.67401
+  },
+  {
+    "slug": "hansot",
+    "name": "Hansot",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "nandesari",
+    "name": "Nandesari",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.4108,
+    "lon": 73.09792
+  },
+  {
+    "slug": "rajkot",
+    "name": "Rajkot",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.24885,
+    "lon": 70.77677
+  },
+  {
+    "slug": "sarkhej",
+    "name": "Sarkhej",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.03457,
+    "lon": 72.53288
+  },
+  {
+    "slug": "surat",
+    "name": "Surat",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 2,
+    "lat": 21.19392,
+    "lon": 72.8151
+  },
+  {
+    "slug": "vadodara",
+    "name": "Vadodara",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.32015,
+    "lon": 73.21629
+  },
+  {
+    "slug": "vapi",
+    "name": "Vapi",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 20.35087,
+    "lon": 72.91331
+  },
+  {
+    "slug": "vatva",
+    "name": "Vatva",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.96898,
+    "lon": 72.64752
+  },
+  {
+    "slug": "visnagar",
+    "name": "Visnagar",
+    "state": "Gujarat",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.59315,
+    "lon": 72.37279
+  },
+  {
+    "slug": "ambala",
+    "name": "Ambala",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "bahadurgarh",
+    "name": "Bahadurgarh",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 2,
+    "lat": 28.62867,
+    "lon": 76.90432
+  },
+  {
+    "slug": "ballabgarh",
+    "name": "Ballabgarh",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.34252,
+    "lon": 77.31813
+  },
+  {
+    "slug": "bhiwani",
+    "name": "Bhiwani",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.80622,
+    "lon": 76.1411
+  },
+  {
+    "slug": "charkhi-dadri",
+    "name": "Charkhi Dadri",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.59388,
+    "lon": 76.27065
+  },
+  {
+    "slug": "dharuhera",
+    "name": "Dharuhera",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.2068,
+    "lon": 76.7997
+  },
+  {
+    "slug": "faridabad",
+    "name": "Faridabad",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 4,
+    "lat": 28.40433,
+    "lon": 77.31199
+  },
+  {
+    "slug": "fatehabad",
+    "name": "Fatehabad",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.50347,
+    "lon": 75.46968
+  },
+  {
+    "slug": "gurugram",
+    "name": "Gurugram",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 8,
+    "lat": 28.43129,
+    "lon": 77.08538
+  },
+  {
+    "slug": "hisar",
+    "name": "Hisar",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.14012,
+    "lon": 75.74183
+  },
+  {
+    "slug": "jind",
+    "name": "Jind",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.30874,
+    "lon": 76.34519
+  },
+  {
+    "slug": "kaithal",
+    "name": "Kaithal",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.80211,
+    "lon": 76.41434
+  },
+  {
+    "slug": "karnal",
+    "name": "Karnal",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.5955,
+    "lon": 76.99997
+  },
+  {
+    "slug": "kurukshetra",
+    "name": "Kurukshetra",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.96698,
+    "lon": 76.87583
+  },
+  {
+    "slug": "mandikhera",
+    "name": "Mandikhera",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.90012,
+    "lon": 76.99391
+  },
+  {
+    "slug": "manesar",
+    "name": "Manesar",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 3,
+    "lat": 28.33802,
+    "lon": 76.92519
+  },
+  {
+    "slug": "narnaul",
+    "name": "Narnaul",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.06432,
+    "lon": 76.11291
+  },
+  {
+    "slug": "palwal",
+    "name": "Palwal",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.14856,
+    "lon": 77.33004
+  },
+  {
+    "slug": "panchkula",
+    "name": "Panchkula",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "panipat",
+    "name": "Panipat",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.50025,
+    "lon": 76.99474
+  },
+  {
+    "slug": "rohtak",
+    "name": "Rohtak",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.87008,
+    "lon": 76.6205
+  },
+  {
+    "slug": "sirsa",
+    "name": "Sirsa",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.53746,
+    "lon": 75.01728
+  },
+  {
+    "slug": "sonipat",
+    "name": "Sonipat",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.02743,
+    "lon": 77.06685
+  },
+  {
+    "slug": "yamuna-nagar",
+    "name": "Yamuna Nagar",
+    "state": "Haryana",
+    "country": "India",
+    "station_count": 1,
+    "lat": 30.14806,
+    "lon": 77.28936
+  },
+  {
+    "slug": "baddi",
+    "name": "Baddi",
+    "state": "Himachal Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "awantipur",
+    "name": "Awantipur",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 34.03161,
+    "lon": 75.00971
+  },
+  {
+    "slug": "bandipura",
+    "name": "Bandipura",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 34.4494,
+    "lon": 74.6635
+  },
+  {
+    "slug": "doda",
+    "name": "Doda",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "gho-brahmanan-de",
+    "name": "Gho Brahmanan de",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 32.56693,
+    "lon": 75.01987
+  },
+  {
+    "slug": "jammu",
+    "name": "Jammu",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 3,
+    "lat": 32.71049,
+    "lon": 74.85897
+  },
+  {
+    "slug": "kargil",
+    "name": "Kargil",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 34.55897,
+    "lon": 76.12614
+  },
+  {
+    "slug": "leh",
+    "name": "Leh",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 34.14554,
+    "lon": 77.56328
+  },
+  {
+    "slug": "rajaori",
+    "name": "Rajaori",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 2,
+    "lat": 33.16241,
+    "lon": 74.23779
+  },
+  {
+    "slug": "riasi",
+    "name": "Riasi",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 33.0801,
+    "lon": 74.83987
+  },
+  {
+    "slug": "srinagar",
+    "name": "Srinagar",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 7,
+    "lat": 34.08647,
+    "lon": 74.82164
+  },
+  {
+    "slug": "udhampur",
+    "name": "Udhampur",
+    "state": "Jammu and Kashmir",
+    "country": "India",
+    "station_count": 1,
+    "lat": 32.9165,
+    "lon": 75.1326
+  },
+  {
+    "slug": "dhanbad",
+    "name": "Dhanbad",
+    "state": "Jharkhand",
+    "country": "India",
+    "station_count": 2,
+    "lat": 23.80862,
+    "lon": 86.46196
+  },
+  {
+    "slug": "jorapokhar",
+    "name": "Jorapokhar",
+    "state": "Jharkhand",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.70791,
+    "lon": 86.41467
+  },
+  {
+    "slug": "pathardih",
+    "name": "Pathardih",
+    "state": "Jharkhand",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.66988,
+    "lon": 86.41173
+  },
+  {
+    "slug": "bagalkot",
+    "name": "Bagalkot",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.17281,
+    "lon": 75.65969
+  },
+  {
+    "slug": "belgaum",
+    "name": "Belgaum",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 2,
+    "lat": 15.88865,
+    "lon": 74.54175
+  },
+  {
+    "slug": "bengaluru",
+    "name": "Bengaluru",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 18,
+    "lat": 12.93382,
+    "lon": 77.60543
+  },
+  {
+    "slug": "bidar",
+    "name": "Bidar",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 17.93031,
+    "lon": 77.48219
+  },
+  {
+    "slug": "chamarajanagar",
+    "name": "Chamarajanagar",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.92661,
+    "lon": 76.93114
+  },
+  {
+    "slug": "chikkaballapur",
+    "name": "Chikkaballapur",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.4286,
+    "lon": 77.73109
+  },
+  {
+    "slug": "chikkamagaluru",
+    "name": "Chikkamagaluru",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.32803,
+    "lon": 75.79706
+  },
+  {
+    "slug": "davanagere",
+    "name": "Davanagere",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 14.4758,
+    "lon": 75.9052
+  },
+  {
+    "slug": "dharwad",
+    "name": "Dharwad",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 15.45971,
+    "lon": 75.00838
+  },
+  {
+    "slug": "gadag",
+    "name": "Gadag",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 15.41146,
+    "lon": 75.63813
+  },
+  {
+    "slug": "hassan",
+    "name": "Hassan",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.00856,
+    "lon": 76.12526
+  },
+  {
+    "slug": "haveri",
+    "name": "Haveri",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 14.7918,
+    "lon": 75.3896
+  },
+  {
+    "slug": "honnali",
+    "name": "Honnali",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "hubballi",
+    "name": "Hubballi",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 2,
+    "lat": 15.36163,
+    "lon": 75.12838
+  },
+  {
+    "slug": "kalaburagi",
+    "name": "Kalaburagi",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 2,
+    "lat": 17.32825,
+    "lon": 76.83414
+  },
+  {
+    "slug": "karwar",
+    "name": "Karwar",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 14.81667,
+    "lon": 74.141
+  },
+  {
+    "slug": "kolar",
+    "name": "Kolar",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.12763,
+    "lon": 78.15701
+  },
+  {
+    "slug": "koppal",
+    "name": "Koppal",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 2,
+    "lat": 15.34763,
+    "lon": 76.18177
+  },
+  {
+    "slug": "madikeri",
+    "name": "Madikeri",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 2,
+    "lat": 12.41591,
+    "lon": 75.73505
+  },
+  {
+    "slug": "mangalore",
+    "name": "Mangalore",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 2,
+    "lat": 12.88925,
+    "lon": 74.853
+  },
+  {
+    "slug": "mysuru",
+    "name": "Mysuru",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.35114,
+    "lon": 76.62492
+  },
+  {
+    "slug": "raichur",
+    "name": "Raichur",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.20814,
+    "lon": 77.34842
+  },
+  {
+    "slug": "ramanagara",
+    "name": "Ramanagara",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.73341,
+    "lon": 77.29805
+  },
+  {
+    "slug": "shivamogga",
+    "name": "Shivamogga",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.94,
+    "lon": 75.55592
+  },
+  {
+    "slug": "tumakuru",
+    "name": "Tumakuru",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.37752,
+    "lon": 77.09907
+  },
+  {
+    "slug": "vijayapura",
+    "name": "Vijayapura",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.80264,
+    "lon": 75.72269
+  },
+  {
+    "slug": "yadgir",
+    "name": "Yadgir",
+    "state": "Karnataka",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.7602,
+    "lon": 77.1428
+  },
+  {
+    "slug": "cherpulassery",
+    "name": "Cherpulassery",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.89236,
+    "lon": 76.2344
+  },
+  {
+    "slug": "eloor",
+    "name": "Eloor",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.07323,
+    "lon": 76.30276
+  },
+  {
+    "slug": "ernakulam",
+    "name": "Ernakulam",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 9.98724,
+    "lon": 76.28204
+  },
+  {
+    "slug": "kannur",
+    "name": "Kannur",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.875,
+    "lon": 75.3732
+  },
+  {
+    "slug": "kochi",
+    "name": "Kochi",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 9.96945,
+    "lon": 76.32119
+  },
+  {
+    "slug": "kollam",
+    "name": "Kollam",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 8.8787,
+    "lon": 76.6073
+  },
+  {
+    "slug": "kozhikode",
+    "name": "Kozhikode",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.24908,
+    "lon": 75.78437
+  },
+  {
+    "slug": "thiruvananthapuram",
+    "name": "Thiruvananthapuram",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 2,
+    "lat": 8.53931,
+    "lon": 76.91504
+  },
+  {
+    "slug": "trichur",
+    "name": "Trichur",
+    "state": "Kerala",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.5324,
+    "lon": 76.2159
+  },
+  {
+    "slug": "bhopal",
+    "name": "Bhopal",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 23.24184,
+    "lon": 77.41551
+  },
+  {
+    "slug": "damoh",
+    "name": "Damoh",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.81741,
+    "lon": 79.44632
+  },
+  {
+    "slug": "dewas",
+    "name": "Dewas",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.96826,
+    "lon": 76.06412
+  },
+  {
+    "slug": "gwalior",
+    "name": "Gwalior",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 26.2184,
+    "lon": 78.1821
+  },
+  {
+    "slug": "indore",
+    "name": "Indore",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 6,
+    "lat": 22.72573,
+    "lon": 75.86493
+  },
+  {
+    "slug": "jabalpur",
+    "name": "Jabalpur",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 23.1732,
+    "lon": 79.94481
+  },
+  {
+    "slug": "katni",
+    "name": "Katni",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.83378,
+    "lon": 80.39122
+  },
+  {
+    "slug": "maihar",
+    "name": "Maihar",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.26172,
+    "lon": 80.78902
+  },
+  {
+    "slug": "mandideep",
+    "name": "Mandideep",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.10844,
+    "lon": 77.51143
+  },
+  {
+    "slug": "pithampur",
+    "name": "Pithampur",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.62476,
+    "lon": 75.67524
+  },
+  {
+    "slug": "ratlam",
+    "name": "Ratlam",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.33179,
+    "lon": 75.0459
+  },
+  {
+    "slug": "satna",
+    "name": "Satna",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.58434,
+    "lon": 80.85494
+  },
+  {
+    "slug": "singrauli",
+    "name": "Singrauli",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.10897,
+    "lon": 82.64558
+  },
+  {
+    "slug": "ujjain",
+    "name": "Ujjain",
+    "state": "Madhya Pradesh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 23.17303,
+    "lon": 75.78422
+  },
+  {
+    "slug": "ahmednagar",
+    "name": "Ahmednagar",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.10122,
+    "lon": 74.73339
+  },
+  {
+    "slug": "akola",
+    "name": "Akola",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 20.71952,
+    "lon": 77.00025
+  },
+  {
+    "slug": "amarnath",
+    "name": "Amarnath",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.1971,
+    "lon": 73.188
+  },
+  {
+    "slug": "amravati",
+    "name": "Amravati",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 18.72766,
+    "lon": 79.15384
+  },
+  {
+    "slug": "aurangabad",
+    "name": "Aurangabad",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 3,
+    "lat": 21.08395,
+    "lon": 77.57979
+  },
+  {
+    "slug": "badlapur",
+    "name": "Badlapur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.16485,
+    "lon": 73.23409
+  },
+  {
+    "slug": "beed",
+    "name": "Beed",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 18.989,
+    "lon": 75.7571
+  },
+  {
+    "slug": "belapur",
+    "name": "Belapur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.02439,
+    "lon": 73.04067
+  },
+  {
+    "slug": "bhiwandi",
+    "name": "Bhiwandi",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.30907,
+    "lon": 73.05722
+  },
+  {
+    "slug": "boisar",
+    "name": "Boisar",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.78609,
+    "lon": 72.75797
+  },
+  {
+    "slug": "chandrapur",
+    "name": "Chandrapur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 2,
+    "lat": 19.81143,
+    "lon": 78.43411
+  },
+  {
+    "slug": "dhule",
+    "name": "Dhule",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 20.91895,
+    "lon": 74.77639
+  },
+  {
+    "slug": "dombivli",
+    "name": "Dombivli",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.2183,
+    "lon": 73.0845
+  },
+  {
+    "slug": "hingoli",
+    "name": "Hingoli",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.7175,
+    "lon": 77.1498
+  },
+  {
+    "slug": "jalgaon",
+    "name": "Jalgaon",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.00126,
+    "lon": 75.5656
+  },
+  {
+    "slug": "jalna",
+    "name": "Jalna",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.85462,
+    "lon": 75.90589
+  },
+  {
+    "slug": "kalyan",
+    "name": "Kalyan",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.25292,
+    "lon": 73.14202
+  },
+  {
+    "slug": "kolhapur",
+    "name": "Kolhapur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 2,
+    "lat": 16.70071,
+    "lon": 74.24661
+  },
+  {
+    "slug": "latur",
+    "name": "Latur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 18.39963,
+    "lon": 76.57452
+  },
+  {
+    "slug": "lonavla",
+    "name": "Lonavla",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 18.587,
+    "lon": 73.4078
+  },
+  {
+    "slug": "mahad",
+    "name": "Mahad",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 18.10234,
+    "lon": 73.47837
+  },
+  {
+    "slug": "malegaon",
+    "name": "Malegaon",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 20.55571,
+    "lon": 74.52924
+  },
+  {
+    "slug": "mira-bhayandar",
+    "name": "Mira Bhayandar",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.29648,
+    "lon": 72.84092
+  },
+  {
+    "slug": "mumbai",
+    "name": "Mumbai",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 30,
+    "lat": 19.09724,
+    "lon": 72.86496
+  },
+  {
+    "slug": "nagpur",
+    "name": "Nagpur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 5,
+    "lat": 21.1372,
+    "lon": 79.06213
+  },
+  {
+    "slug": "nanded",
+    "name": "Nanded",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.17385,
+    "lon": 77.29629
+  },
+  {
+    "slug": "nashik",
+    "name": "Nashik",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 4,
+    "lat": 19.98455,
+    "lon": 73.77509
+  },
+  {
+    "slug": "navi-mumbai",
+    "name": "Navi Mumbai",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 6,
+    "lat": 19.05983,
+    "lon": 73.04647
+  },
+  {
+    "slug": "parbhani",
+    "name": "Parbhani",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.26559,
+    "lon": 76.76146
+  },
+  {
+    "slug": "pimpri-chinchwad",
+    "name": "Pimpri Chinchwad",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 4,
+    "lat": 18.61437,
+    "lon": 73.7916
+  },
+  {
+    "slug": "pune",
+    "name": "Pune",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 12,
+    "lat": 18.53934,
+    "lon": 73.84096
+  },
+  {
+    "slug": "sangli",
+    "name": "Sangli",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 16.5038,
+    "lon": 74.3623
+  },
+  {
+    "slug": "satara",
+    "name": "Satara",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 17.69665,
+    "lon": 74.00339
+  },
+  {
+    "slug": "solapur",
+    "name": "Solapur",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 3,
+    "lat": 17.64931,
+    "lon": 75.90871
+  },
+  {
+    "slug": "thane",
+    "name": "Thane",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 3,
+    "lat": 19.22737,
+    "lon": 72.96277
+  },
+  {
+    "slug": "ulhasnagar",
+    "name": "Ulhasnagar",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 2,
+    "lat": 19.22694,
+    "lon": 73.16106
+  },
+  {
+    "slug": "virar",
+    "name": "Virar",
+    "state": "Maharashtra",
+    "country": "India",
+    "station_count": 1,
+    "lat": 19.44582,
+    "lon": 72.79882
+  },
+  {
+    "slug": "imphal",
+    "name": "Imphal",
+    "state": "Manipur",
+    "country": "India",
+    "station_count": 2,
+    "lat": 24.78658,
+    "lon": 93.93547
+  },
+  {
+    "slug": "shillong",
+    "name": "Shillong",
+    "state": "Meghalaya",
+    "country": "India",
+    "station_count": 2,
+    "lat": 25.56947,
+    "lon": 91.89638
+  },
+  {
+    "slug": "aizawl",
+    "name": "Aizawl",
+    "state": "Mizoram",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.71763,
+    "lon": 92.71928
+  },
+  {
+    "slug": "kohima",
+    "name": "Kohima",
+    "state": "Nagaland",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.66354,
+    "lon": 94.09899
+  },
+  {
+    "slug": "angul",
+    "name": "Angul",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "balasore",
+    "name": "Balasore",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.51145,
+    "lon": 86.89116
+  },
+  {
+    "slug": "barbil",
+    "name": "Barbil",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.47001,
+    "lon": 86.88444
+  },
+  {
+    "slug": "baripada",
+    "name": "Baripada",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "bhubaneswar",
+    "name": "Bhubaneswar",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 2,
+    "lat": 20.29285,
+    "lon": 85.82292
+  },
+  {
+    "slug": "bileipada",
+    "name": "Bileipada",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "brajrajnagar",
+    "name": "Brajrajnagar",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "byasanagar",
+    "name": "Byasanagar",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 20.94039,
+    "lon": 86.11313
+  },
+  {
+    "slug": "cuttack",
+    "name": "Cuttack",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 20.47195,
+    "lon": 85.84874
+  },
+  {
+    "slug": "jaleshwar",
+    "name": "Jaleshwar",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.9409,
+    "lon": 87.2739
+  },
+  {
+    "slug": "keonjhar",
+    "name": "Keonjhar",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "nayagarh",
+    "name": "Nayagarh",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "rairangpur",
+    "name": "Rairangpur",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.26582,
+    "lon": 86.17483
+  },
+  {
+    "slug": "rourkela",
+    "name": "Rourkela",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 3,
+    "lat": 22.21852,
+    "lon": 84.85111
+  },
+  {
+    "slug": "suakati",
+    "name": "Suakati",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "talcher",
+    "name": "Talcher",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "tensa",
+    "name": "Tensa",
+    "state": "Odisha",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.86999,
+    "lon": 85.16702
+  },
+  {
+    "slug": "puducherry",
+    "name": "Puducherry",
+    "state": "Puducherry",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.9309,
+    "lon": 79.8027
+  },
+  {
+    "slug": "amritsar",
+    "name": "Amritsar",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 31.62,
+    "lon": 74.87651
+  },
+  {
+    "slug": "bathinda",
+    "name": "Bathinda",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "jalandhar",
+    "name": "Jalandhar",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 31.32191,
+    "lon": 75.57891
+  },
+  {
+    "slug": "khanna",
+    "name": "Khanna",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 30.73606,
+    "lon": 76.20969
+  },
+  {
+    "slug": "ludhiana",
+    "name": "Ludhiana",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 30.9028,
+    "lon": 75.8086
+  },
+  {
+    "slug": "mandi-gobindgarh",
+    "name": "Mandi Gobindgarh",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 30.64996,
+    "lon": 76.33144
+  },
+  {
+    "slug": "mullanpur-dhaka",
+    "name": "Mullanpur Dhaka",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 2,
+    "lat": 30.8988,
+    "lon": 75.7391
+  },
+  {
+    "slug": "patiala",
+    "name": "Patiala",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 30.34939,
+    "lon": 76.36664
+  },
+  {
+    "slug": "rupnagar",
+    "name": "Rupnagar",
+    "state": "Punjab",
+    "country": "India",
+    "station_count": 1,
+    "lat": 31.03255,
+    "lon": 76.5623
+  },
+  {
+    "slug": "-dholpur",
+    "name": " Dholpur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.69956,
+    "lon": 77.89888
+  },
+  {
+    "slug": "ajmer",
+    "name": "Ajmer",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.47086,
+    "lon": 74.64659
+  },
+  {
+    "slug": "alwar",
+    "name": "Alwar",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.55479,
+    "lon": 76.61154
+  },
+  {
+    "slug": "banswara",
+    "name": "Banswara",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.55519,
+    "lon": 74.44001
+  },
+  {
+    "slug": "baran",
+    "name": "Baran",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.10601,
+    "lon": 76.46995
+  },
+  {
+    "slug": "barmer",
+    "name": "Barmer",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.7473,
+    "lon": 71.39399
+  },
+  {
+    "slug": "bhilwara",
+    "name": "Bhilwara",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.33961,
+    "lon": 74.61888
+  },
+  {
+    "slug": "bhiwadi",
+    "name": "Bhiwadi",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 2,
+    "lat": 28.20109,
+    "lon": 76.84579
+  },
+  {
+    "slug": "bikaner",
+    "name": "Bikaner",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.01879,
+    "lon": 73.29266
+  },
+  {
+    "slug": "bundi",
+    "name": "Bundi",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.43577,
+    "lon": 75.64427
+  },
+  {
+    "slug": "chittorgarh",
+    "name": "Chittorgarh",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.89205,
+    "lon": 74.62353
+  },
+  {
+    "slug": "churu",
+    "name": "Churu",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.29614,
+    "lon": 74.9617
+  },
+  {
+    "slug": "dausa",
+    "name": "Dausa",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.89555,
+    "lon": 76.33475
+  },
+  {
+    "slug": "dungarpur",
+    "name": "Dungarpur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.838,
+    "lon": 73.71507
+  },
+  {
+    "slug": "hanumangarh",
+    "name": "Hanumangarh",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.61075,
+    "lon": 74.28361
+  },
+  {
+    "slug": "jaipur",
+    "name": "Jaipur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 6,
+    "lat": 26.89344,
+    "lon": 75.78899
+  },
+  {
+    "slug": "jaisalmer",
+    "name": "Jaisalmer",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.91233,
+    "lon": 70.90917
+  },
+  {
+    "slug": "jalore",
+    "name": "Jalore",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.33889,
+    "lon": 72.63546
+  },
+  {
+    "slug": "jhalawar",
+    "name": "Jhalawar",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.5884,
+    "lon": 76.17278
+  },
+  {
+    "slug": "jhunjhunu",
+    "name": "Jhunjhunu",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.10899,
+    "lon": 75.38658
+  },
+  {
+    "slug": "jodhpur",
+    "name": "Jodhpur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 5,
+    "lat": 26.27833,
+    "lon": 73.03917
+  },
+  {
+    "slug": "karauli",
+    "name": "Karauli",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.50618,
+    "lon": 77.02599
+  },
+  {
+    "slug": "kishangarh",
+    "name": "Kishangarh",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.6236,
+    "lon": 75.0273
+  },
+  {
+    "slug": "kota",
+    "name": "Kota",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 3,
+    "lat": 25.168,
+    "lon": 75.84502
+  },
+  {
+    "slug": "nagaur",
+    "name": "Nagaur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.21349,
+    "lon": 73.73444
+  },
+  {
+    "slug": "pali",
+    "name": "Pali",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.77106,
+    "lon": 73.34023
+  },
+  {
+    "slug": "pratapgarh",
+    "name": "Pratapgarh",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.0412,
+    "lon": 74.7807
+  },
+  {
+    "slug": "rajsamand",
+    "name": "Rajsamand",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.03636,
+    "lon": 73.8835
+  },
+  {
+    "slug": "sawai-madhopur",
+    "name": "Sawai Madhopur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.03144,
+    "lon": 76.35933
+  },
+  {
+    "slug": "sikar",
+    "name": "Sikar",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.60891,
+    "lon": 75.1533
+  },
+  {
+    "slug": "sirohi",
+    "name": "Sirohi",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.88526,
+    "lon": 72.85755
+  },
+  {
+    "slug": "sri-ganganagar",
+    "name": "Sri Ganganagar",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.93162,
+    "lon": 73.86451
+  },
+  {
+    "slug": "tonk",
+    "name": "Tonk",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.15993,
+    "lon": 75.78052
+  },
+  {
+    "slug": "udaipur",
+    "name": "Udaipur",
+    "state": "Rajasthan",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.58862,
+    "lon": 73.63214
+  },
+  {
+    "slug": "gangtok",
+    "name": "Gangtok",
+    "state": "Sikkim",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.33853,
+    "lon": 88.6141
+  },
+  {
+    "slug": "ariyalur",
+    "name": "Ariyalur",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.06825,
+    "lon": 79.07033
+  },
+  {
+    "slug": "auroville",
+    "name": "Auroville",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "chengalpattu",
+    "name": "Chengalpattu",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.87773,
+    "lon": 80.08348
+  },
+  {
+    "slug": "chennai",
+    "name": "Chennai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 10,
+    "lat": 13.06864,
+    "lon": 80.24157
+  },
+  {
+    "slug": "coimbatore",
+    "name": "Coimbatore",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 3,
+    "lat": 10.98763,
+    "lon": 77.00695
+  },
+  {
+    "slug": "cuddalore",
+    "name": "Cuddalore",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 2,
+    "lat": 11.72338,
+    "lon": 79.75159
+  },
+  {
+    "slug": "dindigul",
+    "name": "Dindigul",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.35854,
+    "lon": 77.98432
+  },
+  {
+    "slug": "gummidipoondi",
+    "name": "Gummidipoondi",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 13.4127,
+    "lon": 80.1081
+  },
+  {
+    "slug": "hosur",
+    "name": "Hosur",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.747,
+    "lon": 77.81381
+  },
+  {
+    "slug": "kanchipuram",
+    "name": "Kanchipuram",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.86462,
+    "lon": 79.65997
+  },
+  {
+    "slug": "karambakkudi",
+    "name": "Karambakkudi",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "karur",
+    "name": "Karur",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.96782,
+    "lon": 78.08088
+  },
+  {
+    "slug": "madurai",
+    "name": "Madurai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "namakkal",
+    "name": "Namakkal",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.27399,
+    "lon": 78.16355
+  },
+  {
+    "slug": "negapatam",
+    "name": "Negapatam",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.79855,
+    "lon": 79.83821
+  },
+  {
+    "slug": "ooty",
+    "name": "Ooty",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 2,
+    "lat": 11.40683,
+    "lon": 76.7139
+  },
+  {
+    "slug": "palkalaiperur",
+    "name": "Palkalaiperur",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.68116,
+    "lon": 78.74175
+  },
+  {
+    "slug": "perundurai",
+    "name": "Perundurai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.25824,
+    "lon": 77.55276
+  },
+  {
+    "slug": "pudukkottai",
+    "name": "Pudukkottai",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.42342,
+    "lon": 78.78489
+  },
+  {
+    "slug": "ramanathapuram",
+    "name": "Ramanathapuram",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 9.36399,
+    "lon": 78.83198
+  },
+  {
+    "slug": "ranipet",
+    "name": "Ranipet",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.95271,
+    "lon": 79.30394
+  },
+  {
+    "slug": "salem",
+    "name": "Salem",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.67911,
+    "lon": 78.12505
+  },
+  {
+    "slug": "semmandalam",
+    "name": "Semmandalam",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "sivakasi",
+    "name": "Sivakasi",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "thanjavur",
+    "name": "Thanjavur",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.76548,
+    "lon": 79.139
+  },
+  {
+    "slug": "tiruchirappalli",
+    "name": "Tiruchirappalli",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 10.81135,
+    "lon": 78.67614
+  },
+  {
+    "slug": "tirunelveli",
+    "name": "Tirunelveli",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 8.72778,
+    "lon": 77.69403
+  },
+  {
+    "slug": "tirupparangunram",
+    "name": "Tirupparangunram",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 9.86594,
+    "lon": 78.02267
+  },
+  {
+    "slug": "tirupur",
+    "name": "Tirupur",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 11.09736,
+    "lon": 77.32287
+  },
+  {
+    "slug": "vellore",
+    "name": "Vellore",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 12.90949,
+    "lon": 79.13186
+  },
+  {
+    "slug": "virudhunagar",
+    "name": "Virudhunagar",
+    "state": "Tamil Nadu",
+    "country": "India",
+    "station_count": 1,
+    "lat": 9.55938,
+    "lon": 77.94883
+  },
+  {
+    "slug": "hyderabad",
+    "name": "Hyderabad",
+    "state": "Telangana",
+    "country": "India",
+    "station_count": 19,
+    "lat": 18.39595,
+    "lon": 77.21582
+  },
+  {
+    "slug": "agartala",
+    "name": "Agartala",
+    "state": "Tripura",
+    "country": "India",
+    "station_count": 2,
+    "lat": 23.84019,
+    "lon": 91.28072
+  },
+  {
+    "slug": "agra",
+    "name": "Agra",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 6,
+    "lat": 27.18414,
+    "lon": 77.99072
+  },
+  {
+    "slug": "baghpat",
+    "name": "Baghpat",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.96495,
+    "lon": 77.27876
+  },
+  {
+    "slug": "bareilly",
+    "name": "Bareilly",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 28.37435,
+    "lon": 79.42205
+  },
+  {
+    "slug": "bulandshahr",
+    "name": "Bulandshahr",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.40696,
+    "lon": 77.84983
+  },
+  {
+    "slug": "dasna",
+    "name": "Dasna",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.69453,
+    "lon": 77.49471
+  },
+  {
+    "slug": "firozabad",
+    "name": "Firozabad",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 27.16415,
+    "lon": 78.38613
+  },
+  {
+    "slug": "ghaziabad",
+    "name": "Ghaziabad",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 5,
+    "lat": 28.65268,
+    "lon": 77.38133
+  },
+  {
+    "slug": "gorakhpur",
+    "name": "Gorakhpur",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "greater-noida",
+    "name": "Greater Noida",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 28.51489,
+    "lon": 77.46783
+  },
+  {
+    "slug": "hapur",
+    "name": "Hapur",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.72565,
+    "lon": 77.74968
+  },
+  {
+    "slug": "jhansi",
+    "name": "Jhansi",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.4547,
+    "lon": 78.6039
+  },
+  {
+    "slug": "kanpur",
+    "name": "Kanpur",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 26.48007,
+    "lon": 80.2837
+  },
+  {
+    "slug": "khurja",
+    "name": "Khurja",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.23489,
+    "lon": 77.8683
+  },
+  {
+    "slug": "loni",
+    "name": "Loni",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 28.7505,
+    "lon": 77.28678
+  },
+  {
+    "slug": "lucknow",
+    "name": "Lucknow",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 6,
+    "lat": 26.85063,
+    "lon": 80.94613
+  },
+  {
+    "slug": "meerut",
+    "name": "Meerut",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 28.99726,
+    "lon": 77.71802
+  },
+  {
+    "slug": "moradabad",
+    "name": "Moradabad",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 6,
+    "lat": 28.83501,
+    "lon": 78.73869
+  },
+  {
+    "slug": "muradnagar",
+    "name": "Muradnagar",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 28.79745,
+    "lon": 77.53892
+  },
+  {
+    "slug": "muzaffarnagar",
+    "name": "Muzaffarnagar",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.47235,
+    "lon": 77.7194
+  },
+  {
+    "slug": "nautanwa",
+    "name": "Nautanwa",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.48952,
+    "lon": 83.27909
+  },
+  {
+    "slug": "noida",
+    "name": "Noida",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 5,
+    "lat": 28.58209,
+    "lon": 77.3462
+  },
+  {
+    "slug": "pachperwa",
+    "name": "Pachperwa",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "prayagraj",
+    "name": "Prayagraj",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 3,
+    "lat": 25.45627,
+    "lon": 81.86917
+  },
+  {
+    "slug": "salon",
+    "name": "Salon",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.0946,
+    "lon": 81.3678
+  },
+  {
+    "slug": "sector",
+    "name": "Sector",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 2,
+    "lat": 28.6017,
+    "lon": 77.36691
+  },
+  {
+    "slug": "varanasi",
+    "name": "Varanasi",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 4,
+    "lat": 25.30966,
+    "lon": 82.97435
+  },
+  {
+    "slug": "vrindavan",
+    "name": "Vrindavan",
+    "state": "Uttar Pradesh",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.57141,
+    "lon": 77.65576
+  },
+  {
+    "slug": "dehradun",
+    "name": "Dehradun",
+    "state": "Uttarakhand",
+    "country": "India",
+    "station_count": 1,
+    "lat": 30.26944,
+    "lon": 78.04417
+  },
+  {
+    "slug": "kashipur",
+    "name": "Kashipur",
+    "state": "Uttarakhand",
+    "country": "India",
+    "station_count": 1,
+    "lat": 29.21241,
+    "lon": 78.96118
+  },
+  {
+    "slug": "rishikesh",
+    "name": "Rishikesh",
+    "state": "Uttarakhand",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "ahmadpur",
+    "name": "Ahmadpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.80868,
+    "lon": 87.79847
+  },
+  {
+    "slug": "aistala",
+    "name": "Aistala",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 23.23247,
+    "lon": 88.55676
+  },
+  {
+    "slug": "alipur-duar",
+    "name": "Alipur Duar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 26.49883,
+    "lon": 89.52907
+  },
+  {
+    "slug": "amlagora",
+    "name": "Amlagora",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.85905,
+    "lon": 87.35516
+  },
+  {
+    "slug": "amtala",
+    "name": "Amtala",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.40584,
+    "lon": 88.27856
+  },
+  {
+    "slug": "arambagh",
+    "name": "Arambagh",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.94006,
+    "lon": 87.69056
+  },
+  {
+    "slug": "asansol",
+    "name": "Asansol",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 9,
+    "lat": 23.67449,
+    "lon": 87.01168
+  },
+  {
+    "slug": "ashoknagar-kalyangarh",
+    "name": "Ashoknagar Kalyangarh",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "baduria",
+    "name": "Baduria",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.70454,
+    "lon": 88.81848
+  },
+  {
+    "slug": "bagdogra",
+    "name": "Bagdogra",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.71338,
+    "lon": 88.35819
+  },
+  {
+    "slug": "baharampur",
+    "name": "Baharampur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "baidyabati",
+    "name": "Baidyabati",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.77248,
+    "lon": 88.33782
+  },
+  {
+    "slug": "balarampur",
+    "name": "Balarampur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.03464,
+    "lon": 86.36452
+  },
+  {
+    "slug": "bali",
+    "name": "Bali",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 22.64474,
+    "lon": 88.34463
+  },
+  {
+    "slug": "bali-chak",
+    "name": "Bali Chak",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 22.30805,
+    "lon": 87.65273
+  },
+  {
+    "slug": "balurghat",
+    "name": "Balurghat",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 25.23401,
+    "lon": 88.77918
+  },
+  {
+    "slug": "bangaon",
+    "name": "Bangaon",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "bankra",
+    "name": "Bankra",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.62677,
+    "lon": 88.29255
+  },
+  {
+    "slug": "bankura",
+    "name": "Bankura",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 23.22667,
+    "lon": 86.96953
+  },
+  {
+    "slug": "bansbaria",
+    "name": "Bansbaria",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.9931,
+    "lon": 88.38688
+  },
+  {
+    "slug": "bara-bazar",
+    "name": "Bara Bazar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "baranagar",
+    "name": "Baranagar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "barddhaman",
+    "name": "Barddhaman",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.24664,
+    "lon": 87.85301
+  },
+  {
+    "slug": "barrackpore",
+    "name": "Barrackpore",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 22.76619,
+    "lon": 88.37732
+  },
+  {
+    "slug": "baruipur",
+    "name": "Baruipur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "beldanga",
+    "name": "Beldanga",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "bhadreswar",
+    "name": "Bhadreswar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.80961,
+    "lon": 88.34257
+  },
+  {
+    "slug": "birpara",
+    "name": "Birpara",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.79553,
+    "lon": 89.14505
+  },
+  {
+    "slug": "bishnupur",
+    "name": "Bishnupur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "bolpur",
+    "name": "Bolpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.66501,
+    "lon": 87.67991
+  },
+  {
+    "slug": "chakapara",
+    "name": "Chakapara",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.61078,
+    "lon": 88.33641
+  },
+  {
+    "slug": "chandannagar",
+    "name": "Chandannagar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.84807,
+    "lon": 88.38601
+  },
+  {
+    "slug": "chandrakona",
+    "name": "Chandrakona",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.64041,
+    "lon": 87.32313
+  },
+  {
+    "slug": "chittaranjan",
+    "name": "Chittaranjan",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.8364,
+    "lon": 86.89834
+  },
+  {
+    "slug": "contai",
+    "name": "Contai",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 21.63934,
+    "lon": 88.07578
+  },
+  {
+    "slug": "dalkola",
+    "name": "Dalkola",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 25.84502,
+    "lon": 87.88358
+  },
+  {
+    "slug": "dam-dam",
+    "name": "Dam Dam",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 9,
+    "lat": 22.60841,
+    "lon": 88.4619
+  },
+  {
+    "slug": "darjiling",
+    "name": "Darjiling",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 27.04385,
+    "lon": 88.26511
+  },
+  {
+    "slug": "daulatpur",
+    "name": "Daulatpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.40654,
+    "lon": 88.39681
+  },
+  {
+    "slug": "debipur",
+    "name": "Debipur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.12888,
+    "lon": 88.67376
+  },
+  {
+    "slug": "dhulagari",
+    "name": "Dhulagari",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.55856,
+    "lon": 88.20847
+  },
+  {
+    "slug": "dhupgari",
+    "name": "Dhupgari",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.57097,
+    "lon": 89.03616
+  },
+  {
+    "slug": "diamond-harbour",
+    "name": "Diamond Harbour",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.25834,
+    "lon": 88.19592
+  },
+  {
+    "slug": "digha",
+    "name": "Digha",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.62323,
+    "lon": 87.52153
+  },
+  {
+    "slug": "dinhata",
+    "name": "Dinhata",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.13761,
+    "lon": 89.46101
+  },
+  {
+    "slug": "dubrajpur",
+    "name": "Dubrajpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "dumjor",
+    "name": "Dumjor",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.62726,
+    "lon": 88.23276
+  },
+  {
+    "slug": "durgapur",
+    "name": "Durgapur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 11,
+    "lat": 23.5417,
+    "lon": 87.29874
+  },
+  {
+    "slug": "egra",
+    "name": "Egra",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 21.8995,
+    "lon": 87.5356
+  },
+  {
+    "slug": "falakata",
+    "name": "Falakata",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.52788,
+    "lon": 89.19395
+  },
+  {
+    "slug": "farakka",
+    "name": "Farakka",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.79243,
+    "lon": 87.91784
+  },
+  {
+    "slug": "gangarampur",
+    "name": "Gangarampur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.40325,
+    "lon": 88.54558
+  },
+  {
+    "slug": "garui",
+    "name": "Garui",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.60158,
+    "lon": 88.40456
+  },
+  {
+    "slug": "ghatal",
+    "name": "Ghatal",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.6156,
+    "lon": 87.66528
+  },
+  {
+    "slug": "gosaba",
+    "name": "Gosaba",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 4,
+    "lat": 22.16496,
+    "lon": 88.76321
+  },
+  {
+    "slug": "guskhara",
+    "name": "Guskhara",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.49295,
+    "lon": 87.7413
+  },
+  {
+    "slug": "habra",
+    "name": "Habra",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.8351,
+    "lon": 88.63968
+  },
+  {
+    "slug": "haldia",
+    "name": "Haldia",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 6,
+    "lat": 21.99542,
+    "lon": 88.10227
+  },
+  {
+    "slug": "haldibari",
+    "name": "Haldibari",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 26.3424,
+    "lon": 88.84493
+  },
+  {
+    "slug": "haora",
+    "name": "Haora",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 22.58589,
+    "lon": 88.31639
+  },
+  {
+    "slug": "haringhata",
+    "name": "Haringhata",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.94465,
+    "lon": 88.53338
+  },
+  {
+    "slug": "howrah",
+    "name": "Howrah",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 22.59458,
+    "lon": 88.30749
+  },
+  {
+    "slug": "ingraj-bazar",
+    "name": "Ingraj Bazar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 24.98624,
+    "lon": 88.14531
+  },
+  {
+    "slug": "islampur",
+    "name": "Islampur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 26.3309,
+    "lon": 88.27296
+  },
+  {
+    "slug": "jalpaiguri",
+    "name": "Jalpaiguri",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 26.51739,
+    "lon": 88.73319
+  },
+  {
+    "slug": "jaynagar-majilpur",
+    "name": "Jaynagar-Majilpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.16841,
+    "lon": 88.42126
+  },
+  {
+    "slug": "jhalida",
+    "name": "Jhalida",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "jhargram",
+    "name": "Jhargram",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 22.3591,
+    "lon": 87.02622
+  },
+  {
+    "slug": "kalimpong",
+    "name": "Kalimpong",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 27.06472,
+    "lon": 88.46921
+  },
+  {
+    "slug": "kaliyaganj",
+    "name": "Kaliyaganj",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 25.63924,
+    "lon": 88.33557
+  },
+  {
+    "slug": "kalna",
+    "name": "Kalna",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.22073,
+    "lon": 88.36459
+  },
+  {
+    "slug": "kalyani",
+    "name": "Kalyani",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "kamarhati",
+    "name": "Kamarhati",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.66225,
+    "lon": 88.37935
+  },
+  {
+    "slug": "kanchrapara",
+    "name": "Kanchrapara",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.96291,
+    "lon": 88.4447
+  },
+  {
+    "slug": "kandi",
+    "name": "Kandi",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 23.97579,
+    "lon": 88.00115
+  },
+  {
+    "slug": "karimpur",
+    "name": "Karimpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 24.10436,
+    "lon": 88.53584
+  },
+  {
+    "slug": "karsiyang",
+    "name": "Karsiyang",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.87988,
+    "lon": 88.27841
+  },
+  {
+    "slug": "katoya",
+    "name": "Katoya",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 4,
+    "lat": 23.57182,
+    "lon": 88.12439
+  },
+  {
+    "slug": "kharagpur",
+    "name": "Kharagpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "kharar",
+    "name": "Kharar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.71725,
+    "lon": 87.64728
+  },
+  {
+    "slug": "khardah",
+    "name": "Khardah",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.7358,
+    "lon": 88.4102
+  },
+  {
+    "slug": "koch-bihar",
+    "name": "Koch Bihar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 26.32056,
+    "lon": 89.45268
+  },
+  {
+    "slug": "kolkata",
+    "name": "Kolkata",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 24,
+    "lat": 22.54668,
+    "lon": 88.38208
+  },
+  {
+    "slug": "konnagar",
+    "name": "Konnagar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 22.70308,
+    "lon": 88.33152
+  },
+  {
+    "slug": "krishnanagar",
+    "name": "Krishnanagar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.40948,
+    "lon": 88.4866
+  },
+  {
+    "slug": "krishnapur",
+    "name": "Krishnapur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.68172,
+    "lon": 88.29487
+  },
+  {
+    "slug": "kultali",
+    "name": "Kultali",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 3,
+    "lat": 21.91335,
+    "lon": 88.27281
+  },
+  {
+    "slug": "kulti",
+    "name": "Kulti",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "madanpur",
+    "name": "Madanpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "madhyamgram",
+    "name": "Madhyamgram",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 19,
+    "lat": 22.69445,
+    "lon": 88.45768
+  },
+  {
+    "slug": "masila",
+    "name": "Masila",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 22.5721,
+    "lon": 88.24605
+  },
+  {
+    "slug": "matabhanga",
+    "name": "Matabhanga",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.34084,
+    "lon": 89.21302
+  },
+  {
+    "slug": "medinipur",
+    "name": "Medinipur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.4306,
+    "lon": 87.29629
+  },
+  {
+    "slug": "memari",
+    "name": "Memari",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.17656,
+    "lon": 88.09458
+  },
+  {
+    "slug": "mirik",
+    "name": "Mirik",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.89272,
+    "lon": 88.18499
+  },
+  {
+    "slug": "monoharpur",
+    "name": "Monoharpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.08299,
+    "lon": 88.08586
+  },
+  {
+    "slug": "muri",
+    "name": "Muri",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.19861,
+    "lon": 85.90545
+  },
+  {
+    "slug": "murshidabad",
+    "name": "Murshidabad",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 24.18215,
+    "lon": 88.18878
+  },
+  {
+    "slug": "naihati",
+    "name": "Naihati",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.8907,
+    "lon": 88.40813
+  },
+  {
+    "slug": "navadwip",
+    "name": "Navadwip",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "odlabari",
+    "name": "Odlabari",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.86975,
+    "lon": 88.73988
+  },
+  {
+    "slug": "parbatipur",
+    "name": "Parbatipur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.64433,
+    "lon": 88.20262
+  },
+  {
+    "slug": "patrasaer",
+    "name": "Patrasaer",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.15567,
+    "lon": 87.60833
+  },
+  {
+    "slug": "pujali",
+    "name": "Pujali",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.46848,
+    "lon": 88.10728
+  },
+  {
+    "slug": "puruliya",
+    "name": "Puruliya",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 23.38482,
+    "lon": 86.32722
+  },
+  {
+    "slug": "raghunathpur",
+    "name": "Raghunathpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.53153,
+    "lon": 86.65433
+  },
+  {
+    "slug": "raiganj",
+    "name": "Raiganj",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 25.60354,
+    "lon": 88.16118
+  },
+  {
+    "slug": "ranaghat",
+    "name": "Ranaghat",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 23.26166,
+    "lon": 88.53852
+  },
+  {
+    "slug": "raniganj",
+    "name": "Raniganj",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 4,
+    "lat": 23.60533,
+    "lon": 87.1199
+  },
+  {
+    "slug": "raypur",
+    "name": "Raypur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.4953,
+    "lon": 88.50929
+  },
+  {
+    "slug": "rishra",
+    "name": "Rishra",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 4,
+    "lat": 22.73234,
+    "lon": 88.3378
+  },
+  {
+    "slug": "sainthia",
+    "name": "Sainthia",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.94456,
+    "lon": 87.66995
+  },
+  {
+    "slug": "sankrail",
+    "name": "Sankrail",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.54842,
+    "lon": 88.22614
+  },
+  {
+    "slug": "santoshpur",
+    "name": "Santoshpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.4849,
+    "lon": 88.29937
+  },
+  {
+    "slug": "shantipur",
+    "name": "Shantipur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "shiliguri",
+    "name": "Shiliguri",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 26.72289,
+    "lon": 88.39011
+  },
+  {
+    "slug": "shrirampur",
+    "name": "Shrirampur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 4,
+    "lat": 22.7536,
+    "lon": 88.33524
+  },
+  {
+    "slug": "shyamnagar",
+    "name": "Shyamnagar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.82372,
+    "lon": 88.36565
+  },
+  {
+    "slug": "siliguri",
+    "name": "Siliguri",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 26.68805,
+    "lon": 88.41399
+  },
+  {
+    "slug": "siuri",
+    "name": "Siuri",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.89669,
+    "lon": 87.51405
+  },
+  {
+    "slug": "sodpur",
+    "name": "Sodpur",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 22.70819,
+    "lon": 88.41406
+  },
+  {
+    "slug": "sonamukhi",
+    "name": "Sonamukhi",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 23.30475,
+    "lon": 87.41508
+  },
+  {
+    "slug": "tamluk",
+    "name": "Tamluk",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 2,
+    "lat": 22.27061,
+    "lon": 87.89572
+  },
+  {
+    "slug": "tarakeswar",
+    "name": "Tarakeswar",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": 22.88018,
+    "lon": 88.01276
+  },
+  {
+    "slug": "titagarh",
+    "name": "Titagarh",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 5,
+    "lat": 22.74464,
+    "lon": 88.39493
+  },
+  {
+    "slug": "tufanganj",
+    "name": "Tufanganj",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "ula",
+    "name": "Ula",
+    "state": "West Bengal",
+    "country": "India",
+    "station_count": 14,
+    "lat": 22.70395,
+    "lon": 88.52365
+  },
+  {
+    "slug": "changunarayan",
+    "name": "Changunarayan",
+    "state": "Bagmati Province",
+    "country": "Nepal",
+    "station_count": 4,
+    "lat": 27.692,
+    "lon": 85.43821
+  },
+  {
+    "slug": "bhaktapur",
+    "name": "Bhaktapur",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 6,
+    "lat": 27.68438,
+    "lon": 85.45065
+  },
+  {
+    "slug": "bharatpur",
+    "name": "Bharatpur",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 4,
+    "lat": 27.5413,
+    "lon": 82.65387
+  },
+  {
+    "slug": "dhulikhel",
+    "name": "Dhulikhel",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 27.60848,
+    "lon": 85.5478
+  },
+  {
+    "slug": "hetauda",
+    "name": "Hetauda",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 4,
+    "lat": 27.41953,
+    "lon": 85.03264
+  },
+  {
+    "slug": "janakpur",
+    "name": "Janakpur",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 3,
+    "lat": 26.73583,
+    "lon": 85.92355
+  },
+  {
+    "slug": "kathmandu",
+    "name": "Kathmandu",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 34,
+    "lat": 27.71049,
+    "lon": 85.33675
+  },
+  {
+    "slug": "katunje",
+    "name": "Katunje",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 27.66684,
+    "lon": 85.40821
+  },
+  {
+    "slug": "kirtipur",
+    "name": "Kirtipur",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 8,
+    "lat": 27.67405,
+    "lon": 85.28599
+  },
+  {
+    "slug": "madhyapur-thimi",
+    "name": "Madhyapur Thimi",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 6,
+    "lat": 27.69028,
+    "lon": 85.36744
+  },
+  {
+    "slug": "narayani",
+    "name": "Narayani",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "patan",
+    "name": "Patan",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 22,
+    "lat": 27.6679,
+    "lon": 85.31728
+  },
+  {
+    "slug": "pipara-simara",
+    "name": "Pipara Simara",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 27.15671,
+    "lon": 84.99776
+  },
+  {
+    "slug": "tathali",
+    "name": "Tathali",
+    "state": "Central Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 27.673,
+    "lon": 85.465
+  },
+  {
+    "slug": "biratnagar",
+    "name": "Biratnagar",
+    "state": "Eastern Region",
+    "country": "Nepal",
+    "station_count": 2,
+    "lat": 26.46067,
+    "lon": 87.28361
+  },
+  {
+    "slug": "dhankuta",
+    "name": "Dhankuta",
+    "state": "Eastern Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "ilam",
+    "name": "Ilam",
+    "state": "Eastern Region",
+    "country": "Nepal",
+    "station_count": 2,
+    "lat": 26.85857,
+    "lon": 87.77205
+  },
+  {
+    "slug": "itahari",
+    "name": "Itahari",
+    "state": "Eastern Region",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "achham",
+    "name": "Achham",
+    "state": "Far Western",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 29.14272,
+    "lon": 81.28927
+  },
+  {
+    "slug": "belauri",
+    "name": "Belauri",
+    "state": "Far Western",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 28.6821,
+    "lon": 80.3611
+  },
+  {
+    "slug": "dhangadhi",
+    "name": "Dhangadhi",
+    "state": "Far Western",
+    "country": "Nepal",
+    "station_count": 5,
+    "lat": 28.70654,
+    "lon": 80.59053
+  },
+  {
+    "slug": "mahendranagar",
+    "name": "Mahendranagar",
+    "state": "Far Western",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "birendranagar",
+    "name": "Birendranagar",
+    "state": "Mid Western",
+    "country": "Nepal",
+    "station_count": 5,
+    "lat": 28.61887,
+    "lon": 81.58789
+  },
+  {
+    "slug": "nepalgunj",
+    "name": "Nepalgunj",
+    "state": "Mid Western",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "pina",
+    "name": "Pina",
+    "state": "Mid Western",
+    "country": "Nepal",
+    "station_count": 1,
+    "lat": 29.5083,
+    "lon": 82.09379
+  },
+  {
+    "slug": "pyuthan",
+    "name": "Pyuthan",
+    "state": "Mid Western",
+    "country": "Nepal",
+    "station_count": 2,
+    "lat": 27.84337,
+    "lon": 82.74005
+  },
+  {
+    "slug": "tulsipur",
+    "name": "Tulsipur",
+    "state": "Mid Western",
+    "country": "Nepal",
+    "station_count": 3,
+    "lat": 27.93094,
+    "lon": 82.53073
+  },
+  {
+    "slug": "butwal",
+    "name": "Butwal",
+    "state": "Western Region",
+    "country": "Nepal",
+    "station_count": 9,
+    "lat": 27.68319,
+    "lon": 83.40494
+  },
+  {
+    "slug": "pokhara",
+    "name": "Pokhara",
+    "state": "Western Region",
+    "country": "Nepal",
+    "station_count": 4,
+    "lat": 28.22127,
+    "lon": 84.01104
+  },
+  {
+    "slug": "siddharthanagar",
+    "name": "Siddharthanagar",
+    "state": "Western Region",
+    "country": "Nepal",
+    "station_count": 4,
+    "lat": 27.50937,
+    "lon": 83.44307
+  },
+  {
+    "slug": "muzaffarabad",
+    "name": "Muzaffarabad",
+    "state": "Azad Kashmir",
+    "country": "Pakistan",
+    "station_count": 4,
+    "lat": 34.3835,
+    "lon": 73.4767
+  },
+  {
+    "slug": "rawala-kot",
+    "name": "Rawala Kot",
+    "state": "Azad Kashmir",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "gwadar",
+    "name": "Gwadar",
+    "state": "Balochistan",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 25.16086,
+    "lon": 62.31568
+  },
+  {
+    "slug": "kharan",
+    "name": "Kharan",
+    "state": "Balochistan",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "khuzdar",
+    "name": "Khuzdar",
+    "state": "Balochistan",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 27.80552,
+    "lon": 66.60127
+  },
+  {
+    "slug": "kot-malik-barkhurdar",
+    "name": "Kot Malik Barkhurdar",
+    "state": "Balochistan",
+    "country": "Pakistan",
+    "station_count": 11,
+    "lat": 30.22195,
+    "lon": 66.98655
+  },
+  {
+    "slug": "quetta",
+    "name": "Quetta",
+    "state": "Balochistan",
+    "country": "Pakistan",
+    "station_count": 9,
+    "lat": 30.15953,
+    "lon": 66.99206
+  },
+  {
+    "slug": "gilgit",
+    "name": "Gilgit",
+    "state": "Gilgit-Baltistan",
+    "country": "Pakistan",
+    "station_count": 8,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "skardu",
+    "name": "Skardu",
+    "state": "Gilgit-Baltistan",
+    "country": "Pakistan",
+    "station_count": 12,
+    "lat": 35.4277,
+    "lon": 75.4558
+  },
+  {
+    "slug": "islamabad",
+    "name": "Islamabad",
+    "state": "Islamabad",
+    "country": "Pakistan",
+    "station_count": 44,
+    "lat": 33.68825,
+    "lon": 73.06617
+  },
+  {
+    "slug": "abbottabad",
+    "name": "Abbottabad",
+    "state": "Khyber Pakhtunkhwa",
+    "country": "Pakistan",
+    "station_count": 9,
+    "lat": 34.217,
+    "lon": 73.24205
+  },
+  {
+    "slug": "baffa",
+    "name": "Baffa",
+    "state": "Khyber Pakhtunkhwa",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 34.4203,
+    "lon": 73.2469
+  },
+  {
+    "slug": "dera-ismail-khan",
+    "name": "Dera Ismail Khan",
+    "state": "Khyber Pakhtunkhwa",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "haripur",
+    "name": "Haripur",
+    "state": "Khyber Pakhtunkhwa",
+    "country": "Pakistan",
+    "station_count": 14,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "malam-jabba",
+    "name": "Malam Jabba",
+    "state": "Khyber Pakhtunkhwa",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "peshawar",
+    "name": "Peshawar",
+    "state": "Khyber Pakhtunkhwa",
+    "country": "Pakistan",
+    "station_count": 37,
+    "lat": 34.00329,
+    "lon": 71.49121
+  },
+  {
+    "slug": "aliabad",
+    "name": "Aliabad",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "arifwala",
+    "name": "Arifwala",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 30.2582,
+    "lon": 73.0581
+  },
+  {
+    "slug": "attock-city",
+    "name": "Attock City",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 33.7667,
+    "lon": 72.3667
+  },
+  {
+    "slug": "bahawalpur",
+    "name": "Bahawalpur",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 29,
+    "lat": 29.38022,
+    "lon": 71.70481
+  },
+  {
+    "slug": "bhakkar",
+    "name": "Bhakkar",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 31.6167,
+    "lon": 71.0833
+  },
+  {
+    "slug": "bhopalwala",
+    "name": "Bhopalwala",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "burewala",
+    "name": "Burewala",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 30.1751,
+    "lon": 72.6966
+  },
+  {
+    "slug": "chak-jhumra",
+    "name": "Chak Jhumra",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 31.54979,
+    "lon": 73.12358
+  },
+  {
+    "slug": "chakwal",
+    "name": "Chakwal",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.9333,
+    "lon": 72.85
+  },
+  {
+    "slug": "charsadda",
+    "name": "Charsadda",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "chiniot",
+    "name": "Chiniot",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 31.7167,
+    "lon": 72.9833
+  },
+  {
+    "slug": "daska-kalan",
+    "name": "Daska Kalan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "dera-ghazi-khan",
+    "name": "Dera Ghazi Khan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 5,
+    "lat": 30.03475,
+    "lon": 70.63653
+  },
+  {
+    "slug": "diplo",
+    "name": "Diplo",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "eminabad",
+    "name": "Eminabad",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 32.1016,
+    "lon": 74.20259
+  },
+  {
+    "slug": "faisalabad",
+    "name": "Faisalabad",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 43,
+    "lat": 31.43253,
+    "lon": 73.0984
+  },
+  {
+    "slug": "gujranwala",
+    "name": "Gujranwala",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 23,
+    "lat": 32.17287,
+    "lon": 74.1917
+  },
+  {
+    "slug": "gujrat",
+    "name": "Gujrat",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 6,
+    "lat": 32.56873,
+    "lon": 74.08353
+  },
+  {
+    "slug": "hafizabad",
+    "name": "Hafizabad",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 32.0679,
+    "lon": 73.685
+  },
+  {
+    "slug": "hundal",
+    "name": "Hundal",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 7,
+    "lat": 32.43051,
+    "lon": 74.52786
+  },
+  {
+    "slug": "jauharabad",
+    "name": "Jauharabad",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.2888,
+    "lon": 72.2747
+  },
+  {
+    "slug": "jhang",
+    "name": "Jhang",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "jhang-sadr",
+    "name": "Jhang Sadr",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 31.25604,
+    "lon": 72.32587
+  },
+  {
+    "slug": "jhelum",
+    "name": "Jhelum",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 7,
+    "lat": 32.95635,
+    "lon": 73.70614
+  },
+  {
+    "slug": "kahna-nau",
+    "name": "Kahna Nau",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 9,
+    "lat": 31.39555,
+    "lon": 74.33752
+  },
+  {
+    "slug": "kamra",
+    "name": "Kamra",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 33.74771,
+    "lon": 73.4074
+  },
+  {
+    "slug": "kasur",
+    "name": "Kasur",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 5,
+    "lat": 31.1186,
+    "lon": 74.4593
+  },
+  {
+    "slug": "khanewal",
+    "name": "Khanewal",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 4,
+    "lat": 30.30595,
+    "lon": 71.9413
+  },
+  {
+    "slug": "kharian",
+    "name": "Kharian",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.7696,
+    "lon": 73.8976
+  },
+  {
+    "slug": "khurrianwala",
+    "name": "Khurrianwala",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 4,
+    "lat": 31.49914,
+    "lon": 73.24446
+  },
+  {
+    "slug": "khushab",
+    "name": "Khushab",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 32.3,
+    "lon": 72.35
+  },
+  {
+    "slug": "kot-addu",
+    "name": "Kot Addu",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 30.4412,
+    "lon": 70.9791
+  },
+  {
+    "slug": "kotli-loharan",
+    "name": "Kotli Loharan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 32.59938,
+    "lon": 74.47959
+  },
+  {
+    "slug": "ladhewala-waraich",
+    "name": "Ladhewala Waraich",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.2451,
+    "lon": 74.1572
+  },
+  {
+    "slug": "lahore",
+    "name": "Lahore",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 192,
+    "lat": 31.50259,
+    "lon": 74.35104
+  },
+  {
+    "slug": "lodhran",
+    "name": "Lodhran",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 29.67993,
+    "lon": 71.56078
+  },
+  {
+    "slug": "mandi-bahauddin",
+    "name": "Mandi Bahauddin",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.56597,
+    "lon": 73.49639
+  },
+  {
+    "slug": "mangla",
+    "name": "Mangla",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "mian-channun",
+    "name": "Mian Channun",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 30.3482,
+    "lon": 72.2335
+  },
+  {
+    "slug": "mianwali",
+    "name": "Mianwali",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.5833,
+    "lon": 71.55
+  },
+  {
+    "slug": "mohmand-agency",
+    "name": "Mohmand Agency",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "multan",
+    "name": "Multan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 23,
+    "lat": 30.1673,
+    "lon": 71.46226
+  },
+  {
+    "slug": "muridke",
+    "name": "Muridke",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 31.7176,
+    "lon": 74.38946
+  },
+  {
+    "slug": "murree",
+    "name": "Murree",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 7,
+    "lat": 33.90757,
+    "lon": 73.39508
+  },
+  {
+    "slug": "muzaffargarh",
+    "name": "Muzaffargarh",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 5,
+    "lat": 30.14177,
+    "lon": 71.03673
+  },
+  {
+    "slug": "nankana-sahib",
+    "name": "Nankana Sahib",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 31.44864,
+    "lon": 73.69813
+  },
+  {
+    "slug": "narang-mandi",
+    "name": "Narang Mandi",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 31.84868,
+    "lon": 74.5148
+  },
+  {
+    "slug": "narowal",
+    "name": "Narowal",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 4,
+    "lat": 32.09757,
+    "lon": 74.87248
+  },
+  {
+    "slug": "okara",
+    "name": "Okara",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 30.81353,
+    "lon": 73.4308
+  },
+  {
+    "slug": "pakpattan",
+    "name": "Pakpattan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 30.36243,
+    "lon": 73.38185
+  },
+  {
+    "slug": "pasrur",
+    "name": "Pasrur",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 32.26521,
+    "lon": 74.65505
+  },
+  {
+    "slug": "pattoki",
+    "name": "Pattoki",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 31.039,
+    "lon": 73.9297
+  },
+  {
+    "slug": "pindi-bhattian",
+    "name": "Pindi Bhattian",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "qadirpur-ran",
+    "name": "Qadirpur Ran",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 30.2515,
+    "lon": 71.57288
+  },
+  {
+    "slug": "rahim-yar-khan",
+    "name": "Rahim Yar Khan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 6,
+    "lat": 28.41472,
+    "lon": 70.31681
+  },
+  {
+    "slug": "raiwind",
+    "name": "Raiwind",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 7,
+    "lat": 31.37426,
+    "lon": 74.17707
+  },
+  {
+    "slug": "raja-jang",
+    "name": "Raja Jang",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "rajanpur",
+    "name": "Rajanpur",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 29.10631,
+    "lon": 70.3271
+  },
+  {
+    "slug": "rawalpindi",
+    "name": "Rawalpindi",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 32,
+    "lat": 33.57309,
+    "lon": 73.07604
+  },
+  {
+    "slug": "rojhan",
+    "name": "Rojhan",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 28.52369,
+    "lon": 70.07641
+  },
+  {
+    "slug": "sahiwal",
+    "name": "Sahiwal",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 30.6663,
+    "lon": 73.09581
+  },
+  {
+    "slug": "sambrial",
+    "name": "Sambrial",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 32.47896,
+    "lon": 74.39433
+  },
+  {
+    "slug": "sargodha",
+    "name": "Sargodha",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 9,
+    "lat": 32.04673,
+    "lon": 72.69044
+  },
+  {
+    "slug": "sharqpur-sharif",
+    "name": "Sharqpur Sharif",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 31.4638,
+    "lon": 74.22594
+  },
+  {
+    "slug": "sheikhupura",
+    "name": "Sheikhupura",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 3,
+    "lat": 31.65051,
+    "lon": 73.89534
+  },
+  {
+    "slug": "sialkot",
+    "name": "Sialkot",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 27,
+    "lat": 32.52048,
+    "lon": 74.51244
+  },
+  {
+    "slug": "swabi",
+    "name": "Swabi",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "talagang",
+    "name": "Talagang",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 32.9167,
+    "lon": 72.4167
+  },
+  {
+    "slug": "vehari",
+    "name": "Vehari",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "vihari",
+    "name": "Vihari",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 30.04988,
+    "lon": 72.35725
+  },
+  {
+    "slug": "wazirabad",
+    "name": "Wazirabad",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 32.44199,
+    "lon": 74.11808
+  },
+  {
+    "slug": "zafarwal",
+    "name": "Zafarwal",
+    "state": "Punjab",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 32.34242,
+    "lon": 74.90578
+  },
+  {
+    "slug": "karachi",
+    "name": "Karachi",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 72,
+    "lat": 24.85558,
+    "lon": 67.08182
+  },
+  {
+    "slug": "khairpur-mir's",
+    "name": "Khairpur Mir's",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": 27.52948,
+    "lon": 68.75915
+  },
+  {
+    "slug": "kotri",
+    "name": "Kotri",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 25.36727,
+    "lon": 68.33788
+  },
+  {
+    "slug": "malir-cantonment",
+    "name": "Malir Cantonment",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 8,
+    "lat": 24.92988,
+    "lon": 67.14202
+  },
+  {
+    "slug": "mirpur-khas",
+    "name": "Mirpur Khas",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": 25.52969,
+    "lon": 69.00687
+  },
+  {
+    "slug": "mithi",
+    "name": "Mithi",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "sukkur",
+    "name": "Sukkur",
+    "state": "Sindh",
+    "country": "Pakistan",
+    "station_count": 2,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "akurana",
+    "name": "Akurana",
+    "state": "Central",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "dambulla",
+    "name": "Dambulla",
+    "state": "Central",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "digana",
+    "name": "Digana",
+    "state": "Central",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "nawalapitiya",
+    "name": "Nawalapitiya",
+    "state": "Central",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "nuwara-eliya",
+    "name": "Nuwara Eliya",
+    "state": "Central",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.97104,
+    "lon": 80.78252
+  },
+  {
+    "slug": "akkaraipattu",
+    "name": "Akkaraipattu",
+    "state": "Eastern Province",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "ampara",
+    "name": "Ampara",
+    "state": "Eastern Province",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 7.2908,
+    "lon": 81.671
+  },
+  {
+    "slug": "batticaloa",
+    "name": "Batticaloa",
+    "state": "Eastern Province",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 7.7062,
+    "lon": 81.7124
+  },
+  {
+    "slug": "trincomalee",
+    "name": "Trincomalee",
+    "state": "Eastern Province",
+    "country": "Sri Lanka",
+    "station_count": 2,
+    "lat": 8.64763,
+    "lon": 81.19239
+  },
+  {
+    "slug": "anuradhapura",
+    "name": "Anuradhapura",
+    "state": "North Central",
+    "country": "Sri Lanka",
+    "station_count": 3,
+    "lat": 8.33547,
+    "lon": 80.40071
+  },
+  {
+    "slug": "polonnaruwa",
+    "name": "Polonnaruwa",
+    "state": "North Central",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 7.95196,
+    "lon": 81.01556
+  },
+  {
+    "slug": "chilaw",
+    "name": "Chilaw",
+    "state": "North Western",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 7.5722,
+    "lon": 79.8016
+  },
+  {
+    "slug": "kurunegala",
+    "name": "Kurunegala",
+    "state": "North Western",
+    "country": "Sri Lanka",
+    "station_count": 2,
+    "lat": 7.46529,
+    "lon": 80.34481
+  },
+  {
+    "slug": "puttalam",
+    "name": "Puttalam",
+    "state": "North Western",
+    "country": "Sri Lanka",
+    "station_count": 5,
+    "lat": 8.01574,
+    "lon": 79.82632
+  },
+  {
+    "slug": "adampan",
+    "name": "Adampan",
+    "state": "Northern Province",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 8.9435,
+    "lon": 79.9948
+  },
+  {
+    "slug": "jaffna",
+    "name": "Jaffna",
+    "state": "Northern Province",
+    "country": "Sri Lanka",
+    "station_count": 3,
+    "lat": 9.66233,
+    "lon": 80.027
+  },
+  {
+    "slug": "kilinochchi",
+    "name": "Kilinochchi",
+    "state": "Northern Province",
+    "country": "Sri Lanka",
+    "station_count": 2,
+    "lat": 9.39782,
+    "lon": 80.40732
+  },
+  {
+    "slug": "mulliyavalai",
+    "name": "Mulliyavalai",
+    "state": "Northern Province",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 9.2249,
+    "lon": 80.7752
+  },
+  {
+    "slug": "kalawana",
+    "name": "Kalawana",
+    "state": "Sabaragamuwa",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.53026,
+    "lon": 80.39472
+  },
+  {
+    "slug": "ratnapura",
+    "name": "Ratnapura",
+    "state": "Sabaragamuwa",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.6823,
+    "lon": 80.3984
+  },
+  {
+    "slug": "ambalangoda",
+    "name": "Ambalangoda",
+    "state": "Southern",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.21138,
+    "lon": 80.06067
+  },
+  {
+    "slug": "deniya",
+    "name": "Deniya",
+    "state": "Southern",
+    "country": "Sri Lanka",
+    "station_count": 2,
+    "lat": 6.08798,
+    "lon": 80.86494
+  },
+  {
+    "slug": "galle",
+    "name": "Galle",
+    "state": "Southern",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.03682,
+    "lon": 80.22586
+  },
+  {
+    "slug": "bandarawela",
+    "name": "Bandarawela",
+    "state": "Uva",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "ella-town",
+    "name": "Ella Town",
+    "state": "Uva",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.8751,
+    "lon": 81.0475
+  },
+  {
+    "slug": "mahiyanganaya",
+    "name": "Mahiyanganaya",
+    "state": "Uva",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  },
+  {
+    "slug": "monaragala",
+    "name": "Monaragala",
+    "state": "Uva",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 6.85759,
+    "lon": 81.33992
+  },
+  {
+    "slug": "battaramulla",
+    "name": "Battaramulla",
+    "state": "Western",
+    "country": "Sri Lanka",
+    "station_count": 2,
+    "lat": 6.89235,
+    "lon": 79.93675
+  },
+  {
+    "slug": "colombo",
+    "name": "Colombo",
+    "state": "Western",
+    "country": "Sri Lanka",
+    "station_count": 6,
+    "lat": 6.89338,
+    "lon": 79.8887
+  },
+  {
+    "slug": "gampaha",
+    "name": "Gampaha",
+    "state": "Western",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 7.0936,
+    "lon": 79.98218
+  },
+  {
+    "slug": "negombo",
+    "name": "Negombo",
+    "state": "Western",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": 7.25575,
+    "lon": 79.85548
+  },
+  {
+    "slug": "nugegoda",
+    "name": "Nugegoda",
+    "state": "Western",
+    "country": "Sri Lanka",
+    "station_count": 2,
+    "lat": 6.87073,
+    "lon": 79.90621
+  },
+  {
+    "slug": "pita-kotte",
+    "name": "Pita Kotte",
+    "state": "Western",
+    "country": "Sri Lanka",
+    "station_count": 1,
+    "lat": null,
+    "lon": null
+  }
+]

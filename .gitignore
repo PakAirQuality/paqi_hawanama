@@ -85,3 +85,16 @@ verify/
 
 # Large local data extracts (GitHub rejects >100 MB; keep out of history)
 2021_2025_readings.csv
+
+# Kept from the public release: local-only tooling and artifacts
+.claude/
+CLAUDE.md
+* 2.*
+**/city_manifests/
+**/station_manifests/
+apps/*/artifacts/
+apps/*/tasks/artifacts/
+apps/worker/tasks/city_raw_api_data/
+apps/worker/tasks/raw_api_data/
+debug-gap.txt
+external_data/

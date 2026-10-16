@@ -56,6 +56,9 @@ export default function Home() {
       width: '100vw',
       maxWidth: '100vw'
     }}>
+      {/* Page heading for search engines and screen readers; the map itself is the content. */}
+      <h1 className="sr-only">Hawanama: real-time air quality map of Pakistan and South Asia</h1>
+
       {/* Full Screen Map */}
       <MapWrapper
         className="absolute inset-0 w-full h-full"
@@ -106,6 +109,20 @@ export default function Home() {
               className="w-12 h-12 sm:w-16 sm:h-16 object-contain"
             />
           </button>
+          {/* About link: same white-pill treatment as the logo, kept small */}
+          <a
+            href="/about/"
+            className="absolute left-full ml-2 bottom-1 text-xs font-medium text-gray-700 hover:text-black whitespace-nowrap"
+            style={{
+              background: '#FFFFFF',
+              borderRadius: '10px',
+              padding: '4px 8px',
+              boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)',
+              border: '1px solid rgba(0, 0, 0, 0.05)'
+            }}
+          >
+            About
+          </a>
         </div>
       </div>
 

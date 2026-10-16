@@ -40,9 +40,11 @@ const CityAQIBox: React.FC<{ value: number }> = ({ value }) => {
 
 interface CityClientProps {
   citySlug: string
+  /** Build-time city facts so the heading is in the HTML before any fetch. */
+  city?: { name: string; state: string | null; country: string | null }
 }
 
-export default function CityClient({ citySlug }: CityClientProps) {
+export default function CityClient({ citySlug, city }: CityClientProps) {
   const [chartMetric, setChartMetric] = useState<'aqi' | 'pm25'>('aqi')
   const [isMobile, setIsMobile] = useState(false)
 
@@ -97,7 +99,11 @@ export default function CityClient({ citySlug }: CityClientProps) {
           </div>
         </header>
         <div className="container mx-auto px-4 py-8">
-          <div className="text-center">Loading city data...</div>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">{city?.name ?? citySlug} air quality</h1>
+          {city && (
+            <p className="text-sm text-muted-foreground">{city.state}{city.country ? `, ${city.country}` : ''}</p>
+          )}
+          <div className="text-center mt-8 text-muted-foreground">Loading city data...</div>
         </div>
       </div>
     )
@@ -117,6 +123,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
           </div>
         </header>
         <div className="container mx-auto px-4 py-8">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-6">{city?.name ?? citySlug} air quality</h1>
           <div className="text-center text-red-500">City not found or error loading data</div>
           <div className="text-center mt-4">
             <Link href="/" className="text-blue-500 hover:underline">← Back to Map</Link>
