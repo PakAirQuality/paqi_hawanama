@@ -48,7 +48,7 @@ IQAir API ──► Station Discovery ──► GCS Manifests
 hawanama/
 ├── apps/
 │   ├── api/                  # FastAPI backend — Cloud Run
-│   ├── dashboard-frontend/   # Internal ops dashboard — Next.js
+│   ├── dashboard-frontend/   # Public read-only analyst dashboard — Next.js
 │   ├── web-next/             # Public website — Next.js
 │   └── worker/               # Scheduled task definitions
 ├── db_schema/                # PostgreSQL/TimescaleDB schema

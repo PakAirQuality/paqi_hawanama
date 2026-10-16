@@ -4,7 +4,6 @@ import type {
   PipelineSummary,
   RunsResponse,
   RunReport,
-  ExecutionsResponse,
   PredictionsResponse,
   PredictionData,
   TileDatesResponse,
@@ -17,11 +16,11 @@ import type {
 } from './types'
 
 export const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
-export const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
 
-const headers = {
-  Authorization: `Bearer ${API_TOKEN}`,
-}
+// The dashboard is a public read-only site: every route it calls is public and
+// rate-limited server-side. Never put a credential here; NEXT_PUBLIC_* values are
+// compiled into the browser bundle.
+const headers: Record<string, string> = {}
 
 export async function fetchPipelineSummary(): Promise<PipelineSummary> {
   const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/summary`, {
@@ -50,23 +49,8 @@ export async function fetchRunReport(date: string): Promise<RunReport> {
   return res.json()
 }
 
-export async function fetchExecutions(which: 'daily' | 'retrain'): Promise<ExecutionsResponse> {
-  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/executions/${which}?page_size=10`, {
-    headers,
-    cache: 'no-store'
-  })
-  if (!res.ok) throw new Error(`Failed to load ${which} executions`)
-  return res.json()
-}
-
-export async function triggerJob(which: 'daily' | 'retrain'): Promise<{ job: string; status: string }> {
-  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/run/${which}`, {
-    method: 'POST',
-    headers,
-  })
-  if (!res.ok) throw new Error(`Failed to trigger ${which} job`)
-  return res.json()
-}
+// Job triggers and execution listings are operator actions; they stay on the API behind
+// TASKS_API_SECRET for Cloud Scheduler and the ops CLI, and are not reachable from here.
 
 export async function fetchPredictions(limit: number = 30): Promise<PredictionsResponse> {
   const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/predictions?limit=${limit}`, {

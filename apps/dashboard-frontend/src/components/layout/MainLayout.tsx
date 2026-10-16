@@ -2,7 +2,6 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { UserMenu } from '@/components/auth/UserMenu'
 
 const modules = [
   { id: 'aqi-tracker', name: 'Air Quality Tracker', href: '/' },
@@ -62,8 +61,10 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
 
-              {/* User menu */}
-              <UserMenu />
+              {/* Public site: link back to the main map */}
+              <a href="https://hawanama.org" className="text-sm text-slate-500 hover:text-slate-900 hidden sm:block">
+                hawanama.org
+              </a>
             </div>
           </div>
         </header>

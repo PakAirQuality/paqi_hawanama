@@ -6,8 +6,9 @@ import { AnalystPanel, StationTrendPanel, type TrayStation, type StationTrendInf
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
-const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
 const DESK_PREFIX = `${API_BASE}/api/v1/ops/analyst-desk`
+// The copilot is public and metered server-side (daily per-visitor and global budgets).
+const BUDGET_MESSAGE = "The assistant has reached its usage limit for today. Please try again tomorrow."
 
 const ACTION_RE = /\{\{ACTION:(\{.*?\})\}\}/g
 
@@ -64,9 +65,10 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
   })
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
-  // Analyst mode: fixed session per mount. Tracker mode: session keyed by date for fresh context.
+  // Analyst mode: fixed session per mount. Tracker mode: a fresh session per selected date.
+  // Both include a random id so no two visitors can ever share a server-side conversation.
   const [_sessionId] = useState(() => crypto.randomUUID())
-  const sessionId = trackerMode ? `tracker-${selectedDate}` : _sessionId
+  const sessionId = trackerMode ? `tracker-${selectedDate}-${_sessionId}` : _sessionId
   // Tracker mode: track which date was last briefed so we re-brief on date change
   const [trackerBriefedDate, setTrackerBriefedDate] = useState<string>('')
   const [briefingDone, setBriefingDone] = useState(() => {
@@ -153,12 +155,21 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
     try {
       const res = await fetch(`${DESK_PREFIX}${endpoint}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+
+      if (res.status === 429 || res.status === 503) {
+        let detail = BUDGET_MESSAGE
+        try {
+          const err = await res.json()
+          if (typeof err?.detail === 'string') detail = err.detail
+        } catch { /* keep the default message */ }
+        setMessages(prev =>
+          prev.map(m => (m.id === assistantId ? { ...m, content: detail, streaming: false } : m))
+        )
+        return
+      }
 
       if (!res.ok || !res.body) {
         throw new Error(`HTTP ${res.status}`)

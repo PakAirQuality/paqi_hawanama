@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { esc } from '@/lib/html'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import type { ForecastEntry, CurrentStation, CopilotAction, StationMention } from './types'
@@ -419,8 +420,7 @@ export function ForecastMap({
 
         try {
           const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`,
-            { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`
           )
           if (!res.ok) return
           const data = await res.json()
@@ -565,10 +565,10 @@ export function ForecastMap({
         firePopup.setLngLat(coords).setHTML(`
           <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">
             <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Fire Detection</div>
-            <div>FRP: <b>${props.frp} MW</b></div>
-            <div>Confidence: <b style="text-transform:capitalize">${props.confidence}</b></div>
-            <div>Satellite: <b>${props.satellite}</b></div>
-            <div style="color:#64748b;font-size:11px;margin-top:2px">${props.acq_date}</div>
+            <div>FRP: <b>${esc(props.frp)} MW</b></div>
+            <div>Confidence: <b style="text-transform:capitalize">${esc(props.confidence)}</b></div>
+            <div>Satellite: <b>${esc(props.satellite)}</b></div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">${esc(props.acq_date)}</div>
           </div>
         `).addTo(map.current)
       })
@@ -805,14 +805,14 @@ export function ForecastMap({
             new mapboxgl.Popup({ offset: 16, closeButton: false, maxWidth: '240px' })
               .setHTML(`
                 <div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5">
-                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${station.name || 'Station'}</div>
-                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${station.city || ''}</div>
+                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${esc(station.name || 'Station')}</div>
+                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${esc(station.city || '')}</div>
                   <div style="background:${color};color:${textColor};border-radius:8px;padding:8px 10px;margin-bottom:8px">
                     <div style="display:flex;justify-content:space-between;align-items:baseline">
                       <span style="font-size:22px;font-weight:700">${station.pm25 != null ? Math.round(station.pm25) : '—'}</span>
                       <span style="font-size:11px;opacity:0.85">µg/m³</span>
                     </div>
-                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${AQI_CATEGORY_LABELS[aqiCat] || aqiCat}</div>
+                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${esc(AQI_CATEGORY_LABELS[aqiCat] || aqiCat)}</div>
                   </div>
                   ${station.aqi_raw != null ? `<div style="font-size:11px;color:#475569">AQI: <b>${Math.round(station.aqi_raw)}</b></div>` : ''}
                 </div>
@@ -870,19 +870,19 @@ export function ForecastMap({
             new mapboxgl.Popup({ offset: 16, closeButton: false, maxWidth: '240px' })
               .setHTML(`
                 <div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5">
-                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${entry.station_name || `Station ${entry.sensor_id}`}</div>
-                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${entry.city_name || ''}</div>
+                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${esc(entry.station_name || `Station ${entry.sensor_id}`)}</div>
+                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${esc(entry.city_name || '')}</div>
                   <div style="background:${color};color:${textColor};border-radius:8px;padding:8px 10px;margin-bottom:8px">
                     <div style="display:flex;justify-content:space-between;align-items:baseline">
                       <span style="font-size:22px;font-weight:700">${formatPM25(entry.pm25_forecast)}</span>
                       <span style="font-size:11px;opacity:0.85">µg/m³</span>
                     </div>
-                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${BAND_LABELS[band] || band}</div>
+                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${esc(BAND_LABELS[band] || band)}</div>
                   </div>
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:#475569">
                     <div>Q75: <b>${formatPM25(entry.pm25_q75)}</b></div>
                     <div>Q90: <b>${formatPM25(entry.pm25_q90)}</b></div>
-                    <div>Priority: <b style="text-transform:capitalize">${entry.priority || '—'}</b></div>
+                    <div>Priority: <b style="text-transform:capitalize">${esc(entry.priority || '—')}</b></div>
                     <div>Conf: <b style="text-transform:capitalize">${entry.confidence || '—'}</b></div>
                   </div>
                   ${entry.ramp_detected ? '<div style="color:#d97706;font-weight:600;margin-top:6px;font-size:12px">&#9889; Ramp Detected</div>' : ''}

@@ -7,13 +7,14 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
-const TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
+// /api/v1/stations is public; no credential is needed or sent.
+const TOKEN = ""
 const OUT_PATH = join(__dirname, '..', 'src', 'data', 'station-ids.json')
 
 async function main() {
   try {
     const res = await fetch(`${API_BASE}/api/v1/stations?country=Pakistan`, {
-      headers: { Authorization: `Bearer ${TOKEN}` },
+      headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {},
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()

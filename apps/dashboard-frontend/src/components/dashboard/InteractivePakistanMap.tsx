@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
+import { esc } from '@/lib/html'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
@@ -364,11 +365,11 @@ export const InteractiveRegionalMap: React.FC<Props> = () => {
           maxWidth: '240px',
         }).setHTML(`
           <div style="font-family: system-ui, sans-serif; min-width: 160px;">
-            <div style="font-weight: 600; font-size: 14px; color: #1e293b; margin-bottom: 4px;">${station.name}</div>
-            ${station.city ? `<div style="font-size: 11px; color: #64748b; margin-bottom: 8px;">${station.city}</div>` : ''}
+            <div style="font-weight: 600; font-size: 14px; color: #1e293b; margin-bottom: 4px;">${esc(station.name)}</div>
+            ${station.city ? `<div style="font-size: 11px; color: #64748b; margin-bottom: 8px;">${esc(station.city)}</div>` : ''}
             <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
-              <span style="width: 8px; height: 8px; border-radius: 50%; background: ${dotColor}; display: inline-block;"></span>
-              <span style="font-size: 11px; color: #64748b;">${status}</span>
+              <span style="width: 8px; height: 8px; border-radius: 50%; background: ${esc(dotColor)}; display: inline-block;"></span>
+              <span style="font-size: 11px; color: #64748b;">${esc(status)}</span>
             </div>
             <div style="display: flex; gap: 16px; margin-top: 6px;">
               <div>

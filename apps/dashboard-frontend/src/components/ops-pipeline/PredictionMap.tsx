@@ -1,11 +1,12 @@
 "use client"
 
 import { useRef, useState, useEffect } from 'react'
+import { esc } from '@/lib/html'
 import { useRouter } from 'next/navigation'
 import { Loader2, X } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import { API_BASE, API_TOKEN } from './api'
+import { API_BASE } from './api'
 import type { FiresGeoJSON } from '@/components/analyst-desk/api'
 import { loadPakBoundary, isInsidePakistan } from '@/components/analyst-desk/pakistan'
 
@@ -153,8 +154,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     const fetchStations = async () => {
       try {
         const res = await fetch(
-          `${API_BASE}/api/v1/ops/pipeline/stations/daily/${selectedDate}?min_hours=6&country=Pakistan`,
-          { headers: { Authorization: `Bearer ${API_TOKEN}` } }
+          `${API_BASE}/api/v1/ops/pipeline/stations/daily/${selectedDate}?min_hours=6&country=Pakistan`
         )
         if (res.ok) {
           const data = await res.json()
@@ -187,10 +187,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       attributionControl: false,
       transformRequest: (url: string) => {
         if (url.includes('/ops/pipeline/tiles/') || url.includes('/ops/downscaler/tiles/')) {
-          return {
-            url,
-            headers: { Authorization: `Bearer ${API_TOKEN}` }
-          }
+          return { url }
         }
         return { url }
       }
@@ -376,10 +373,10 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           const coords = (e.features[0].geometry as GeoJSON.Point).coordinates.slice() as [number, number]
           kilnPopup.setLngLat(coords).setHTML(`
             <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">
-              <div style="font-weight:600;color:#b45309;margin-bottom:4px">Brick Kiln ${props.id || ''}</div>
-              <div>PM₂.₅: <b>${props.pm25_t_yr ?? '—'} t/yr</b></div>
-              <div>Fuel: <b style="text-transform:capitalize">${props.fuel || '—'}</b></div>
-              <div>State: <b>${props.state || '—'}</b></div>
+              <div style="font-weight:600;color:#b45309;margin-bottom:4px">Brick Kiln ${esc(props.id || '')}</div>
+              <div>PM₂.₅: <b>${esc(props.pm25_t_yr ?? '—')} t/yr</b></div>
+              <div>Fuel: <b style="text-transform:capitalize">${esc(props.fuel || '—')}</b></div>
+              <div>State: <b>${esc(props.state || '—')}</b></div>
               ${props.pop1km ? `<div style="color:#64748b;font-size:11px;margin-top:2px">Pop within 1km: ${Number(props.pop1km).toLocaleString()}</div>` : ''}
             </div>
           `).addTo(map)
@@ -479,11 +476,11 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
             const props = e.features[0].properties!
             const coords = (e.features[0].geometry as GeoJSON.Point).coordinates.slice() as [number, number]
             const lines = [`<div style="font-weight:600;color:${layer.color};margin-bottom:4px">${layer.label}</div>`]
-            if (props.name) lines.push(`<div><b>${props.name}</b></div>`)
-            if (props.fuel) lines.push(`<div>Fuel: <b>${props.fuel}</b></div>`)
-            if (props.capacity_mw) lines.push(`<div>Capacity: <b>${props.capacity_mw} MW</b></div>`)
-            if (props.capacity_mtpa) lines.push(`<div>Capacity: <b>${props.capacity_mtpa} Mt/yr</b></div>`)
-            if (props.province) lines.push(`<div style="color:#64748b;font-size:11px">${props.province}</div>`)
+            if (props.name) lines.push(`<div><b>${esc(props.name)}</b></div>`)
+            if (props.fuel) lines.push(`<div>Fuel: <b>${esc(props.fuel)}</b></div>`)
+            if (props.capacity_mw) lines.push(`<div>Capacity: <b>${esc(props.capacity_mw)} MW</b></div>`)
+            if (props.capacity_mtpa) lines.push(`<div>Capacity: <b>${esc(props.capacity_mtpa)} Mt/yr</b></div>`)
+            if (props.province) lines.push(`<div style="color:#64748b;font-size:11px">${esc(props.province)}</div>`)
             industryPopup.setLngLat(coords).setHTML(
               `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">${lines.join('')}</div>`
             ).addTo(map)
@@ -600,10 +597,10 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         firePopup.setLngLat(coords).setHTML(`
           <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">
             <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Fire Detection</div>
-            <div>FRP: <b>${props.frp} MW</b></div>
-            <div>Confidence: <b style="text-transform:capitalize">${props.confidence}</b></div>
-            <div>Satellite: <b>${props.satellite}</b></div>
-            <div style="color:#64748b;font-size:11px;margin-top:2px">${props.acq_date}</div>
+            <div>FRP: <b>${esc(props.frp)} MW</b></div>
+            <div>Confidence: <b style="text-transform:capitalize">${esc(props.confidence)}</b></div>
+            <div>Satellite: <b>${esc(props.satellite)}</b></div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">${esc(props.acq_date)}</div>
           </div>
         `).addTo(map)
       })
@@ -637,9 +634,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       const ensureUrbanGrid = (cityKey: string) => {
         if (urbanGridsRef.current.has(cityKey) || urbanGridLoadingRef.current.has(cityKey)) return
         urbanGridLoadingRef.current.add(cityKey)
-        fetch(`${API_BASE}/api/v1/ops/downscaler/grid/${cityKey}/${selectedDateRef.current}`, {
-          headers: { Authorization: `Bearer ${API_TOKEN}` },
-        })
+        fetch(`${API_BASE}/api/v1/ops/downscaler/grid/${cityKey}/${selectedDateRef.current}`)
           .then(r => r.ok ? r.json() : null)
           .then(data => {
             if (!data) return
@@ -753,8 +748,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         try {
           const extraParams = [smoothed && 'smoothed=true', model !== 'backbone' && `model=${model}`].filter(Boolean).map(p => '&' + p).join('')
           const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${extraParams}`,
-            { headers: { Authorization: `Bearer ${API_TOKEN}` } }
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${extraParams}`
           )
           if (res.ok) {
             const data = await res.json()

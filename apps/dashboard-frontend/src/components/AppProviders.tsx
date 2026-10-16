@@ -2,8 +2,6 @@
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState } from "react";
-import { AuthProvider } from "@/components/auth/AuthProvider";
-import { AuthGuard } from "@/components/auth/AuthGuard";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
@@ -21,9 +19,7 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <AuthProvider>
-          <AuthGuard>{children}</AuthGuard>
-        </AuthProvider>
+        {children}
       </QueryClientProvider>
     </ErrorBoundary>
   );
