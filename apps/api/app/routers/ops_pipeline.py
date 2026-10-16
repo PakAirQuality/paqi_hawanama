@@ -17,7 +17,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+import re
+
+from starlette.concurrency import run_in_threadpool
+
 from app.core.config import settings
+from app.core.filecache import BlobMissing, BoundedBlobCache
 from app.core.security import verify_tasks_token
 from ._tile_utils import (
     TURBO_CMAP,
@@ -79,7 +84,7 @@ def _gcs_read_json(bucket_name: str, blob_path: str) -> Dict[str, Any]:
         logger.error(f"GCS read failed: gs://{bucket_name}/{blob_path}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"GCS read failed: {blob_path}: {str(e)}"
+            detail="Storage read failed"
         )
 
 
@@ -118,7 +123,7 @@ def _gcs_list_run_dates(limit: int = 30) -> List[str]:
         logger.error(f"Failed to list run dates from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list run dates: {str(e)}"
+            detail="Failed to list run dates"
         )
 
 
@@ -411,7 +416,7 @@ def _gcs_list_model_history(limit: int = 30) -> List[str]:
         logger.error(f"Failed to list model history from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list model history: {str(e)}"
+            detail="Failed to list model history"
         )
 
 
@@ -540,7 +545,7 @@ def _gcs_list_prediction_dates(limit: int = 30) -> List[str]:
         logger.error(f"Failed to list prediction dates from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list prediction dates: {str(e)}"
+            detail="Failed to list prediction dates"
         )
 
 
@@ -700,54 +705,53 @@ def _download_cog_to_temp(bucket_name: str, blob_path: str) -> str:
         client = _gcs_client()
         blob = client.bucket(bucket_name).blob(blob_path)
         if not blob.exists(client):
-            raise HTTPException(
-                status_code=404,
-                detail=f"COG not found: gs://{bucket_name}/{blob_path}"
-            )
+            raise BlobMissing(blob_path)
 
         # Create temp file
         tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
         blob.download_to_filename(tmp.name)
         return tmp.name
-    except HTTPException:
+    except (HTTPException, BlobMissing):
         raise
     except Exception as e:
-        logger.error(f"Failed to download COG: gs://{bucket_name}/{blob_path}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to download COG: {str(e)}"
-        )
+        logger.error("Failed to download COG gs://%s/%s: %s", bucket_name, blob_path, type(e).__name__, exc_info=True)
+        raise HTTPException(status_code=502, detail="Raster data temporarily unavailable")
 
 
-# In-process cache for COG temp files. Keyed by "bucket/blob_path".
-# Avoids re-downloading the same COG on every tile request within a container lifetime.
-_COG_FILE_CACHE: Dict[str, str] = {}
-_COG_FILE_CACHE_LOCK = threading.Lock()
-_COG_ABSENT: set = set()  # blob paths known to not exist — skips repeated GCS checks
+# Bounded on-disk cache for COGs (Cloud Run /tmp is memory): at most 32 files, LRU
+# evicted and deleted, and a bounded "known missing" set. Keys are validated before
+# they reach here (see _check_pred_date / _check_model) so clients cannot grow it with
+# arbitrary strings. Always call from a worker thread.
+_COG_CACHE = BoundedBlobCache("cogs", max_files=32, max_absent=2000)
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MODEL_RE = re.compile(r"^(backbone|support_aware|population|urban/[a-z0-9_]{1,32})$")
+
+
+def _check_pred_date(value: str) -> str:
+    """400 unless ``value`` is a YYYY-MM-DD date (it becomes part of a storage path)."""
+    if not _DATE_RE.match(value or ""):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    try:
+        from datetime import date as _date
+        _date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be a valid YYYY-MM-DD date")
+    return value
+
+
+def _check_model(value: str) -> str:
+    if not _MODEL_RE.match(value or ""):
+        raise HTTPException(status_code=400, detail="unknown model variant")
+    return value
 
 
 def _get_or_download_cog(bucket_name: str, blob_path: str) -> str:
-    """Return cached temp file path for COG, downloading once per process if needed.
-    Raises HTTPException(404) for missing blobs and caches that result too."""
-    cache_key = f"{bucket_name}/{blob_path}"
-    if cache_key in _COG_ABSENT:
-        raise HTTPException(status_code=404, detail=f"COG not found: gs://{cache_key}")
-    if cache_key in _COG_FILE_CACHE:
-        return _COG_FILE_CACHE[cache_key]
-    with _COG_FILE_CACHE_LOCK:
-        if cache_key in _COG_ABSENT:
-            raise HTTPException(status_code=404, detail=f"COG not found: gs://{cache_key}")
-        if cache_key in _COG_FILE_CACHE:
-            return _COG_FILE_CACHE[cache_key]
-        try:
-            path = _download_cog_to_temp(bucket_name, blob_path)
-            _COG_FILE_CACHE[cache_key] = path
-            logger.info(f"COG cached: gs://{bucket_name}/{blob_path} → {path}")
-            return path
-        except HTTPException as e:
-            if e.status_code == 404:
-                _COG_ABSENT.add(cache_key)
-            raise
+    """Return a local path for the COG, downloading at most once while it stays cached.
+    Raises HTTPException(404) for missing blobs (cached, bounded)."""
+    return _COG_CACHE.get_or_download(
+        f"{bucket_name}/{blob_path}", lambda: _download_cog_to_temp(bucket_name, blob_path)
+    )
 
 
 @router.get(
@@ -782,6 +786,8 @@ async def get_prediction_tile(
     from fastapi.responses import Response
     from starlette.concurrency import run_in_threadpool
 
+    _check_pred_date(pred_date)
+    _check_model(model)
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
@@ -972,10 +978,11 @@ async def get_prediction_tilejson(
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
-    # Download COG to temp file
+    _check_pred_date(pred_date)
+    _check_model(model)
     prefix = "predictions/support_aware" if model == "support_aware" else "predictions"
     blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}.tif"
-    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, outputs_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -1016,7 +1023,7 @@ async def get_prediction_tilejson(
         logger.error(f"TileJSON error for {pred_date}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"TileJSON generation failed: {error_msg}"
+            detail="TileJSON generation failed"
         )
     finally:
         try:
@@ -1054,7 +1061,7 @@ def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
         logger.error(f"Failed to list COG dates from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list COG dates: {str(e)}"
+            detail="Failed to list COG dates"
         )
 
 
@@ -1123,21 +1130,19 @@ async def get_urban_grid_json(
     if city_key not in valid_cities:
         raise HTTPException(status_code=404, detail=f"Unknown city: {city_key}")
 
+    _check_pred_date(pred_date)
     bucket_name = _get_outputs_bucket()
     blob_path = f"predictions/urban/date={pred_date}/{city_key}.json"
 
-    try:
+    def _load() -> dict:
         client = _gcs_client()
         blob = client.bucket(bucket_name).blob(blob_path)
         if not blob.exists(client):
-            raise HTTPException(status_code=404, detail=f"No urban data for {city_key} on {pred_date}")
+            raise HTTPException(status_code=404, detail="No urban data for that city and date")
+        return _json.loads(blob.download_as_bytes())
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        blob.download_to_filename(tmp.name)
-        with open(tmp.name) as f:
-            data = _json.load(f)
-        import os
-        os.unlink(tmp.name)
+    try:
+        data = await run_in_threadpool(_load)
 
         # Return grid info + values + population
         return {
@@ -1153,8 +1158,8 @@ async def get_urban_grid_json(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to load urban grid for {city_key}/{pred_date}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Failed to load urban grid for %s/%s: %s", city_key, pred_date, type(e).__name__, exc_info=True)
+        raise HTTPException(status_code=502, detail="Urban grid temporarily unavailable")
 
 
 @router.get(
@@ -1184,10 +1189,12 @@ async def get_point_value(
     import os
     import math
 
+    _check_pred_date(pred_date)
+    _check_model(model)
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
-    # Download COG to temp file
+    # Resolve the COG (cached, bounded; downloaded off the event loop)
     if model.startswith("urban/"):
         city_key = model.split("/", 1)[1]
         suffix = "_smoothed" if smoothed else ""
@@ -1198,7 +1205,7 @@ async def get_point_value(
     else:
         suffix = "_gaussian_smoothed" if smoothed else ""
         blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
-    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, outputs_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -1242,7 +1249,7 @@ async def get_point_value(
         logger.error(f"Point query error for {pred_date} at ({lat}, {lon}): {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Point query failed: {error_msg}"
+            detail="Point query failed"
         )
     finally:
         try:
@@ -1304,7 +1311,7 @@ def _gcs_list_feature_cog_dates(feature: str, limit: int = 365) -> List[str]:
         logger.error(f"Failed to list feature COG dates for {feature}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list feature COG dates: {str(e)}"
+            detail="Failed to list feature COG dates"
         )
 
 
@@ -1353,8 +1360,9 @@ async def get_feature_tile(
     features_bucket = _get_features_bucket()
 
     # Path in features bucket: cog/{feature}/date={date}/{feature}.tif
+    _check_pred_date(feat_date)
     blob_path = f"cog/{feature}/date={feat_date}/{feature}.tif"
-    tmp_path = _download_cog_to_temp(features_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, features_bucket, blob_path)
 
     try:
         import numpy as np
@@ -1475,8 +1483,9 @@ async def get_feature_point_value(
     features_bucket = _get_features_bucket()
 
     # Path in features bucket: cog/{feature}/date={date}/{feature}.tif
+    _check_pred_date(feat_date)
     blob_path = f"cog/{feature}/date={feat_date}/{feature}.tif"
-    tmp_path = _download_cog_to_temp(features_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, features_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -1507,7 +1516,7 @@ async def get_feature_point_value(
         if "outside" in error_msg.lower() or "bounds" in error_msg.lower():
             raise HTTPException(status_code=400, detail=f"Coordinates ({lat}, {lon}) outside bounds")
         logger.error(f"Feature point query error for {feature}/{feat_date} at ({lat}, {lon}): {e}")
-        raise HTTPException(status_code=500, detail=f"Point query failed: {error_msg}")
+        raise HTTPException(status_code=500, detail="Point query failed")
     finally:
         try:
             os.unlink(tmp_path)
@@ -1605,7 +1614,7 @@ async def run_pipeline_job(
         logger.error(f"Failed to trigger Cloud Run job {which}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to trigger job: {str(e)}"
+            detail="Failed to trigger job"
         )
 
 
@@ -1656,7 +1665,7 @@ async def get_job_executions(
         logger.error(f"Failed to list executions for {which}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list executions: {str(e)}"
+            detail="Failed to list executions"
         )
 
 
@@ -1696,7 +1705,7 @@ async def get_execution_details(
         logger.error(f"Failed to get execution {execution_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get execution: {str(e)}"
+            detail="Failed to get execution"
         )
 
 
@@ -1832,7 +1841,7 @@ async def get_station_daily_observations(
         raise
     except Exception as e:
         logger.error(f"Failed to load station daily for {obs_date}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # =============================================================================

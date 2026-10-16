@@ -12,7 +12,19 @@ from app.ingestion.http import aclose_shared_clients, configure_logging
 
 # Process-wide logging: redacts credentials in every record and keeps httpx from
 # logging request URLs (which carry the IQAir key as a query parameter).
-configure_logging(settings.LOG_LEVEL, secrets=(settings.IQAIR_API_KEY, settings.OPENAQ_API_KEY))
+configure_logging(
+    settings.LOG_LEVEL,
+    secrets=(
+        settings.IQAIR_API_KEY,
+        settings.OPENAQ_API_KEY,
+        settings.TASKS_API_SECRET,
+        settings.GEMINI_API_KEY,
+        settings.BAM_INGEST_TOKEN,
+        settings.PARTNER_API_KEYS,
+        settings.PUBLIC_API_SECRET,
+        settings.POSTGRES_PASSWORD,
+    ),
+)
 from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest
 
 # True only on the dedicated ingestion Cloud Run service (hawanama-ingest).
@@ -38,6 +50,20 @@ app.add_middleware(GZipMiddleware, minimum_size=1024)
 # wire the 429 handler so @limiter.limit decorators take effect.
 app.state.limiter = public.limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# Unhandled exceptions: log the traceback (redacted), never echo it to the client.
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request, exc):
+    from fastapi.responses import JSONResponse
+    import logging as _logging
+    import uuid as _uuid
+
+    ref = _uuid.uuid4().hex[:12]
+    _logging.getLogger("app.unhandled").error(
+        "unhandled error ref=%s %s %s: %s", ref, request.method, request.url.path, type(exc).__name__, exc_info=True
+    )
+    return JSONResponse(status_code=500, content={"detail": "Internal error", "ref": ref})
 
 
 # Baseline security headers on every response.

@@ -59,7 +59,7 @@ class StationDiscoveryTask:
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
-        self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
+        self._leases = leases or LeaseManager(AsyncSessionLocal, required=True)
 
         # Station manifest configuration (directory and format)
         self.manifest_root = Path(s.STATION_MANIFEST_DIR)

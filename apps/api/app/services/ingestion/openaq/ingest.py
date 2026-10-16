@@ -42,7 +42,7 @@ class OpenAQIngestTask:
         self.repo = repo or PostgresOpenAQRepository(AsyncSessionLocal)
         self.archiver = archiver or RawPayloadArchiver(s)
         self._recorder_factory = recorder_factory or (lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False))
-        self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
+        self._leases = leases or LeaseManager(AsyncSessionLocal, required=True)
         self._now = now or (lambda: datetime.now(timezone.utc))
 
     async def run(self, *, mode: str = "ingest", trigger: str = "http") -> RunOutcome:

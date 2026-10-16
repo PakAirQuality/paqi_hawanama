@@ -92,7 +92,7 @@ class DataIngestionTask:
         self._recorder_factory = recorder_factory or (
             lambda: RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
         )
-        self._leases = leases or LeaseManager(AsyncSessionLocal, required=False)
+        self._leases = leases or LeaseManager(AsyncSessionLocal, required=True)
         self._archiver = archiver or RawPayloadArchiver(s)
         self._stats = ExtractStats()
         # Set per run: run id, report dir, abort signal (provider auth failure stops new fetches).

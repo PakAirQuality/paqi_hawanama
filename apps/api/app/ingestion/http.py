@@ -91,6 +91,17 @@ def configure_logging(level: str = "INFO", *, secrets: Iterable[Optional[str]] =
         )
     _original_factory = logging.getLogRecordFactory()
     logging.setLogRecordFactory(_redacting_record_factory)
+    # Tracebacks (exc_info / logger.exception) are rendered by the formatter after the
+    # record factory ran, so redact them there too. Patching the base class covers
+    # uvicorn's and any third-party formatter.
+    if not getattr(logging.Formatter, "_hawanama_redacting", False):
+        _orig_format_exception = logging.Formatter.formatException
+
+        def _redacting_format_exception(self, ei):  # type: ignore[no-untyped-def]
+            return redact_text(_orig_format_exception(self, ei))
+
+        logging.Formatter.formatException = _redacting_format_exception  # type: ignore[method-assign]
+        logging.Formatter._hawanama_redacting = True  # type: ignore[attr-defined]
     for name in ("httpx", "httpcore"):
         logging.getLogger(name).setLevel(logging.WARNING)
 

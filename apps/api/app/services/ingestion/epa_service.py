@@ -121,7 +121,7 @@ async def collect_once(db: AsyncSession, *, trigger: str = "http", settings=None
     dbs = db_service or DatabaseService()
     archiver = archiver or RawPayloadArchiver(s)
     recorder = recorder or RunRecorder(AsyncSessionLocal, Path(s.INGEST_OUT_DIR), required=False)
-    leases = leases or LeaseManager(AsyncSessionLocal, required=False)
+    leases = leases or LeaseManager(AsyncSessionLocal, required=True)
 
     run_id = new_run_id("punjab-ingest")
     outcome = RunOutcome(run_id=run_id, task="punjab-ingest", provider_code=PROVIDER_CODE, scope="Punjab", trigger=trigger)

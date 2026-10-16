@@ -12,8 +12,11 @@ import json
 import logging
 import os
 import struct
+import threading
 import time
 import zlib
+
+from starlette.concurrency import run_in_threadpool
 from datetime import datetime, timezone
 
 import fsspec
@@ -283,27 +286,45 @@ def _download_cog_from_gcs(cog_filename: str) -> str:
     return local_path
 
 
+_sat_lock = threading.Lock()
+_sat_missing: dict = {}          # cog_filename -> None, bounded below
+_SAT_MAX_MISSING = 500
+
+
 def _get_sat_reader(cog_filename: str):
-    """Get or create a rio-tiler Reader for the given COG file."""
+    """Get or create a rio-tiler Reader for the given COG file.
+
+    Blocking (GCS download on first use): call via ``run_in_threadpool``. One lock
+    serialises downloads so concurrent first requests do not race on the same file,
+    and missing files are remembered (bounded) so each miss costs one GCS check.
+    """
     from rio_tiler.io import Reader
 
-    if cog_filename in _sat_readers:
-        return _sat_readers[cog_filename]
-
-    local_path = _download_cog_from_gcs(cog_filename)
-    reader = Reader(local_path)
-
-    # Evict oldest if at capacity
-    if len(_sat_readers) >= _SAT_MAX_READERS:
-        oldest_key = next(iter(_sat_readers))
-        old_reader = _sat_readers.pop(oldest_key)
+    with _sat_lock:
+        if cog_filename in _sat_readers:
+            return _sat_readers[cog_filename]
+        if cog_filename in _sat_missing:
+            raise FileNotFoundError(cog_filename)
         try:
-            old_reader.close()
-        except Exception:
-            pass
+            local_path = _download_cog_from_gcs(cog_filename)
+        except FileNotFoundError:
+            _sat_missing[cog_filename] = None
+            while len(_sat_missing) > _SAT_MAX_MISSING:
+                _sat_missing.pop(next(iter(_sat_missing)))
+            raise
+        reader = Reader(local_path)
 
-    _sat_readers[cog_filename] = reader
-    return reader
+        # Evict oldest if at capacity
+        if len(_sat_readers) >= _SAT_MAX_READERS:
+            oldest_key = next(iter(_sat_readers))
+            old_reader = _sat_readers.pop(oldest_key)
+            try:
+                old_reader.close()
+            except Exception:
+                pass
+
+        _sat_readers[cog_filename] = reader
+        return reader
 
 
 def _render_satpm25_tile(reader, x: int, y: int, z: int) -> bytes:
@@ -421,11 +442,11 @@ async def get_satpm25_monthly_tile(year: int, month: int, z: int, x: int, y: int
     cog_filename = f"satpm25_{year}{month:02d}.tif"
 
     try:
-        reader = _get_sat_reader(cog_filename)
+        reader = await run_in_threadpool(_get_sat_reader, cog_filename)
     except FileNotFoundError:
         return Response(content="COG not found", status_code=404)
 
-    png_bytes = _render_satpm25_tile(reader, x, y, z)
+    png_bytes = await run_in_threadpool(_render_satpm25_tile, reader, x, y, z)
     if png_bytes is None:
         return Response(content=b"", status_code=204)
 
@@ -447,11 +468,11 @@ async def get_satpm25_tile(z: int, x: int, y: int, year: int = 2022):
     cog_filename = f"satpm25_{year}.tif"
 
     try:
-        reader = _get_sat_reader(cog_filename)
+        reader = await run_in_threadpool(_get_sat_reader, cog_filename)
     except FileNotFoundError:
         return Response(content="COG not found", status_code=404)
 
-    png_bytes = _render_satpm25_tile(reader, x, y, z)
+    png_bytes = await run_in_threadpool(_render_satpm25_tile, reader, x, y, z)
     if png_bytes is None:
         return Response(content=b"", status_code=204)
 

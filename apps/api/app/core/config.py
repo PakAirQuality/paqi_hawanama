@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     
     # Security
     TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
+    # Cloud Scheduler calls hawanama-ingest with an OIDC token for this service account and
+    # this audience; the ingest role verifies both (app/core/security.py).
+    SCHEDULER_SERVICE_ACCOUNT: str = "scheduler-invoker@hawanama-2.iam.gserviceaccount.com"
+    INGEST_BASE_URL: str = "https://hawanama-ingest-152782825429.asia-south1.run.app"
+    # GCS destinations the publish routes may write to: "bucket" or "bucket/prefix", comma-separated.
+    EXPORT_GCS_ALLOWED: str = "paqi-raw-hawanama-data"
     PUBLIC_API_SECRET: Optional[str] = None  # Legacy single shared key for public API endpoints
     # Per-partner API keys for the public partner API. JSON object mapping
     # key -> partner name, e.g. '{"abc123": "alertli", "def456": "delivetree"}'.

@@ -63,6 +63,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2am" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -90,6 +91,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2pm" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -118,6 +120,7 @@ resource "google_cloud_scheduler_job" "station_ingestion" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -146,6 +149,7 @@ resource "google_cloud_scheduler_job" "city_ingestion" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -181,6 +185,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_hourly" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -215,6 +220,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_test" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -243,6 +249,7 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -271,6 +278,7 @@ resource "google_cloud_scheduler_job" "firms_fire_ingest" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -306,6 +314,7 @@ resource "google_cloud_scheduler_job" "parquet_export_daily" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -334,6 +343,7 @@ resource "google_cloud_scheduler_job" "hourly_partitioned_export" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -362,6 +372,7 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -392,6 +403,7 @@ resource "google_cloud_scheduler_job" "daily_brief_generation" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -421,6 +433,7 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -456,6 +469,7 @@ resource "google_cloud_scheduler_job" "openaq_discovery" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -486,6 +500,7 @@ resource "google_cloud_scheduler_job" "openaq_ingestion" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -514,6 +529,7 @@ resource "google_cloud_scheduler_job" "openaq_reconcile" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
