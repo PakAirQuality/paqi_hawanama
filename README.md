@@ -6,6 +6,8 @@ from 1,200+ monitoring stations in 600+ cities across Pakistan, India, Banglades
 stores them in TimescaleDB, and serves them through a FastAPI backend, a public Next.js map and an
 internal operations dashboard.
 
+**Maintainer:** [Rehan Ahmad](https://github.com/RehanAhmad13), technical lead, Pakistan Air Quality Initiative.
+
 **Live:** [hawanama.org](https://hawanama.org) · [About and data downloads](https://hawanama.org/about/) ·
 **Dashboard:** [hawanama-dashboard.web.app](https://hawanama-dashboard.web.app) ·
 **Updates:** [@pakairquality](https://twitter.com/pakairquality)

@@ -148,6 +148,15 @@ export default function AboutPage() {
 {`Pakistan Air Quality Initiative (${new Date().getUTCFullYear()}). Hawanama: real-time air quality data for Pakistan and South Asia. https://hawanama.org`}
         </pre>
 
+        <h2 className="text-2xl font-semibold mt-10 mb-3">Credits</h2>
+        <p className="text-muted-foreground">
+          Hawanama is designed, built and maintained by{' '}
+          <A href="https://github.com/RehanAhmad13">Rehan Ahmad</A> (technical lead) for the Pakistan Air Quality
+          Initiative, founded by <A href={SITE.links.paqi}>Abid Omar</A>. The satellite PM2.5 estimation behind the
+          “Estimated” map mode is by Rehan Ahmad, Mahad Naveed and Abid Omar. Monitors are hosted by PAQI’s community
+          of volunteers, schools, businesses and public agencies across Pakistan.
+        </p>
+
         <h2 className="text-2xl font-semibold mt-10 mb-3">Contact</h2>
         <p className="text-muted-foreground">
           Questions, data requests or a monitor to host: reach PAQI through{' '}
