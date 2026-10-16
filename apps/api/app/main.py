@@ -7,6 +7,7 @@ from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from app.core.config import settings
 from app.core.database import get_database
+from app.core.ratelimit import make_rate_limit
 from app.ingestion.http import aclose_shared_clients, configure_logging
 
 # Process-wide logging: redacts credentials in every record and keeps httpx from
@@ -68,11 +69,15 @@ if BAM_ROLE:
 else:
     app.include_router(meta.router, prefix=f"{settings.API_V1_STR}/meta", tags=["metadata"])
     # app.include_router(directory.router, prefix=f"{settings.API_V1_STR}", tags=["directory"])  # Temporarily disabled
-    app.include_router(nearest.router, prefix=f"{settings.API_V1_STR}", tags=["nearest"])
-    app.include_router(current.router, prefix=f"{settings.API_V1_STR}", tags=["current"])
-    app.include_router(history.router, prefix=f"{settings.API_V1_STR}", tags=["history"])
-    app.include_router(dashboard.router, prefix=f"{settings.API_V1_STR}/dashboard", tags=["dashboard"])
-    app.include_router(cities.router, prefix=f"{settings.API_V1_STR}", tags=["cities"])
+    # Per-IP, per-instance limits on the read routes the sites use (see app/core/ratelimit.py).
+    # Tile routers get a higher allowance because one map view fetches dozens of tiles.
+    json_limit = [Depends(make_rate_limit(settings.PUBLIC_RATE_LIMIT_PER_MINUTE, "json"))]
+    tile_limit = [Depends(make_rate_limit(settings.TILE_RATE_LIMIT_PER_MINUTE, "tiles"))]
+    app.include_router(nearest.router, prefix=f"{settings.API_V1_STR}", tags=["nearest"], dependencies=json_limit)
+    app.include_router(current.router, prefix=f"{settings.API_V1_STR}", tags=["current"], dependencies=json_limit)
+    app.include_router(history.router, prefix=f"{settings.API_V1_STR}", tags=["history"], dependencies=json_limit)
+    app.include_router(dashboard.router, prefix=f"{settings.API_V1_STR}/dashboard", tags=["dashboard"], dependencies=json_limit)
+    app.include_router(cities.router, prefix=f"{settings.API_V1_STR}", tags=["cities"], dependencies=json_limit)
     app.include_router(exports.router, prefix=f"{settings.API_V1_STR}/exports", tags=["exports"])
     app.include_router(exports_publish.router, prefix=f"{settings.API_V1_STR}/exports/publish", tags=["publish"])
     if INGEST_ROLE:
@@ -81,14 +86,16 @@ else:
     app.include_router(punjab_epa.router, prefix=f"{settings.API_V1_STR}/punjab", tags=["punjab-epa"])
     app.include_router(openaq_network.router, prefix=f"{settings.API_V1_STR}")
     app.include_router(nasa_database.router, prefix=f"{settings.API_V1_STR}")
-    app.include_router(internal_stations.router, prefix=f"{settings.API_V1_STR}/internal/stations", tags=["internal-stations"])
+    app.include_router(internal_stations.router, prefix=f"{settings.API_V1_STR}/internal/stations", tags=["internal-stations"], dependencies=json_limit)
     app.include_router(public.router, prefix=f"{settings.API_V1_STR}", tags=["public"])
-    app.include_router(ops_pipeline.router, prefix=f"{settings.API_V1_STR}/ops/pipeline", tags=["ops-pipeline"])
-    app.include_router(ops_downscaler.router, prefix=f"{settings.API_V1_STR}/ops/downscaler", tags=["ops-downscaler"])
-    app.include_router(data_sources.router, prefix=f"{settings.API_V1_STR}/data-sources", tags=["data-sources"])
-    app.include_router(analyst_desk.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["analyst-desk"])
+    # Read routes below are public (the dashboard is a public read-only site); the few action
+    # routes left in these routers keep their own verify_tasks_token dependency.
+    app.include_router(ops_pipeline.router, prefix=f"{settings.API_V1_STR}/ops/pipeline", tags=["ops-pipeline"], dependencies=tile_limit)
+    app.include_router(ops_downscaler.router, prefix=f"{settings.API_V1_STR}/ops/downscaler", tags=["ops-downscaler"], dependencies=tile_limit)
+    app.include_router(data_sources.router, prefix=f"{settings.API_V1_STR}/data-sources", tags=["data-sources"], dependencies=tile_limit)
+    app.include_router(analyst_desk.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["analyst-desk"], dependencies=json_limit)
     app.include_router(copilot.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["copilot"])
-    app.include_router(analytics.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["analytics"])
+    app.include_router(analytics.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["analytics"], dependencies=json_limit)
 
     # Add direct stations endpoint for frontend compatibility
     @app.get(f"{settings.API_V1_STR}/stations")

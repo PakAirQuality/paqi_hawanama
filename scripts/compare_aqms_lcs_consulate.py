@@ -42,7 +42,7 @@ PLOTS.mkdir(exist_ok=True)
 END = dt.datetime(2026, 5, 13, 0, 0, tzinfo=dt.timezone.utc)
 START = END - dt.timedelta(days=730)   # exactly 24 months
 
-AIRNOW_API_KEY = "***REMOVED***"
+AIRNOW_API_KEY = os.environ["AIRNOW_API_KEY"]  # never commit the key; export it in the shell
 CONSULATE_SITES = {"Lahore", "Karachi", "Islamabad", "Peshawar"}
 
 COLOR = {

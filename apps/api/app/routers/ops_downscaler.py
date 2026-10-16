@@ -324,7 +324,6 @@ async def get_downscaler_tile(
 async def get_grid_json(
     city: str,
     pred_date: str,
-    _: bool = Depends(verify_tasks_token),
 ) -> Dict[str, Any]:
     """Full 1km grid data (lats, lons, pm25 values) for client-side O(1) hover."""
     import json as _json
@@ -360,9 +359,7 @@ async def get_grid_json(
 
 
 @router.get("/summary", summary="Downscaler model card")
-async def get_summary(
-    _: bool = Depends(verify_tasks_token),
-) -> Dict[str, Any]:
+async def get_summary() -> Dict[str, Any]:
     """Model metadata: version, MAE, feature count, cities covered."""
     bucket_name = _get_models_bucket()
 

@@ -20,7 +20,7 @@ from typing import List, Optional, Literal
 from fastapi import APIRouter, HTTPException, Query, Depends, Header, Request
 from pydantic import BaseModel
 from slowapi import Limiter
-from slowapi.util import get_remote_address
+from app.core.ratelimit import client_ip
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -52,8 +52,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------
 
 def _rate_limit_key(request: Request) -> str:
-    """Rate-limit bucket: the API key if present, else the client IP."""
-    return request.headers.get("x-api-key") or get_remote_address(request)
+    """Rate-limit bucket: the API key if present, else the client IP Google's front end saw."""
+    return request.headers.get("x-api-key") or client_ip(request)
 
 
 # Shared limiter instance; registered on the app in main.py.

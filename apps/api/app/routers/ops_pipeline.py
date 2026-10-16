@@ -178,9 +178,7 @@ def _get_derived_bucket() -> str:
     summary="Get pipeline summary",
     description="Returns current model pointer, predictions pointer, and latest run report."
 )
-async def get_pipeline_summary(
-    _: bool = Depends(verify_tasks_token)
-) -> Dict[str, Any]:
+async def get_pipeline_summary() -> Dict[str, Any]:
     """
     Get pipeline summary including:
     - Model pointer (current operational model)
@@ -268,9 +266,7 @@ def _find_model_results_file(waterline: str) -> Optional[str]:
     summary="Get model training details",
     description="Returns model training results including hyperparameters, CV metrics, and feature importance."
 )
-async def get_model_details(
-    _: bool = Depends(verify_tasks_token)
-) -> Dict[str, Any]:
+async def get_model_details() -> Dict[str, Any]:
     """
     Get detailed model training results for the current operational model.
 
@@ -426,7 +422,6 @@ def _gcs_list_model_history(limit: int = 30) -> List[str]:
 )
 async def list_model_history(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of entries to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available model training history entries (most recent last)."""
     dates = _gcs_list_model_history(limit=limit)
@@ -440,7 +435,6 @@ async def list_model_history(
 )
 async def get_model_history_entry(
     reference_date: str,
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
     Get model training results for a specific reference date.
@@ -491,7 +485,6 @@ async def get_model_history_entry(
 )
 async def list_pipeline_runs(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of run dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available pipeline run dates (most recent last)."""
     dates = _gcs_list_run_dates(limit=limit)
@@ -505,7 +498,6 @@ async def list_pipeline_runs(
 )
 async def get_run_report(
     run_date: str,
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
     Get the run report for a specific date.
@@ -559,7 +551,6 @@ def _gcs_list_prediction_dates(limit: int = 30) -> List[str]:
 )
 async def list_predictions(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available prediction dates (most recent last)."""
     dates = _gcs_list_prediction_dates(limit=limit)
@@ -573,7 +564,6 @@ async def list_predictions(
 )
 async def get_prediction_data(
     pred_date: str,
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
     Get prediction data for a specific date.
@@ -1270,9 +1260,7 @@ async def get_point_value(
     summary="List available features",
     description="Returns list of features with metadata (stage, unit, vmin, vmax, colormap)."
 )
-async def list_features(
-    _: bool = Depends(verify_tasks_token)
-) -> Dict[str, Any]:
+async def list_features() -> Dict[str, Any]:
     """List all available features with their metadata."""
     features = [
         {
@@ -1328,7 +1316,6 @@ def _gcs_list_feature_cog_dates(feature: str, limit: int = 365) -> List[str]:
 async def list_feature_cog_dates(
     feature: str = Query(..., description="Feature name (e.g. t2m, optical_depth_047)"),
     limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available COG dates for a specific feature."""
     if feature not in FEATURE_CONFIG:
@@ -1353,7 +1340,6 @@ async def get_feature_tile(
     z: int,
     x: int,
     y: int,
-    _: bool = Depends(verify_tasks_token)
 ):
     """Serve XYZ tiles from a feature COG."""
     from fastapi.responses import Response
@@ -1476,7 +1462,6 @@ async def get_feature_point_value(
     feat_date: str,
     lat: float = Query(..., ge=20.0, le=40.0, description="Latitude"),
     lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """Query feature value at a specific coordinate."""
     import os

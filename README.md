@@ -118,7 +118,10 @@ python -m venv venv && source venv/bin/activate
 pip install -r requirements.txt
 
 # Configure environment
-cp .env.example .env  # Edit with your credentials
+# Secrets come from Secret Manager in production. For local runs export them in your
+# shell or keep a .env OUTSIDE the repository; .env files under apps/ are excluded from
+# Cloud Build uploads and Docker images on purpose.
+export POSTGRES_SERVER=... POSTGRES_USER=... POSTGRES_PASSWORD=... IQAIR_API_KEY=...
 
 # Run locally
 uvicorn app.main:app --reload --port 8000
