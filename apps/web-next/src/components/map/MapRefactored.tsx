@@ -302,7 +302,7 @@ export default function MapRefactored({
       <Map
         {...viewport}
         zoom={viewport?.zoom ?? 3.6}
-        mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'}
+        mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''}
         mapStyle="mapbox://styles/mapbox/streets-v12"
         onMove={handleMapChange}
         onLoad={handleMapLoad}

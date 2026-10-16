@@ -10,7 +10,7 @@ import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 
 // the deployed build reads a token restricted to this site's own addresses
 // (.env.production.local); the literal is the development fallback
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
 const API_BASE = 'https://hawanama-152782825429.asia-south1.run.app'
 const MARKER_MIN_ZOOM = 4

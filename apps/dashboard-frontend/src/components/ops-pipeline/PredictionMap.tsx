@@ -11,7 +11,7 @@ import { loadPakBoundary, isInsidePakistan } from '@/components/analyst-desk/pak
 
 // the deployed build reads a token restricted to this site's own addresses
 // (.env.production.local); the literal is the development fallback
-mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***'
+mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
 const STYLE_URL = 'mapbox://styles/rehan0900/cmmh9p69z009m01qu0nnn3iwu'
 const INITIAL_CENTER: [number, number] = [69.3459, 30.3]

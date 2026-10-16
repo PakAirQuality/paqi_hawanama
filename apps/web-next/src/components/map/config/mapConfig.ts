@@ -8,7 +8,7 @@ export const MAP_CONFIG = {
   center: [78, 22] as [number, number], // South Asia center
   zoom: 3.6,
   projection: 'globe' as const, // Beautiful globe projection with 2D overlay
-  accessToken: process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '***REMOVED***',
+  accessToken: process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '',
   config: {
     basemap: {
       // Light canvas with relief for Climate TRACE style
