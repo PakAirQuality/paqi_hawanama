@@ -26,33 +26,8 @@ from app.routers.analyst_desk import (
 
 logger = logging.getLogger(__name__)
 
-# ── Risk band thresholds (µg/m³) ─────────────────────────────────────────
-
-_PM25_BANDS = [
-    (35, "good"),
-    (75, "moderate"),
-    (150, "unhealthy"),
-    (250, "very_unhealthy"),
-]
-
-
-def _classify_band(pm25: float | None) -> str:
-    if pm25 is None:
-        return "unknown"
-    for threshold, band in _PM25_BANDS:
-        if pm25 <= threshold:
-            return band
-    return "severe"
-
-
-_BAND_ORDER = {
-    "severe": 5,
-    "very_unhealthy": 4,
-    "unhealthy": 3,
-    "moderate": 2,
-    "good": 1,
-    "unknown": 0,
-}
+# ── Health bands: US EPA 2024 PM2.5 categories, one implementation for the repo ──
+from app.services.aqi.pm25 import BAND_ORDER as _BAND_ORDER, band_key as _classify_band  # noqa: E402
 
 _WATCHLIST_SEVERITY = {
     "ramp_alerts": "critical",
@@ -399,9 +374,13 @@ def _build_national_summary(
 
     return {
         "n_stations": len(vals),
+        # Unweighted mean over the stations that reported: a monitoring-network figure,
+        # not an area or population average. Label it that way downstream.
         "mean_pm25": _safe_round(sum(vals) / len(vals)) if vals else None,
+        "mean_basis": "reporting_station_mean",
         "max_pm25": _safe_round(max(vals)) if vals else None,
         "band_counts": band_counts,
+        "band_scale": "us_epa_2024",
         "source": "observations",
     }
 
@@ -2112,12 +2091,14 @@ async def get_historical_snapshot(
             COUNT(*) AS n_stations,
             ROUND(AVG(pm25)::numeric, 1) AS mean_pm25,
             ROUND(MAX(pm25)::numeric, 1) AS max_pm25,
-            COUNT(CASE WHEN pm25 < 12 THEN 1 END) AS good,
-            COUNT(CASE WHEN pm25 >= 12 AND pm25 < 35.5 THEN 1 END) AS moderate,
-            COUNT(CASE WHEN pm25 >= 35.5 AND pm25 < 55.5 THEN 1 END) AS usg,
-            COUNT(CASE WHEN pm25 >= 55.5 AND pm25 < 150.5 THEN 1 END) AS unhealthy,
-            COUNT(CASE WHEN pm25 >= 150.5 AND pm25 < 250.5 THEN 1 END) AS very_unhealthy,
-            COUNT(CASE WHEN pm25 >= 250.5 THEN 1 END) AS hazardous
+            -- US EPA 2024 PM2.5 breakpoints on the truncated (0.1 µg/m³) concentration;
+            -- keep in step with app/services/aqi/pm25.py BANDS.
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 <= 9.0 THEN 1 END) AS good,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 9.0 AND trunc(pm25 * 10) / 10 <= 35.4 THEN 1 END) AS moderate,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 35.4 AND trunc(pm25 * 10) / 10 <= 55.4 THEN 1 END) AS usg,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 55.4 AND trunc(pm25 * 10) / 10 <= 125.4 THEN 1 END) AS unhealthy,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 125.4 AND trunc(pm25 * 10) / 10 <= 225.4 THEN 1 END) AS very_unhealthy,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 225.4 THEN 1 END) AS hazardous
         FROM latest
     """), params)
     nat = nat_result.mappings().first()
@@ -2126,10 +2107,12 @@ async def get_historical_snapshot(
         "n_stations": int(nat["n_stations"]) if nat else 0,
         "mean_pm25": float(nat["mean_pm25"]) if nat and nat["mean_pm25"] else None,
         "max_pm25": float(nat["max_pm25"]) if nat and nat["max_pm25"] else None,
+        "mean_basis": "reporting_station_mean",
+        "band_scale": "us_epa_2024",
         "bands": {
             "good": int(nat["good"]) if nat else 0,
             "moderate": int(nat["moderate"]) if nat else 0,
-            "usg": int(nat["usg"]) if nat else 0,
+            "unhealthy_sensitive": int(nat["usg"]) if nat else 0,
             "unhealthy": int(nat["unhealthy"]) if nat else 0,
             "very_unhealthy": int(nat["very_unhealthy"]) if nat else 0,
             "hazardous": int(nat["hazardous"]) if nat else 0,

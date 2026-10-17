@@ -212,15 +212,8 @@ def compute_hazard_surface(
     population = grid["population"].values.astype(np.float32)
     exposure = population * hazard
 
-    # Risk band thresholds
-    PM25_BANDS = [(35, "good"), (75, "moderate"), (150, "unhealthy"),
-                  (250, "very_unhealthy")]
-
-    def _band(v):
-        for t, b in PM25_BANDS:
-            if v <= t:
-                return b
-        return "severe"
+    # Health bands: US EPA 2024 PM2.5 categories (single implementation)
+    from app.services.aqi.pm25 import band_key as _band
 
     # Aggregate by city
     city_stats = []
@@ -347,17 +340,18 @@ def get_exposed_population(
     population = subset["population"].values.astype(np.float32)
     total_pop = float(population.sum())
 
-    # Exposed population by risk band
+    # Exposed population at or above each US EPA 2024 PM2.5 category's lower bound
+    # (population whose modelled PM2.5 is worse than the previous category's ceiling).
+    from app.services.aqi.pm25 import BANDS as _BANDS
     bands = {}
-    for threshold, label in [(35, "good"), (75, "moderate"), (150, "unhealthy"), (250, "very_unhealthy")]:
-        bands[label] = {
-            "threshold": threshold,
-            "exposed_population": int(population[hazard > threshold].sum()),
+    prev_max = 0.0
+    for b in _BANDS:
+        bands[b["key"]] = {
+            "threshold": prev_max,
+            "exposed_population": int(population[hazard > prev_max].sum()),
         }
-    bands["severe"] = {
-        "threshold": 250,
-        "exposed_population": int(population[hazard > 250].sum()),
-    }
+        if b["pm25_max"] is not None:
+            prev_max = float(b["pm25_max"])
 
     # Population-weighted PM2.5
     pwm = float((population * hazard).sum() / total_pop) if total_pop > 0 else 0

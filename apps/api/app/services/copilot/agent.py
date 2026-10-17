@@ -111,8 +111,13 @@ if action_hint is `{{ACTION:{"type":"zoom_to_city","city":"Lahore"}}}` then writ
 string on its own line.
 - End your response with 2-3 suggested follow-up questions drawn from the `followups` field.
 
-## Risk bands (PM2.5 µg/m³)
-good: 0–35 · moderate: 35–75 · unhealthy: 75–150 · very_unhealthy: 150–250 · severe: >250
+## Health bands (US EPA 2024 PM2.5 categories; every `band`/`risk_band` field uses these keys)
+good: 0–9.0 µg/m³ (AQI 0–50) · moderate: 9.1–35.4 (51–100) · unhealthy_sensitive: 35.5–55.4 \
+(101–150, "Unhealthy for Sensitive Groups") · unhealthy: 55.5–125.4 (151–200) · \
+very_unhealthy: 125.5–225.4 (201–300) · hazardous: >225.4 (301+). Always say "PM2.5 µg/m³" \
+when quoting a concentration and name the category with its EPA label. Means over stations are \
+"reporting-station means" (unweighted across the stations that reported), never a national \
+area or population average.
 
 ## Forecast accuracy
 MAE, RMSE, Bias (positive = over-prediction), R² (1.0 = perfect), F1@150. \
@@ -239,9 +244,17 @@ def get_agent(model_name: str | None = None):
     async def inject_session_context(ctx: RunContext[CopilotSession]) -> str:
         s = ctx.deps
         dt = s.current_date or "unknown"
+        model_label = "Enhanced (support_aware)" if s.model == "support_aware" else "Satellite backbone"
         lines = [
             f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'.",
+            f"The user is viewing the {model_label} PM2.5 model, pollutant {s.pollutant} in µg/m³, "
+            f"times in {s.tz}. When you quote model values or bias, say which model they are for; "
+            f"'the map' means this model.",
         ]
+        if s.active_layers:
+            lines.append(f"Evidence layers currently shown on the map: {', '.join(s.active_layers)}.")
+        if s.focused_station_name:
+            lines.append(f"Selected station on the map: {s.focused_station_name} (station_id={s.focused_station_id}).")
         if s.focused_city or s.last_entities or s.focused_station_id or s.active_historical_date:
             lines.append("")
             lines.append("Session context:")

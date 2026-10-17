@@ -45,10 +45,27 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "429" in exc_str or "resource_exhausted" in exc_str or "rate limit" in exc_str or "rate-limit" in exc_str
 
 
+class SelectionLocation(BaseModel):
+    type: str = Field(default="national", max_length=20)      # national | city | station
+    id: str = Field(default="", max_length=80)
+    name: str = Field(default="", max_length=120)
+
+
+class SelectionContext(BaseModel):
+    """What the user is looking at, so the answer describes the same selection."""
+    model: str = Field(default="backbone", max_length=32)     # backbone | support_aware
+    pollutant: str = Field(default="pm25", max_length=16)
+    units: str = Field(default="µg/m³", max_length=16)
+    tz: str = Field(default="Asia/Karachi", max_length=40)
+    location: SelectionLocation = Field(default_factory=SelectionLocation)
+    layers: list[str] = Field(default_factory=list, max_length=12)
+
+
 class ChatRequest(BaseModel):
     session_id: str = Field(default_factory=lambda: str(uuid.uuid4()), min_length=8, max_length=80)
     message: str = Field(default="", max_length=settings.COPILOT_MAX_MESSAGE_CHARS)
     date: str = Field(default="", max_length=10)
+    context: SelectionContext | None = None
 
     @field_validator("session_id")
     @classmethod
@@ -67,6 +84,28 @@ class ChatRequest(BaseModel):
 
 def _sse_event(data: dict) -> str:
     return f"data: {json.dumps(data)}\n\n"
+
+
+def _apply_context(session, ctx: SelectionContext | None) -> None:
+    """Copy the client's selection into the session so the prompt can state it."""
+    if ctx is None:
+        return
+    session.model = ctx.model if ctx.model in ("backbone", "support_aware") else "backbone"
+    session.pollutant = ctx.pollutant
+    session.tz = ctx.tz
+    session.active_layers = [l for l in ctx.layers if l][:12]
+    loc = ctx.location
+    if loc and loc.type == "city" and loc.name:
+        session.focus_type = "city"
+        session.focused_city = loc.name
+    elif loc and loc.type == "station" and loc.id:
+        session.focus_type = "station"
+        session.focused_station_id = loc.id
+        if loc.name:
+            session.focused_city = session.focused_city or None
+            session.focused_station_name = loc.name
+    elif loc and loc.type == "national":
+        session.focus_type = "national"
 
 
 def _clean(text: str) -> str:
@@ -99,6 +138,7 @@ async def copilot_chat(req: ChatRequest, request: Request):
     ip = client_ip(request)
     await budget.reserve(ip)
     session = get_or_create_session(req.session_id, req.date)
+    _apply_context(session, req.context)
 
     async def _run_with_agent(agent):
         async with session.lock:
@@ -143,6 +183,7 @@ async def copilot_briefing(req: ChatRequest, request: Request):
     ip = client_ip(request)
     await budget.reserve(ip)
     session = get_or_create_session(req.session_id, req.date)
+    _apply_context(session, req.context)
 
     async def _run_briefing_with_agent(agent):
         async with session.lock:

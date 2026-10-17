@@ -123,6 +123,97 @@ def category_for(aqi: Optional[int], scale: str = DEFAULT_SCALE) -> str:
     return BEYOND_INDEX
 
 
+# ---------------------------------------------------------------------------
+# Health categories ("bands"): the single classification every product uses.
+#
+# Keys are stable identifiers shared with the front-ends; labels are the EPA names;
+# the PM2.5 upper bounds are the 2024 breakpoints (inclusive, after truncation to
+# 0.1 µg/m³); colours are the palette the public map already uses
+# (apps/web-next/src/components/map/config/aqiStyles.ts). Nothing else in the repo
+# may carry its own thresholds: call classify()/band_key() instead.
+# ---------------------------------------------------------------------------
+
+BAND_KEYS = ["good", "moderate", "unhealthy_sensitive", "unhealthy", "very_unhealthy", "hazardous"]
+
+BANDS: List[dict] = [
+    {"key": "good", "label": "Good", "short_label": "Good", "pm25_max": 9.0, "aqi_min": 0, "aqi_max": 50,
+     "color": "#6ecc39", "text_color": "#1f2937",
+     "description": "Air quality is satisfactory and poses little or no risk."},
+    {"key": "moderate", "label": "Moderate", "short_label": "Moderate", "pm25_max": 35.4, "aqi_min": 51, "aqi_max": 100,
+     "color": "#f0c20c", "text_color": "#1f2937",
+     "description": "Acceptable; unusually sensitive people should consider limiting prolonged exertion."},
+    {"key": "unhealthy_sensitive", "label": "Unhealthy for Sensitive Groups", "short_label": "USG", "pm25_max": 55.4,
+     "aqi_min": 101, "aqi_max": 150, "color": "#f18017", "text_color": "#ffffff",
+     "description": "Members of sensitive groups may experience health effects."},
+    {"key": "unhealthy", "label": "Unhealthy", "short_label": "Unhealthy", "pm25_max": 125.4, "aqi_min": 151, "aqi_max": 200,
+     "color": "#ef7855", "text_color": "#ffffff",
+     "description": "Everyone may begin to experience health effects."},
+    {"key": "very_unhealthy", "label": "Very Unhealthy", "short_label": "V. Unhealthy", "pm25_max": 225.4,
+     "aqi_min": 201, "aqi_max": 300, "color": "#a070b5", "text_color": "#ffffff",
+     "description": "Health alert: everyone may experience more serious health effects."},
+    {"key": "hazardous", "label": "Hazardous", "short_label": "Hazardous", "pm25_max": None, "aqi_min": 301, "aqi_max": 500,
+     "color": "#991b1b", "text_color": "#ffffff",
+     "description": "Emergency conditions: the entire population is likely to be affected."},
+]
+
+BAND_ORDER: Dict[str, int] = {b["key"]: i + 1 for i, b in enumerate(BANDS)}
+BAND_ORDER["unknown"] = 0
+UNKNOWN_BAND = {"key": "unknown", "label": "Unknown", "short_label": "—", "pm25_max": None, "aqi_min": None,
+                "aqi_max": None, "color": "#6b7280", "text_color": "#ffffff", "description": "No usable reading."}
+
+# Old house keys still present in stored forecast files and older clients.
+_LEGACY_BAND_KEYS = {"severe": "hazardous", "usg": "unhealthy_sensitive", "unhealthy_for_sensitive_groups": "unhealthy_sensitive"}
+
+
+def band_for_aqi(aqi: Optional[int]) -> str:
+    """Band key for a US AQI value ('unknown' when unusable)."""
+    if aqi is None:
+        return "unknown"
+    try:
+        a = int(aqi)
+    except (TypeError, ValueError):
+        return "unknown"
+    if a < 0:
+        return "unknown"
+    for b in BANDS:
+        if a <= b["aqi_max"]:
+            return b["key"]
+    return "hazardous"  # beyond index
+
+
+def band_key(pm25) -> str:
+    """Band key for a PM2.5 concentration in µg/m³ (truncated to 0.1 per EPA)."""
+    return band_for_aqi(pm25_to_aqi(pm25).value)
+
+
+def classify(pm25) -> dict:
+    """Full classification of a PM2.5 concentration: band, label, AQI value and colours."""
+    r = pm25_to_aqi(pm25)
+    key = band_for_aqi(r.value)
+    band = UNKNOWN_BAND if key == "unknown" else next(b for b in BANDS if b["key"] == key)
+    return {**band, "aqi": r.value, "pm25": r.truncated_conc}
+
+
+def normalize_band(key: Optional[str]) -> str:
+    """Map any legacy or alias band key onto the canonical set."""
+    if not key:
+        return "unknown"
+    k = str(key).strip().lower()
+    k = _LEGACY_BAND_KEYS.get(k, k)
+    return k if k in BAND_ORDER else "unknown"
+
+
+def categories_payload() -> dict:
+    """What /meta/aqi-categories serves: one table for every client."""
+    return {
+        "scale": DEFAULT_SCALE,
+        "pollutant": "pm25",
+        "units": "µg/m³",
+        "note": "US EPA 2024 PM2.5 breakpoints; concentrations truncated to 0.1 µg/m³; an hourly value gives an hourly sub-index, not the 24 h AQI.",
+        "categories": [dict(b) for b in BANDS],
+    }
+
+
 def aqi_provenance(result: AqiResult, version: int = 1) -> dict:
     """Small dict for readings.raw describing how a stored aqi_us was derived."""
     return {

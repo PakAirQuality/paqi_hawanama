@@ -37,23 +37,8 @@ router = APIRouter()
 FORECASTS_BUCKET = settings.OPS_FORECASTS_BUCKET or "paqi-forecasts-hawanama-data"
 
 
-# ── Risk band thresholds for normalization ────────────────────────────────
-
-_PM25_BANDS = [
-    (35, "good"),
-    (75, "moderate"),
-    (150, "unhealthy"),
-    (250, "very_unhealthy"),
-]
-
-
-def _classify_band(pm25: float | None) -> str:
-    if pm25 is None:
-        return "unknown"
-    for threshold, band in _PM25_BANDS:
-        if pm25 <= threshold:
-            return band
-    return "severe"
+# ── Health bands: US EPA 2024 PM2.5 categories (app/services/aqi/pm25.py) ──
+from app.services.aqi.pm25 import band_key as _classify_band, normalize_band as _normalize_band  # noqa: E402
 
 
 def _normalize_forecast(data: dict) -> dict:
@@ -69,9 +54,12 @@ def _normalize_forecast(data: dict) -> dict:
         if not entry.get("city_name") and entry.get("city"):
             entry["city_name"] = entry["city"]
 
-        # Compute risk_band from pm25_forecast if missing
-        if not entry.get("risk_band"):
+        # risk_band always comes from the canonical classification of the forecast value;
+        # stored files may carry the retired 35/75/150/250 house bands ("severe").
+        if entry.get("pm25_forecast") is not None:
             entry["risk_band"] = _classify_band(entry.get("pm25_forecast"))
+        else:
+            entry["risk_band"] = _normalize_band(entry.get("risk_band"))
 
         # Defaults for decision-support fields
         if not entry.get("episode_state"):
@@ -80,9 +68,9 @@ def _normalize_forecast(data: dict) -> dict:
             entry["confidence"] = "medium"
         if not entry.get("priority"):
             band = entry.get("risk_band", "unknown")
-            if band in ("severe", "very_unhealthy"):
+            if band in ("hazardous", "very_unhealthy"):
                 entry["priority"] = "escalate"
-            elif band == "unhealthy":
+            elif band in ("unhealthy", "unhealthy_sensitive"):
                 entry["priority"] = "review"
             else:
                 entry["priority"] = "monitor"
@@ -226,7 +214,7 @@ async def get_overview(
     if summary:
         for city in summary.get("city_summaries", []):
             d1h = city.get("horizons", {}).get("D+1", {})
-            if d1h.get("worst_band") in ("unhealthy", "very_unhealthy", "severe"):
+            if d1h.get("worst_band") in ("unhealthy", "very_unhealthy", "hazardous"):
                 n_cities_unhealthy += 1
             if city.get("trend") == "worsening":
                 n_cities_worsening += 1

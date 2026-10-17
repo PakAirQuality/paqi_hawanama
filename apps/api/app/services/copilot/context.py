@@ -46,6 +46,12 @@ class CopilotSession:
     last_coverage_query: Optional[Dict] = None  # {entity, geography, detail_level}
     # ── Historical date anchor (set when user focuses on a past date) ──
     active_historical_date: Optional[str] = None  # YYYY-MM-DD
+    # ── Shared selection sent by the client (what the map/cards currently show) ──
+    model: str = "backbone"                       # backbone | support_aware
+    pollutant: str = "pm25"
+    tz: str = "Asia/Karachi"
+    focused_station_name: Optional[str] = None
+    active_layers: List[str] = field(default_factory=list)
 
     def set_history(self, messages: List[ModelMessage]) -> None:
         """Replace the history, keeping only the most recent messages."""

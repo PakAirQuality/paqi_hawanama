@@ -569,21 +569,35 @@ async def list_predictions(
 )
 async def get_prediction_data(
     pred_date: str,
+    model: str = Query("backbone", description="Model variant for `stats`: 'backbone' or 'support_aware'"),
 ) -> Dict[str, Any]:
     """
     Get prediction data for a specific date.
 
     Returns JSON with grid metadata, statistics, and PM2.5 values
-    optimized for frontend map rendering.
+    optimized for frontend map rendering. `stats` describes the requested model's
+    grid (an area average over the model domain, not a station or population mean).
 
     Args:
         pred_date: Date in YYYY-MM-DD format
     """
+    _check_pred_date(pred_date)
+    if model not in ("backbone", "support_aware"):
+        raise HTTPException(status_code=400, detail="unknown model variant")
     outputs_bucket = _get_outputs_bucket()
 
     # Try JSON format first (new format with grid data)
     try:
-        return _gcs_read_json(outputs_bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
+        data = _gcs_read_json(outputs_bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
+        data["model"] = model
+        data["stats_basis"] = "modelled_area_average"
+        if model == "support_aware":
+            from starlette.concurrency import run_in_threadpool as _rtp
+            sa_stats = await _rtp(_compute_tif_stats, outputs_bucket, f"predictions/support_aware/date={pred_date}/pm25_{pred_date}.tif")
+            if sa_stats is None:
+                raise HTTPException(status_code=404, detail="No support_aware prediction for that date")
+            data["stats"] = {**(data.get("stats") or {}), **sa_stats}
+        return data
     except HTTPException as e:
         if e.status_code != 404:
             raise
@@ -1078,6 +1092,7 @@ async def list_cog_dates(
     from fastapi.responses import JSONResponse
 
     backbone_dates = set(_gcs_list_cog_dates(limit=limit))
+    sa_dates: set = set()
 
     # Always include support_aware dates so the timeline shows all available dates
     # regardless of which model toggle is active
@@ -1100,10 +1115,26 @@ async def list_cog_dates(
         all_dates = sorted(backbone_dates)
 
     dates = all_dates[-limit:]
+    # A date is "complete" once the station daily aggregation for it can exist, i.e. the
+    # Pakistan calendar day has ended (the aggregation runs at 04:00 UTC). Clients must use
+    # this flag rather than comparing against the browser's UTC date.
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    today_pkt = _dt.now(ZoneInfo("Asia/Karachi")).strftime("%Y-%m-%d")
+    details = [
+        {
+            "date": d,
+            "models": [m for m, present in (("backbone", d in backbone_dates), ("support_aware", d in sa_dates)) if present],
+            "complete": d < today_pkt,
+        }
+        for d in dates
+    ]
     return JSONResponse(
         content={
             "dates": dates,
             "count": len(dates),
+            "details": details,
+            "today_pkt": today_pkt,
             "tile_url_template": "/api/v1/ops/pipeline/tiles/{date}/{z}/{x}/{y}.png",
             "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson",
         },
@@ -1961,15 +1992,56 @@ def _load_forecasts_text_safe(blob_path: str) -> Optional[str]:
 
 
 def _get_band(pm25: float) -> str:
-    if pm25 <= 35:
-        return "good"
-    if pm25 <= 75:
-        return "moderate"
-    if pm25 <= 150:
-        return "unhealthy"
-    if pm25 <= 250:
-        return "very_unhealthy"
-    return "severe"
+    """US EPA 2024 PM2.5 category key (app/services/aqi/pm25.py)."""
+    from app.services.aqi.pm25 import band_key
+    return band_key(pm25)
+
+
+def _sample_cog_at_points(bucket_name: str, blob_path: str, points: List[tuple]) -> List[Optional[float]]:
+    """Prediction values at (lon, lat) points from a COG; None where nodata/outside/missing.
+
+    Blocking (download + raster reads); used by brief generation (scheduler) only.
+    """
+    try:
+        tmp_path = _get_or_download_cog(bucket_name, blob_path)
+    except HTTPException:
+        return [None] * len(points)
+    try:
+        import math as _math
+        import rasterio
+        out: List[Optional[float]] = []
+        with rasterio.open(tmp_path) as ds:
+            nodata = ds.nodata
+            for v in ds.sample(points, indexes=1):
+                val = float(v[0])
+                if (nodata is not None and val == nodata) or not _math.isfinite(val) or val < -9000:
+                    out.append(None)
+                else:
+                    out.append(val)
+        return out
+    except Exception as e:
+        logger.warning("Point sampling failed for %s: %s", blob_path, type(e).__name__)
+        return [None] * len(points)
+
+
+def _matched_bias(stations: List[Dict], predicted: List[Optional[float]]) -> Optional[Dict[str, float]]:
+    """Mean (prediction − observation) over stations where both exist: a like-for-like
+    validation statistic, unlike grid-mean minus station-mean."""
+    pairs = [(p, s["pm25"]) for p, s in zip(predicted, stations) if p is not None and s.get("pm25") is not None]
+    if not pairs:
+        return None
+    diffs = [p - o for p, o in pairs]
+    return {
+        "bias": round(sum(diffs) / len(diffs), 1),
+        "mae": round(sum(abs(d) for d in diffs) / len(diffs), 1),
+        "n": len(pairs),
+    }
+
+
+def _fmt_bias(m: Optional[Dict[str, float]]) -> str:
+    if not m:
+        return "unavailable (no matched stations)"
+    return f"{'+' if m['bias'] > 0 else ''}{m['bias']} µg/m³ matched at {m['n']} stations (MAE {m['mae']})"
 
 
 def _build_brief_context(
@@ -1977,8 +2049,10 @@ def _build_brief_context(
     pred_stats: Optional[Dict],
     enhanced_stats: Optional[Dict],
     fires_csv: Optional[str],
+    matched: Optional[Dict[str, Optional[Dict[str, float]]]] = None,
 ) -> Dict[str, str]:
     """Build template variables from raw data sources."""
+    matched = matched or {}
 
     # ── Station observations ──
     valid = [s for s in stations if s.get("pm25") is not None]
@@ -1987,11 +2061,14 @@ def _build_brief_context(
         values = [s["pm25"] for s in valid]
         obs_mean = round(sum(values) / len(values), 1)
         obs_max = round(max(values), 1)
-        bands = {"good": 0, "moderate": 0, "unhealthy": 0, "very_unhealthy": 0, "severe": 0}
+        bands = {"good": 0, "moderate": 0, "unhealthy_sensitive": 0, "unhealthy": 0, "very_unhealthy": 0, "hazardous": 0, "unknown": 0}
         for v in values:
             bands[_get_band(v)] += 1
-        band_breakdown = ", ".join(f"{cnt} {band.replace('_', ' ')}" for band, cnt in bands.items() if cnt)
-        unhealthy_count = bands["unhealthy"] + bands["very_unhealthy"] + bands["severe"]
+        _band_names = {"unhealthy_sensitive": "unhealthy for sensitive groups"}
+        band_breakdown = ", ".join(
+            f"{cnt} {_band_names.get(band, band.replace('_', ' '))}" for band, cnt in bands.items() if cnt and band != "unknown"
+        )
+        unhealthy_count = bands["unhealthy"] + bands["very_unhealthy"] + bands["hazardous"]
         unhealthy_pct = round(unhealthy_count / station_count * 100)
 
         # Worst cities
@@ -2019,11 +2096,9 @@ def _build_brief_context(
         n_valid = pred_stats.get("n_valid", 0)
         n_total = pred_stats.get("n_total", 0)
         coverage = f"{round(n_valid / n_total * 100)}%" if n_total else "unavailable"
-        if isinstance(obs_mean, (int, float)):
-            bias_val = round(pred_stats["mean"] - obs_mean, 1)
-            bias = f"{'+' if bias_val > 0 else ''}{bias_val} µg/m³"
-        else:
-            bias = "unavailable (no observations)"
+        # Bias is the matched-station statistic (prediction sampled at each reporting
+        # station minus its observation), never grid mean minus station mean.
+        bias = _fmt_bias(matched.get("backbone"))
     else:
         pred_mean = coverage = bias = "unavailable"
         data_track = "unavailable"
@@ -2031,11 +2106,7 @@ def _build_brief_context(
     # ── Enhanced (support_aware) model stats ──
     if enhanced_stats and enhanced_stats.get("mean") is not None:
         enhanced_mean = f"{round(enhanced_stats['mean'], 1)} µg/m³"
-        if isinstance(obs_mean, (int, float)):
-            e_bias_val = round(enhanced_stats["mean"] - obs_mean, 1)
-            enhanced_bias = f"{'+' if e_bias_val > 0 else ''}{e_bias_val} µg/m³"
-        else:
-            enhanced_bias = "unavailable (no observations)"
+        enhanced_bias = _fmt_bias(matched.get("support_aware"))
     else:
         enhanced_mean = enhanced_bias = "unavailable"
 
@@ -2229,15 +2300,40 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
         if fires_csv and fires_csv.strip():
             break
 
+    # ── Matched-station bias for both models (prediction sampled at station points) ──
+    valid_stations = [s for s in stations if s.get("pm25") is not None and s.get("lat") is not None and s.get("lon") is not None]
+    matched: Dict[str, Optional[Dict[str, float]]] = {"backbone": None, "support_aware": None}
+    if valid_stations:
+        points = [(float(s["lon"]), float(s["lat"])) for s in valid_stations]
+        from starlette.concurrency import run_in_threadpool as _rtp
+        for model_key, blob in (
+            ("backbone", f"predictions/date={date}/pm25_{date}.tif"),
+            ("support_aware", f"predictions/support_aware/date={date}/pm25_{date}.tif"),
+        ):
+            preds = await _rtp(_sample_cog_at_points, outputs_bucket, blob, points)
+            matched[model_key] = _matched_bias(valid_stations, preds)
+
     # ── Generate ──
-    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv)
+    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv, matched)
     narrative = await _generate_brief_llm(date, context)
 
+    obs_mean_val = float(context["obs_mean"]) if context["obs_mean"] != "unavailable" else None
     result = {
         "date": date,
         "narrative": narrative,
         "station_count": int(context["station_count"]),
-        "obs_mean": float(context["obs_mean"]) if context["obs_mean"] != "unavailable" else None,
+        # Unweighted mean across the stations that reported that day (daily means of
+        # hourly PM2.5, Pakistan only). Not an area or population average.
+        "obs_mean": obs_mean_val,
+        "reporting_station_mean": obs_mean_val,
+        "mean_basis": "reporting_station_mean",
+        "period": {"date": date, "tz": "Asia/Karachi", "aggregation": "daily mean of hourly PM2.5 per station"},
+        "band_scale": "us_epa_2024",
+        "grid_mean": {
+            "backbone": round(float(pred_stats["mean"]), 1) if pred_stats and pred_stats.get("mean") is not None else None,
+            "support_aware": round(float(enhanced_stats["mean"]), 1) if enhanced_stats and enhanced_stats.get("mean") is not None else None,
+        },
+        "matched_bias": matched,
         "data_sources": {
             "stations": len(stations) > 0,
             "predictions": pred_stats is not None,

@@ -109,41 +109,27 @@ async def get_units() -> Dict[str, Any]:
 
 @router.get("/aqi-categories")
 async def get_aqi_categories() -> Dict[str, Any]:
-    """Get AQI category definitions"""
-    return {
-        "us_epa": {
-            "good": {
-                "range": [0, 50],
-                "color": "#00E400",
-                "description": "Air quality is considered satisfactory"
-            },
-            "moderate": {
-                "range": [51, 100], 
-                "color": "#FFFF00",
-                "description": "Air quality is acceptable for most people"
-            },
-            "unhealthy_for_sensitive_groups": {
-                "range": [101, 150],
-                "color": "#FF7E00", 
-                "description": "Sensitive individuals may experience health effects"
-            },
-            "unhealthy": {
-                "range": [151, 200],
-                "color": "#FF0000",
-                "description": "Everyone may begin to experience health effects"
-            },
-            "very_unhealthy": {
-                "range": [201, 300],
-                "color": "#8F3F97",
-                "description": "Health warnings of emergency conditions"
-            },
-            "hazardous": {
-                "range": [301, 500],
-                "color": "#7E0023",
-                "description": "Health alert: everyone may experience serious health effects"
-            }
+    """The one PM2.5 / US AQI category table every client renders from.
+
+    `categories` is the canonical list (key, label, pm25_max, aqi range, colours);
+    `us_epa` keeps the older object shape the public site's client still parses,
+    generated from the same table so colours and ranges cannot drift.
+    """
+    from app.services.aqi.pm25 import categories_payload
+
+    payload = categories_payload()
+    legacy_keys = {"unhealthy_sensitive": "unhealthy_for_sensitive_groups"}
+    payload["us_epa"] = {
+        legacy_keys.get(b["key"], b["key"]): {
+            "range": [b["aqi_min"], b["aqi_max"]],
+            "pm25_max": b["pm25_max"],
+            "color": b["color"],
+            "text_color": b["text_color"],
+            "description": b["description"],
         }
+        for b in payload["categories"]
     }
+    return payload
 
 @router.get("/countries")
 async def get_countries(
