@@ -15,6 +15,10 @@ import { fetchFires } from '@/components/analyst-desk/api'
 import { loadPakBoundary, isInsidePakistan } from '@/components/analyst-desk/pakistan'
 import { useSelection } from '@/lib/selection'
 import { formatDateOnly, pktToday } from '@/lib/time'
+import { INDUSTRY_CATEGORIES, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
+import { MapErrorBoundary, MapUnavailableNotice } from '@/components/MapErrorBoundary'
+import { AqiLegend } from '@/components/ops-pipeline/AqiLegend'
+import type { MapUnavailableReason } from '@/lib/webgl'
 
 export default function OpsPipelinePage() {
   const selection = useSelection()
@@ -35,10 +39,9 @@ export default function OpsPipelinePage() {
   const [kilnsData, setKilnsData] = useState<any[]>([])
   const [industryData, setIndustryData] = useState<any[]>([])
 
-  // Load static GeoJSON data for structures tab
+  // Static inventories for the Sources panel: same cached loads the map uses (parsed once)
   useEffect(() => {
-    fetch('/brick_kilns.geojson')
-      .then(r => r.json())
+    loadKilnsGeoJSON()
       .then(data => {
         setKilnsData(data.features.map((f: any) => ({
           ...f.properties,
@@ -48,17 +51,9 @@ export default function OpsPipelinePage() {
       })
       .catch(() => {})
 
-    fetch('/emission_sources.json')
-      .then(r => r.json())
+    loadEmissionSources()
       .then(data => {
-        const CATS = [
-          { key: 'power_plants', color: '#ef4444', label: 'Power Plants' },
-          { key: 'cement_plants', color: '#8b5cf6', label: 'Cement Plants' },
-          { key: 'steel_sites', color: '#6366f1', label: 'Steel Sites' },
-          { key: 'sugar_mills', color: '#10b981', label: 'Sugar Mills' },
-          { key: 'industrial_sites', color: '#64748b', label: 'Industrial Sites' },
-        ]
-        setIndustryData(CATS.filter(c => data[c.key]?.features?.length).map(c => ({
+        setIndustryData(INDUSTRY_CATEGORIES.filter(c => data[c.key]?.features?.length).map(c => ({
           ...c,
           items: data[c.key].features.map((f: any) => ({
             ...f.properties,
@@ -69,6 +64,35 @@ export default function OpsPipelinePage() {
       })
       .catch(() => {})
   }, [])
+
+  // Map availability: a map failure stays inside the map area (nav, panels, reports keep working)
+  const [mapUnavailable, setMapUnavailable] = useState<MapUnavailableReason | null>(null)
+  const [mapKey, setMapKey] = useState(0)
+  const retryMap = () => { setMapUnavailable(null); setMapKey(k => k + 1) }
+
+  // Shareable URLs: ?date=YYYY-MM-DD&model=support_aware&layers=kilns,industry,fires
+  const urlApplied = useRef(false)
+  useEffect(() => {
+    if (urlApplied.current || typeof window === 'undefined') return
+    urlApplied.current = true
+    const q = new URLSearchParams(window.location.search)
+    const d = q.get('date'); if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setSelectedPredDate(d)
+    const m = q.get('model'); if (m === 'support_aware' || m === 'backbone') setModel(m)
+    const layers = q.get('layers')
+    if (layers != null) {
+      const on = new Set(layers.split(',').filter(Boolean))
+      setShowKilns(on.has('kilns')); setShowIndustry(on.has('industry')); setShowFires(on.has('fires'))
+    }
+  }, [])
+  useEffect(() => {
+    if (!selectedPredDate || typeof window === 'undefined') return
+    const q = new URLSearchParams()
+    q.set('date', selectedPredDate)
+    if (model !== 'backbone') q.set('model', model)
+    const layers = [showKilns && 'kilns', showIndustry && 'industry', showFires && 'fires'].filter(Boolean).join(',')
+    q.set('layers', layers)
+    window.history.replaceState(null, '', `${window.location.pathname}?${q}`)
+  }, [selectedPredDate, model, showKilns, showIndustry, showFires])
 
   // Force map resize when panel opens/closes
   const mapWrapperRef = useRef<HTMLDivElement>(null)
@@ -94,9 +118,11 @@ export default function OpsPipelinePage() {
     queryFn: () => fetchTileDates(365),
   })
 
+  // One station query for map markers and panels (the map used to fetch its own copy with
+  // different parameters, so markers and the Stations panel could disagree).
   const { data: stationData } = useQuery({
-    queryKey: ['ops-station-daily', selectedPredDate],
-    queryFn: () => fetchStationDaily(selectedPredDate!, 'Pakistan'),
+    queryKey: ['ops-station-daily', selectedPredDate, 6],
+    queryFn: () => fetchStationDaily(selectedPredDate!, 'Pakistan', 6),
     enabled: !!selectedPredDate,
   })
 
@@ -303,8 +329,46 @@ export default function OpsPipelinePage() {
       </div>
 
       {/* Map — fills remaining space */}
-      <div ref={mapWrapperRef} className="flex-1 relative min-h-0">
-        <PredictionMap selectedDate={selectedPredDate} smoothed={true} model={model} showKilns={showKilns} showIndustry={showIndustry} showFires={showFires} firesData={firesGeoJSON ?? null} onMapReady={(fn) => setFlyTo(() => fn)} />
+      <div ref={mapWrapperRef} className="flex-1 relative min-h-0 flex flex-col">
+        <MapErrorBoundary
+          unavailable={mapUnavailable}
+          onRetry={retryMap}
+          fallback={({ message, retry }) => (
+            <MapUnavailableNotice message={message} retry={retry}>
+              <div className="h-full rounded-xl border bg-white overflow-hidden">
+                <StructuresTab
+                  stations={enrichedStations}
+                  kilns={[]}
+                  industryCategories={[]}
+                  selectedDate={selectedPredDate}
+                  onFlyTo={() => {}}
+                  initialView="stations"
+                />
+              </div>
+            </MapUnavailableNotice>
+          )}
+        >
+          <PredictionMap
+            key={mapKey}
+            selectedDate={selectedPredDate}
+            smoothed={true}
+            model={model}
+            showKilns={showKilns}
+            showIndustry={showIndustry}
+            showFires={showFires}
+            firesData={firesGeoJSON ?? null}
+            stations={stationData?.stations ?? []}
+            onMapUnavailable={setMapUnavailable}
+            onMapReady={(fn) => setFlyTo(() => fn)}
+          />
+        </MapErrorBoundary>
+
+        {/* Legend — always visible, with the no-data treatment */}
+        {!mapUnavailable && (
+          <div className="absolute bottom-14 right-4 z-10 hidden sm:block">
+            <AqiLegend model={model} />
+          </div>
+        )}
 
         {/* Floating assessment card — upper right (Gaza CausePanel pattern) */}
         <OpsContextPanel

@@ -1,7 +1,6 @@
 "use client";
 
 import React from 'react';
-import { FirebaseConfigStatus } from './FirebaseConfigStatus';
 
 interface ErrorBoundaryState {
   hasError: boolean;
@@ -20,10 +19,6 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    // Check if it's a Firebase config error
-    if (error.message.includes('Firebase env vars') || error.message.includes('Firebase configuration')) {
-      return { hasError: true, error };
-    }
     return { hasError: true, error };
   }
 
@@ -34,11 +29,6 @@ export class ErrorBoundary extends React.Component<ErrorBoundaryProps, ErrorBoun
   render() {
     if (this.state.hasError) {
       const error = this.state.error;
-      
-      // Show Firebase config status for config-related errors
-      if (error?.message.includes('Firebase env vars') || error?.message.includes('Firebase configuration')) {
-        return <FirebaseConfigStatus />;
-      }
 
       // Use custom fallback or default error UI
       if (this.props.fallback) {

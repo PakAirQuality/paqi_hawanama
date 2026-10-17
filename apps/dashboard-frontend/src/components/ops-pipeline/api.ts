@@ -145,8 +145,11 @@ export function getFeaturePointQueryUrl(feature: string, date: string, lat: numb
   return `${API_BASE}/api/v1/ops/pipeline/tiles/features/${feature}/${date}/point?lat=${lat}&lon=${lon}`
 }
 
-export async function fetchStationDaily(date: string, country?: string): Promise<StationDailyResponse> {
-  const params = country ? `?country=${encodeURIComponent(country)}` : ''
+export async function fetchStationDaily(date: string, country?: string, minHours?: number): Promise<StationDailyResponse> {
+  const q = new URLSearchParams()
+  if (country) q.set('country', country)
+  if (minHours != null) q.set('min_hours', String(minHours))
+  const params = q.toString() ? `?${q}` : ''
   const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/stations/daily/${date}${params}`, { headers })
   if (!res.ok) throw new Error(`Failed to load station data for ${date}`)
   return res.json()

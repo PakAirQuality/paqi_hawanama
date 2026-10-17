@@ -2,7 +2,11 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ChatMessage } from './ChatMessage'
-import { AnalystPanel, StationTrendPanel, type TrayStation, type StationTrendInfo } from './AnalystTray'
+import dynamic from 'next/dynamic'
+import type { TrayStation, StationTrendInfo } from './AnalystTray'
+// Recharts (~100 KB gzip) only loads when the Analytics tab is opened
+const AnalystPanel = dynamic(() => import('./AnalystTray').then(m => m.AnalystPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading charts…</div> })
+const StationTrendPanel = dynamic(() => import('./AnalystTray').then(m => m.StationTrendPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading chart…</div> })
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
 import { useOptionalSelection } from '@/lib/selection'
 

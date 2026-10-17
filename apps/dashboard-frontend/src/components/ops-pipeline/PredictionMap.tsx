@@ -1,6 +1,8 @@
 "use client"
 
 import { useRef, useState, useEffect } from 'react'
+import { canRenderMap, type MapUnavailableReason } from '@/lib/webgl'
+import { INVENTORY_NOTE, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
 import { formatPkt } from '@/lib/time'
 import { bandKey, markerClass, normalizeBand, bandColor } from '@/lib/aqi'
 import { esc } from '@/lib/html'
@@ -55,6 +57,10 @@ interface PredictionMapProps {
   showIndustry?: boolean
   showFires?: boolean
   firesData?: FiresGeoJSON | null
+  /** Station daily means from the page's shared query; when given, the map does not fetch its own copy */
+  stations?: StationReading[]
+  /** Called when the map cannot render; the page shows a non-map fallback */
+  onMapUnavailable?: (reason: MapUnavailableReason) => void
   onMapReady?: (flyTo: (lng: number, lat: number, zoom?: number) => void) => void
 }
 
@@ -113,7 +119,7 @@ function createMarkerEl(value: number | null | undefined, colorClass: string): H
   return container
 }
 
-export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, onMapReady }: PredictionMapProps) {
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady }: PredictionMapProps) {
   const router = useRouter()
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
@@ -133,6 +139,15 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   const firesRef = useRef(firesData)
   firesRef.current = firesData
 
+  // Current selection for handlers registered once at map creation (the district click
+  // used to read the first render's date and model for the rest of the session).
+  const selRef = useRef({ selectedDate, model, smoothed })
+  selRef.current = { selectedDate, model, smoothed }
+  const onMapUnavailableRef = useRef(onMapUnavailable)
+  onMapUnavailableRef.current = onMapUnavailable
+  const zoomHandlerRef = useRef<(() => void) | null>(null)
+  const pointAbortRef = useRef<AbortController | null>(null)
+
   // Refs for urban grid hover (same pattern as ForecastMap)
   const urbanGridsRef = useRef<Map<string, UrbanGrid>>(new Map())
   const urbanGridLoadingRef = useRef<Set<string>>(new Set())
@@ -142,8 +157,14 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     selectedDateRef.current = selectedDate
   }, [selectedDate])
 
-  // Fetch QA-filtered station daily means for the selected date (same labels as model training)
+  // Station daily means for the selected date: from the page's shared query when provided
+  // (one request for map and panels), else fetched here (same QA filter as model training).
   useEffect(() => {
+    if (stationsProp) {
+      setStations(stationsProp)
+      stationsRef.current = stationsProp
+      return
+    }
     const fetchStations = async () => {
       try {
         const res = await fetch(
@@ -164,13 +185,19 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       }
     }
     fetchStations()
-  }, [selectedDate])
+  }, [selectedDate, stationsProp])
 
   // Initialize map once
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return
+    if (!canRenderMap()) {
+      onMapUnavailableRef.current?.('no-webgl')
+      return
+    }
 
-    const map = new mapboxgl.Map({
+    let map: mapboxgl.Map
+    try {
+      map = new mapboxgl.Map({
       container: mapContainer.current,
       style: STYLE_URL,
       center: INITIAL_CENTER,
@@ -185,8 +212,24 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         return { url }
       }
     })
+    } catch (err) {
+      console.warn('[map] init failed', err)
+      onMapUnavailableRef.current?.('init-failed')
+      return
+    }
 
     mapRef.current = map
+
+    // Tile 404s are routine (no COG for a date); anything else is a real failure.
+    map.on('error', (ev: any) => {
+      const status = ev?.error?.status ?? ev?.error?.statusCode
+      if (status === 404 || status === 400) return
+      if (ev?.sourceId || ev?.tile) return
+      console.warn('[map] error', ev?.error?.message ?? ev)
+    })
+    map.getCanvas().addEventListener('webglcontextlost', () => {
+      onMapUnavailableRef.current?.('context-lost')
+    })
 
     // Expose flyTo callback to parent
     onMapReady?.((lng: number, lat: number, zoom?: number) => {
@@ -194,13 +237,13 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     })
 
     map.on('load', async () => {
-      // Load boundaries
-      const districtsResponse = await fetch('/pakistan_districts.geojson')
-      const districtsGeoJSON = await districtsResponse.json()
-      const adm1Response = await fetch('/pakistan_adm1.geojson')
-      const adm1GeoJSON = await adm1Response.json()
-      const dissolvedResponse = await fetch('/pakistan_adm2_dissolved.geojson')
-      const dissolvedGeoJSON = await dissolvedResponse.json()
+      try {
+      // Load boundaries concurrently (they were awaited one after another)
+      const [districtsGeoJSON, adm1GeoJSON, dissolvedGeoJSON] = await Promise.all([
+        fetch('/pakistan_districts.geojson').then(r => r.json()),
+        fetch('/pakistan_adm1.geojson').then(r => r.json()),
+        fetch('/pakistan_adm2_dissolved.geojson').then(r => r.json()),
+      ])
 
       // Add sources
       map.addSource('pakistan-districts', { type: 'geojson', data: districtsGeoJSON, promoteId: 'shapeName' })
@@ -278,8 +321,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       // ── Brick kilns — secondary explanatory layer, reveals on zoom ──
       //    z<8.5: hidden. z8.5-10: subtle amber dots. z10+: chimney icons. z12+: hover popups.
       try {
-        const kilnsRes = await fetch('/brick_kilns.geojson')
-        const kilnsGeoJSON = await kilnsRes.json()
+        const kilnsGeoJSON = await loadKilnsGeoJSON()  // shared with the Sources panel; parsed once
         map.addSource('brick-kilns', { type: 'geojson', data: kilnsGeoJSON })
 
         // Generate chimney icon (SVG → canvas → map image)
@@ -371,6 +413,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
               <div>Fuel: <b style="text-transform:capitalize">${esc(props.fuel || '—')}</b></div>
               <div>State: <b>${esc(props.state || '—')}</b></div>
               ${props.pop1km ? `<div style="color:#64748b;font-size:11px;margin-top:2px">Pop within 1km: ${Number(props.pop1km).toLocaleString()}</div>` : ''}
+              <div style="color:#94a3b8;font-size:10px;margin-top:4px;max-width:220px">${esc(INVENTORY_NOTE)}</div>
             </div>
           `).addTo(map)
         })
@@ -385,8 +428,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
       // ── Industrial emission sources (power plants, cement, steel, etc.) ──
       try {
-        const srcRes = await fetch('/emission_sources.json')
-        const srcData = await srcRes.json()
+        const srcData = await loadEmissionSources()  // shared with the Sources panel; parsed once
 
         const INDUSTRY_LAYERS = [
           { key: 'power_plants', color: '#ef4444', label: 'Power Plant' },
@@ -474,6 +516,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
             if (props.capacity_mw) lines.push(`<div>Capacity: <b>${esc(props.capacity_mw)} MW</b></div>`)
             if (props.capacity_mtpa) lines.push(`<div>Capacity: <b>${esc(props.capacity_mtpa)} Mt/yr</b></div>`)
             if (props.province) lines.push(`<div style="color:#64748b;font-size:11px">${esc(props.province)}</div>`)
+            lines.push(`<div style="color:#94a3b8;font-size:10px;margin-top:4px;max-width:220px">${esc(INVENTORY_NOTE)}</div>`)
             industryPopup.setLngLat(coords).setHTML(
               `<div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">${lines.join('')}</div>`
             ).addTo(map)
@@ -739,9 +782,15 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         })
 
         try {
-          const extraParams = [smoothed && 'smoothed=true', model !== 'backbone' && `model=${model}`].filter(Boolean).map(p => '&' + p).join('')
+          // Read the live selection (not the first render's) and cancel any earlier point query
+          const sel = selRef.current
+          const extraParams = [sel.smoothed && 'smoothed=true', sel.model !== 'backbone' && `model=${sel.model}`].filter(Boolean).map(p => '&' + p).join('')
+          pointAbortRef.current?.abort()
+          const ac = new AbortController()
+          pointAbortRef.current = ac
           const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${extraParams}`
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${sel.selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${extraParams}`,
+            { signal: ac.signal }
           )
           if (res.ok) {
             const data = await res.json()
@@ -764,9 +813,16 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       })
 
       setMapLoaded(true)
+      } catch (err) {
+        // A failed layer must not leave the spinner up forever or take the page down.
+        console.warn('[map] layer setup failed', err)
+        setMapLoaded(true)
+        onMapUnavailableRef.current?.('layers-failed')
+      }
     })
 
     return () => {
+      pointAbortRef.current?.abort()
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
@@ -846,6 +902,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       }
     }
     updateVisibility()
+    // One zoom listener at a time (they used to accumulate on every date change)
+    if (zoomHandlerRef.current) map.off('zoom', zoomHandlerRef.current)
+    zoomHandlerRef.current = updateVisibility
     map.on('zoom', updateVisibility)
   }, [stations, mapLoaded])
 

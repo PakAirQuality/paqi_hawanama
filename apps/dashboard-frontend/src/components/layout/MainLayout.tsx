@@ -3,16 +3,27 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { useOptionalSelection } from '@/lib/selection'
 
 const modules = [
   { id: 'aqi-tracker', name: 'Air Quality Tracker', href: '/' },
   { id: 'analyst-desk', name: 'Analyst Desk', href: '/analyst-desk' },
   { id: 'reports', name: 'Reports', href: '/reports' },
-  { id: 'bam', name: 'BAM Monitor', href: '/bam' },
+  { id: 'bam', name: 'BAM Monitor', href: '/bam', group: 'Staff tools' },
 ]
 
 function cn(...classes: (string | false | undefined)[]) {
   return classes.filter(Boolean).join(' ')
+}
+
+function SelectionStrip() {
+  const selection = useOptionalSelection()
+  if (!selection || !selection.date) return null
+  return (
+    <div className="hidden lg:block text-[11px] text-slate-500 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 truncate max-w-[380px]" title="Current selection">
+      {selection.describe()}
+    </div>
+  )
 }
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
@@ -59,10 +70,14 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                 </div>
               </div>
 
-              {/* Public site: link back to the main map */}
-              <a href="https://hawanama.org" className="text-sm text-slate-500 hover:text-slate-900 hidden sm:block">
-                hawanama.org
-              </a>
+              <div className="flex items-center gap-4">
+                {/* Persistent selection strip: what every panel on the page is describing */}
+                <SelectionStrip />
+                {/* Public site: link back to the main map */}
+                <a href="https://hawanama.org" className="text-sm text-slate-500 hover:text-slate-900 hidden sm:block">
+                  hawanama.org
+                </a>
+              </div>
             </div>
           </div>
         </header>
@@ -85,6 +100,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                     )}
                   >
                     {module.name}
+                    {'group' in module && module.group && (
+                      <span className="ml-1.5 rounded px-1 py-px text-[9px] uppercase tracking-wide bg-slate-700 text-slate-300">{module.group}</span>
+                    )}
                     {/* Active indicator - bottom border */}
                     {isActive && (
                       <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-amber-400 rounded-t-full" />

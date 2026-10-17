@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { canRenderMap } from '@/lib/webgl'
 import { formatPkt } from '@/lib/time'
 import { bandKey, classifyPm25, markerClass, normalizeBand, pm25Color } from '@/lib/aqi'
 import { esc } from '@/lib/html'
@@ -153,6 +154,7 @@ export function ForecastMap({
   const markersRef = useRef<mapboxgl.Marker[]>([])
   const mapLoaded = useRef(false)
   const [zoomLevel, setZoomLevel] = useState(4.2)
+  const [mapUnavailable, setMapUnavailable] = useState(false)
   const providerMapRef = useRef<ProviderMap | null>(null)
   const fireSourceAdded = useRef(false)
 
@@ -210,6 +212,12 @@ export function ForecastMap({
   // Initialize map
   useEffect(() => {
     if (!mapContainer.current || map.current) return
+    if (!canRenderMap()) {
+      // No WebGL: leave the container empty; the page's MapErrorBoundary shows the fallback
+      // when the construction below throws, and this check avoids the throw altogether.
+      setMapUnavailable(true)
+      return
+    }
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -225,9 +233,16 @@ export function ForecastMap({
       antialias: true,
     })
 
+    map.current.on('error', (ev: any) => {
+      const status = ev?.error?.status ?? ev?.error?.statusCode
+      if (status === 404 || status === 400 || ev?.sourceId || ev?.tile) return
+      console.warn('[forecast map] error', ev?.error?.message ?? ev)
+    })
+    map.current.getCanvas().addEventListener('webglcontextlost', () => setMapUnavailable(true))
+
     map.current.on('load', async () => {
       if (!map.current) return
-      await loadPakBoundary()
+      try { await loadPakBoundary() } catch (err) { console.warn('[forecast map] boundary load failed', err) }
 
       // ── 3D Terrain ──
       map.current.addSource('mapbox-dem', {
@@ -1126,6 +1141,15 @@ export function ForecastMap({
 
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
+      {mapUnavailable && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-50">
+          <div className="max-w-md rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-medium">Interactive map unavailable.</div>
+            <div className="text-amber-800 mt-1">This browser cannot render the map (WebGL unavailable or the graphics context was lost). The brief, station data and chat on this page still work.</div>
+            <button type="button" onClick={() => window.location.reload()} className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-medium hover:bg-amber-100">Retry</button>
+          </div>
+        </div>
+      )}
 
       {/* PM2.5 hover readout — upper left, always visible at city zoom */}
       {zoomLevel >= 8 && (
