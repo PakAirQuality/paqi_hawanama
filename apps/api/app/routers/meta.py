@@ -279,13 +279,14 @@ async def get_stations(
         INNER JOIN states s ON st.state_id = s.id
         INNER JOIN countries co ON c.country_id = co.id
         WHERE st.active = true AND c.active = true AND s.active = true AND co.active = true
+          AND COALESCE(st.metadata_json->'registry'->>'status', 'active') <> 'test'
         """
         params = {}
-        
+
         if province_name:
             query += " AND LOWER(s.name) = LOWER(:province_name)"
             params["province_name"] = province_name
-            
+
         if city_name:
             query += " AND LOWER(c.name) = LOWER(:city_name)"
             params["city_name"] = city_name

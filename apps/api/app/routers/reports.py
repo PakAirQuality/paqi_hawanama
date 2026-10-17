@@ -155,8 +155,9 @@ async def report_city_stations(
             ORDER BY r.ts_utc DESC LIMIT 1
         ) lr ON TRUE
         WHERE s.active = TRUE AND LOWER(c.name) = LOWER(:city) {scope}
+          AND (:include_test OR COALESCE(s.metadata_json->'registry'->>'status', 'active') <> 'test')
         ORDER BY s.name
-    """), params)).mappings().all()
+    """), {**params, "include_test": include_test})).mappings().all()
     out = []
     for r in rows:
         if not include_punjab and r["provider"] == "punjab":

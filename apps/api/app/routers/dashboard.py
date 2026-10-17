@@ -182,6 +182,7 @@ async def get_stations_for_map(db: AsyncSession = Depends(get_database)):
             LEFT JOIN latest_readings lr ON s.station_id = lr.scope_key
             LEFT JOIN providers p ON s.provider_id = p.id
             WHERE s.active = true
+              AND COALESCE(s.metadata_json->'registry'->>'status', 'active') <> 'test'
               AND COALESCE(p.code, '') != 'punjab'
               AND lr.ts_utc IS NOT NULL
               AND lr.ts_utc > NOW() - INTERVAL '6 hours'
