@@ -122,6 +122,14 @@ async function main() {
   }
   stations.sort((a, b) => a.name.localeCompare(b.name))
 
+  // Keep metadata for stations that are not in this hour's live feed (they may have dropped
+  // out temporarily); only brand-new ids are appended, and nothing is ever removed here.
+  const existingStations = (await readExisting('stations.json')) || []
+  const freshIds = new Set(stations.map((s) => s.id))
+  for (const s of existingStations) {
+    if (!freshIds.has(s.id)) stations.push(s)
+  }
+  stations.sort((a, b) => a.name.localeCompare(b.name))
   const stationIds = Array.from(new Set([...stations.map((s) => s.id), ...existingIds])).sort()
   const citySlugs = cities.map((c) => c.slug)
 

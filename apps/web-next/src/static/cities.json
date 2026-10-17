@@ -22,9 +22,9 @@
     "name": "Dhaka",
     "state": "Dhaka",
     "country": "Bangladesh",
-    "station_count": 17,
-    "lat": 23.78265,
-    "lon": 90.40566
+    "station_count": 18,
+    "lat": 23.7825,
+    "lon": 90.40691
   },
   {
     "slug": "gazipur",
@@ -104,8 +104,8 @@
     "state": "Andaman and Nicobar Islands",
     "country": "India",
     "station_count": 1,
-    "lat": 11.65405,
-    "lon": 92.73406
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "anantapur",
@@ -113,8 +113,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 14.67589,
-    "lon": 77.59303
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chittoor",
@@ -122,8 +122,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 13.20488,
-    "lon": 79.09789
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ellore",
@@ -131,8 +131,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 16.7107,
-    "lon": 81.0952
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "guntur",
@@ -140,8 +140,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 16.3067,
-    "lon": 80.4365
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kadapa",
@@ -149,8 +149,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 14.46505,
-    "lon": 78.82419
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "machilipatnam",
@@ -158,8 +158,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 16.1875,
-    "lon": 81.1317
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "nellore",
@@ -176,8 +176,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 16.98729,
-    "lon": 81.73632
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tirupati",
@@ -185,8 +185,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 3,
-    "lat": 13.66446,
-    "lon": 79.45044
+    "lat": 13.708,
+    "lon": 79.5921
   },
   {
     "slug": "vijayawada",
@@ -194,8 +194,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 16.52166,
-    "lon": 80.63772
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "visakhapatnam",
@@ -203,8 +203,8 @@
     "state": "Andhra Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 17.72,
-    "lon": 83.3
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "byrnihat",
@@ -212,8 +212,8 @@
     "state": "Assam",
     "country": "India",
     "station_count": 2,
-    "lat": 26.07132,
-    "lon": 91.87488
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "guwahati",
@@ -221,8 +221,8 @@
     "state": "Assam",
     "country": "India",
     "station_count": 4,
-    "lat": 26.16093,
-    "lon": 91.69261
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "nagaon",
@@ -230,8 +230,8 @@
     "state": "Assam",
     "country": "India",
     "station_count": 1,
-    "lat": 26.34908,
-    "lon": 92.68449
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "nalbari",
@@ -239,8 +239,8 @@
     "state": "Assam",
     "country": "India",
     "station_count": 1,
-    "lat": 26.44691,
-    "lon": 91.43906
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "silchar",
@@ -248,8 +248,8 @@
     "state": "Assam",
     "country": "India",
     "station_count": 1,
-    "lat": 24.82827,
-    "lon": 92.79525
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sivasagar",
@@ -257,8 +257,8 @@
     "state": "Assam",
     "country": "India",
     "station_count": 1,
-    "lat": 26.98763,
-    "lon": 94.63657
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "araria",
@@ -266,8 +266,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 2,
-    "lat": 26.14226,
-    "lon": 87.45598
+    "lat": 26.13799,
+    "lon": 87.45777
   },
   {
     "slug": "arrah",
@@ -275,8 +275,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.56261,
-    "lon": 84.66326
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "begusarai",
@@ -284,8 +284,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.44427,
-    "lon": 86.14017
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bettiah",
@@ -302,8 +302,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 2,
-    "lat": 25.2581,
-    "lon": 87.00098
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bihar-sharif",
@@ -311,8 +311,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.20476,
-    "lon": 85.51496
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "buxar",
@@ -320,8 +320,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.55561,
-    "lon": 83.95094
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chhapra",
@@ -329,8 +329,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.78083,
-    "lon": 84.74468
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "darbhanga",
@@ -338,8 +338,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 26.15146,
-    "lon": 85.89342
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gaya",
@@ -347,8 +347,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 3,
-    "lat": 24.78347,
-    "lon": 84.99139
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hajipur",
@@ -356,8 +356,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.69719,
-    "lon": 85.2459
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "katihar",
@@ -365,8 +365,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.56008,
-    "lon": 87.55327
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kishanganj",
@@ -374,8 +374,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 4,
-    "lat": 26.06807,
-    "lon": 88.00372
+    "lat": 26.05804,
+    "lon": 88.03638
   },
   {
     "slug": "motihari",
@@ -392,8 +392,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.37678,
-    "lon": 86.47152
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "muzaffarpur",
@@ -401,8 +401,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 3,
-    "lat": 26.12522,
-    "lon": 85.37595
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "patna",
@@ -410,8 +410,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 6,
-    "lat": 25.59818,
-    "lon": 85.12584
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "purnia",
@@ -419,8 +419,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.36634,
-    "lon": 87.11747
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rajgir",
@@ -428,8 +428,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.0328,
-    "lon": 85.41948
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "raxaul",
@@ -446,8 +446,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.89236,
-    "lon": 86.59033
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "samastipur",
@@ -455,8 +455,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 25.85966,
-    "lon": 85.77944
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sasaram",
@@ -464,8 +464,8 @@
     "state": "Bihar",
     "country": "India",
     "station_count": 1,
-    "lat": 24.95282,
-    "lon": 84.0024
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chandigarh",
@@ -473,8 +473,8 @@
     "state": "Chandigarh",
     "country": "India",
     "station_count": 4,
-    "lat": 30.73292,
-    "lon": 76.75668
+    "lat": 30.7248,
+    "lon": 76.7495
   },
   {
     "slug": "bhilai",
@@ -482,8 +482,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 3,
-    "lat": 21.20154,
-    "lon": 81.35543
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bilaspur",
@@ -491,8 +491,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.08815,
-    "lon": 82.13737
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chhal",
@@ -500,8 +500,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.11813,
-    "lon": 83.14061
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "korba",
@@ -509,8 +509,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 2,
-    "lat": 22.35832,
-    "lon": 82.64802
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kunjemura",
@@ -518,8 +518,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.12665,
-    "lon": 83.48321
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "milupara",
@@ -527,8 +527,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.19102,
-    "lon": 83.5197
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "raipur",
@@ -536,8 +536,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 4,
-    "lat": 21.272,
-    "lon": 81.64483
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tumidih",
@@ -545,8 +545,8 @@
     "state": "Chhattisgarh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.06631,
-    "lon": 83.3382
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "defence-colony",
@@ -554,8 +554,8 @@
     "state": "Delhi",
     "country": "India",
     "station_count": 5,
-    "lat": 28.54373,
-    "lon": 77.2018
+    "lat": 28.55436,
+    "lon": 77.23099
   },
   {
     "slug": "delhi",
@@ -563,8 +563,8 @@
     "state": "Delhi",
     "country": "India",
     "station_count": 32,
-    "lat": 28.64998,
-    "lon": 77.16394
+    "lat": 28.65079,
+    "lon": 77.14272
   },
   {
     "slug": "deoli",
@@ -581,8 +581,8 @@
     "state": "Delhi",
     "country": "India",
     "station_count": 35,
-    "lat": 28.61164,
-    "lon": 77.19598
+    "lat": 28.61157,
+    "lon": 77.19507
   },
   {
     "slug": "shahdara",
@@ -590,8 +590,8 @@
     "state": "Delhi",
     "country": "India",
     "station_count": 3,
-    "lat": 28.5845,
-    "lon": 77.14835
+    "lat": 28.5769,
+    "lon": 77.1651
   },
   {
     "slug": "calangute",
@@ -617,8 +617,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 9,
-    "lat": 23.03439,
-    "lon": 72.56526
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ankleshwar",
@@ -626,8 +626,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 21.64364,
-    "lon": 73.01154
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bhavnagar",
@@ -635,8 +635,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 21.75542,
-    "lon": 72.13906
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gandhinagar",
@@ -644,8 +644,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 3,
-    "lat": 23.20972,
-    "lon": 72.67401
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hansot",
@@ -662,8 +662,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 22.4108,
-    "lon": 73.09792
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rajkot",
@@ -671,8 +671,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 22.24885,
-    "lon": 70.77677
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sarkhej",
@@ -689,8 +689,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 2,
-    "lat": 21.19392,
-    "lon": 72.8151
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "vadodara",
@@ -698,8 +698,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 22.32015,
-    "lon": 73.21629
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "vapi",
@@ -707,8 +707,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 20.35087,
-    "lon": 72.91331
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "vatva",
@@ -716,8 +716,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 22.96898,
-    "lon": 72.64752
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "visnagar",
@@ -725,8 +725,8 @@
     "state": "Gujarat",
     "country": "India",
     "station_count": 1,
-    "lat": 23.59315,
-    "lon": 72.37279
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ambala",
@@ -743,8 +743,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 2,
-    "lat": 28.62867,
-    "lon": 76.90432
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ballabgarh",
@@ -752,8 +752,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.34252,
-    "lon": 77.31813
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bhiwani",
@@ -761,8 +761,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.80622,
-    "lon": 76.1411
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "charkhi-dadri",
@@ -770,8 +770,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.59388,
-    "lon": 76.27065
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dharuhera",
@@ -779,8 +779,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.2068,
-    "lon": 76.7997
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "faridabad",
@@ -788,8 +788,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 4,
-    "lat": 28.40433,
-    "lon": 77.31199
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "fatehabad",
@@ -797,8 +797,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.50347,
-    "lon": 75.46968
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gurugram",
@@ -806,8 +806,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 8,
-    "lat": 28.43129,
-    "lon": 77.08538
+    "lat": 28.43,
+    "lon": 77.08871
   },
   {
     "slug": "hisar",
@@ -815,8 +815,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.14012,
-    "lon": 75.74183
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jind",
@@ -824,8 +824,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.30874,
-    "lon": 76.34519
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kaithal",
@@ -833,8 +833,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.80211,
-    "lon": 76.41434
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "karnal",
@@ -842,8 +842,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.5955,
-    "lon": 76.99997
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kurukshetra",
@@ -851,8 +851,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.96698,
-    "lon": 76.87583
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mandikhera",
@@ -860,8 +860,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 27.90012,
-    "lon": 76.99391
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "manesar",
@@ -869,8 +869,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 3,
-    "lat": 28.33802,
-    "lon": 76.92519
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "narnaul",
@@ -878,8 +878,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.06432,
-    "lon": 76.11291
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "palwal",
@@ -887,8 +887,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.14856,
-    "lon": 77.33004
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "panchkula",
@@ -905,8 +905,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.50025,
-    "lon": 76.99474
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rohtak",
@@ -914,8 +914,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 28.87008,
-    "lon": 76.6205
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sirsa",
@@ -923,8 +923,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.53746,
-    "lon": 75.01728
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sonipat",
@@ -932,8 +932,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 29.02743,
-    "lon": 77.06685
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "yamuna-nagar",
@@ -941,8 +941,8 @@
     "state": "Haryana",
     "country": "India",
     "station_count": 1,
-    "lat": 30.14806,
-    "lon": 77.28936
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "baddi",
@@ -959,8 +959,8 @@
     "state": "Jammu and Kashmir",
     "country": "India",
     "station_count": 1,
-    "lat": 34.03161,
-    "lon": 75.00971
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bandipura",
@@ -1040,8 +1040,8 @@
     "state": "Jammu and Kashmir",
     "country": "India",
     "station_count": 7,
-    "lat": 34.08647,
-    "lon": 74.82164
+    "lat": 34.09153,
+    "lon": 74.82209
   },
   {
     "slug": "udhampur",
@@ -1058,8 +1058,8 @@
     "state": "Jharkhand",
     "country": "India",
     "station_count": 2,
-    "lat": 23.80862,
-    "lon": 86.46196
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jorapokhar",
@@ -1067,8 +1067,8 @@
     "state": "Jharkhand",
     "country": "India",
     "station_count": 1,
-    "lat": 23.70791,
-    "lon": 86.41467
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pathardih",
@@ -1076,8 +1076,8 @@
     "state": "Jharkhand",
     "country": "India",
     "station_count": 1,
-    "lat": 23.66988,
-    "lon": 86.41173
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bagalkot",
@@ -1085,8 +1085,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 16.17281,
-    "lon": 75.65969
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "belgaum",
@@ -1094,8 +1094,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 2,
-    "lat": 15.88865,
-    "lon": 74.54175
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bengaluru",
@@ -1103,8 +1103,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 18,
-    "lat": 12.93382,
-    "lon": 77.60543
+    "lat": 12.93469,
+    "lon": 77.66278
   },
   {
     "slug": "bidar",
@@ -1112,8 +1112,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 17.93031,
-    "lon": 77.48219
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chamarajanagar",
@@ -1121,8 +1121,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 11.92661,
-    "lon": 76.93114
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chikkaballapur",
@@ -1130,8 +1130,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 13.4286,
-    "lon": 77.73109
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chikkamagaluru",
@@ -1139,8 +1139,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 13.32803,
-    "lon": 75.79706
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "davanagere",
@@ -1148,8 +1148,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 14.4758,
-    "lon": 75.9052
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dharwad",
@@ -1157,8 +1157,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 15.45971,
-    "lon": 75.00838
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gadag",
@@ -1166,8 +1166,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 15.41146,
-    "lon": 75.63813
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hassan",
@@ -1175,8 +1175,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 13.00856,
-    "lon": 76.12526
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "haveri",
@@ -1184,8 +1184,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 14.7918,
-    "lon": 75.3896
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "honnali",
@@ -1202,8 +1202,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 2,
-    "lat": 15.36163,
-    "lon": 75.12838
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kalaburagi",
@@ -1211,8 +1211,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 2,
-    "lat": 17.32825,
-    "lon": 76.83414
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "karwar",
@@ -1220,8 +1220,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 14.81667,
-    "lon": 74.141
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kolar",
@@ -1229,8 +1229,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 13.12763,
-    "lon": 78.15701
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "koppal",
@@ -1238,8 +1238,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 2,
-    "lat": 15.34763,
-    "lon": 76.18177
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "madikeri",
@@ -1247,8 +1247,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 2,
-    "lat": 12.41591,
-    "lon": 75.73505
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mangalore",
@@ -1256,8 +1256,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 2,
-    "lat": 12.88925,
-    "lon": 74.853
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mysuru",
@@ -1265,8 +1265,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 12.35114,
-    "lon": 76.62492
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "raichur",
@@ -1274,8 +1274,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 16.20814,
-    "lon": 77.34842
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ramanagara",
@@ -1283,8 +1283,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 12.73341,
-    "lon": 77.29805
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "shivamogga",
@@ -1292,8 +1292,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 13.94,
-    "lon": 75.55592
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tumakuru",
@@ -1301,8 +1301,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 13.37752,
-    "lon": 77.09907
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "vijayapura",
@@ -1310,8 +1310,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 16.80264,
-    "lon": 75.72269
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "yadgir",
@@ -1319,8 +1319,8 @@
     "state": "Karnataka",
     "country": "India",
     "station_count": 1,
-    "lat": 16.7602,
-    "lon": 77.1428
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "cherpulassery",
@@ -1337,8 +1337,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 10.07323,
-    "lon": 76.30276
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ernakulam",
@@ -1346,8 +1346,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 9.98724,
-    "lon": 76.28204
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kannur",
@@ -1355,8 +1355,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 11.875,
-    "lon": 75.3732
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kochi",
@@ -1364,8 +1364,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 9.96945,
-    "lon": 76.32119
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kollam",
@@ -1373,8 +1373,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 8.8787,
-    "lon": 76.6073
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kozhikode",
@@ -1382,8 +1382,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 11.24908,
-    "lon": 75.78437
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "thiruvananthapuram",
@@ -1391,8 +1391,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 2,
-    "lat": 8.53931,
-    "lon": 76.91504
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "trichur",
@@ -1400,8 +1400,8 @@
     "state": "Kerala",
     "country": "India",
     "station_count": 1,
-    "lat": 10.5324,
-    "lon": 76.2159
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bhopal",
@@ -1409,8 +1409,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 23.24184,
-    "lon": 77.41551
+    "lat": 23.25854,
+    "lon": 77.45447
   },
   {
     "slug": "damoh",
@@ -1418,8 +1418,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 23.81741,
-    "lon": 79.44632
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dewas",
@@ -1427,8 +1427,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.96826,
-    "lon": 76.06412
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gwalior",
@@ -1436,8 +1436,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 26.2184,
-    "lon": 78.1821
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "indore",
@@ -1445,8 +1445,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 6,
-    "lat": 22.72573,
-    "lon": 75.86493
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jabalpur",
@@ -1454,8 +1454,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 23.1732,
-    "lon": 79.94481
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "katni",
@@ -1463,8 +1463,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 23.83378,
-    "lon": 80.39122
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "maihar",
@@ -1472,8 +1472,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 24.26172,
-    "lon": 80.78902
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mandideep",
@@ -1481,8 +1481,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 23.10844,
-    "lon": 77.51143
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pithampur",
@@ -1490,8 +1490,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 22.62476,
-    "lon": 75.67524
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ratlam",
@@ -1499,8 +1499,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 23.33179,
-    "lon": 75.0459
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "satna",
@@ -1508,8 +1508,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 24.58434,
-    "lon": 80.85494
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "singrauli",
@@ -1517,8 +1517,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 24.10897,
-    "lon": 82.64558
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ujjain",
@@ -1526,8 +1526,8 @@
     "state": "Madhya Pradesh",
     "country": "India",
     "station_count": 2,
-    "lat": 23.17303,
-    "lon": 75.78422
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ahmednagar",
@@ -1535,8 +1535,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.10122,
-    "lon": 74.73339
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "akola",
@@ -1544,8 +1544,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 20.71952,
-    "lon": 77.00025
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "amarnath",
@@ -1553,8 +1553,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.1971,
-    "lon": 73.188
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "amravati",
@@ -1562,8 +1562,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 18.72766,
-    "lon": 79.15384
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "aurangabad",
@@ -1571,8 +1571,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 3,
-    "lat": 21.08395,
-    "lon": 77.57979
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "badlapur",
@@ -1580,8 +1580,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.16485,
-    "lon": 73.23409
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "beed",
@@ -1589,8 +1589,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 18.989,
-    "lon": 75.7571
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "belapur",
@@ -1598,8 +1598,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.02439,
-    "lon": 73.04067
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bhiwandi",
@@ -1607,8 +1607,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.30907,
-    "lon": 73.05722
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "boisar",
@@ -1616,8 +1616,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.78609,
-    "lon": 72.75797
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chandrapur",
@@ -1625,8 +1625,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 2,
-    "lat": 19.81143,
-    "lon": 78.43411
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dhule",
@@ -1634,8 +1634,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 20.91895,
-    "lon": 74.77639
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dombivli",
@@ -1643,8 +1643,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.2183,
-    "lon": 73.0845
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hingoli",
@@ -1652,8 +1652,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.7175,
-    "lon": 77.1498
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jalgaon",
@@ -1661,8 +1661,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 21.00126,
-    "lon": 75.5656
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jalna",
@@ -1670,8 +1670,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.85462,
-    "lon": 75.90589
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kalyan",
@@ -1679,8 +1679,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.25292,
-    "lon": 73.14202
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kolhapur",
@@ -1688,8 +1688,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 2,
-    "lat": 16.70071,
-    "lon": 74.24661
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "latur",
@@ -1697,8 +1697,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 18.39963,
-    "lon": 76.57452
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "lonavla",
@@ -1715,8 +1715,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 18.10234,
-    "lon": 73.47837
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "malegaon",
@@ -1724,8 +1724,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 20.55571,
-    "lon": 74.52924
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mira-bhayandar",
@@ -1733,8 +1733,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.29648,
-    "lon": 72.84092
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mumbai",
@@ -1742,8 +1742,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 30,
-    "lat": 19.09724,
-    "lon": 72.86496
+    "lat": 19.09979,
+    "lon": 72.86527
   },
   {
     "slug": "nagpur",
@@ -1751,8 +1751,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 5,
-    "lat": 21.1372,
-    "lon": 79.06213
+    "lat": 21.12323,
+    "lon": 79.05286
   },
   {
     "slug": "nanded",
@@ -1760,8 +1760,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.17385,
-    "lon": 77.29629
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "nashik",
@@ -1769,8 +1769,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 4,
-    "lat": 19.98455,
-    "lon": 73.77509
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "navi-mumbai",
@@ -1778,8 +1778,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 6,
-    "lat": 19.05983,
-    "lon": 73.04647
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "parbhani",
@@ -1787,8 +1787,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.26559,
-    "lon": 76.76146
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pimpri-chinchwad",
@@ -1796,8 +1796,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 4,
-    "lat": 18.61437,
-    "lon": 73.7916
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pune",
@@ -1805,8 +1805,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 12,
-    "lat": 18.53934,
-    "lon": 73.84096
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sangli",
@@ -1814,8 +1814,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 16.5038,
-    "lon": 74.3623
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "satara",
@@ -1823,8 +1823,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 17.69665,
-    "lon": 74.00339
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "solapur",
@@ -1832,8 +1832,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 3,
-    "lat": 17.64931,
-    "lon": 75.90871
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "thane",
@@ -1841,8 +1841,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 3,
-    "lat": 19.22737,
-    "lon": 72.96277
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ulhasnagar",
@@ -1850,8 +1850,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 2,
-    "lat": 19.22694,
-    "lon": 73.16106
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "virar",
@@ -1859,8 +1859,8 @@
     "state": "Maharashtra",
     "country": "India",
     "station_count": 1,
-    "lat": 19.44582,
-    "lon": 72.79882
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "imphal",
@@ -1868,8 +1868,8 @@
     "state": "Manipur",
     "country": "India",
     "station_count": 2,
-    "lat": 24.78658,
-    "lon": 93.93547
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "shillong",
@@ -1877,8 +1877,8 @@
     "state": "Meghalaya",
     "country": "India",
     "station_count": 2,
-    "lat": 25.56947,
-    "lon": 91.89638
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "aizawl",
@@ -1886,8 +1886,8 @@
     "state": "Mizoram",
     "country": "India",
     "station_count": 1,
-    "lat": 23.71763,
-    "lon": 92.71928
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kohima",
@@ -1895,8 +1895,8 @@
     "state": "Nagaland",
     "country": "India",
     "station_count": 1,
-    "lat": 25.66354,
-    "lon": 94.09899
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "angul",
@@ -1913,8 +1913,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 1,
-    "lat": 21.51145,
-    "lon": 86.89116
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "barbil",
@@ -1922,8 +1922,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 1,
-    "lat": 21.47001,
-    "lon": 86.88444
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "baripada",
@@ -1940,8 +1940,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 2,
-    "lat": 20.29285,
-    "lon": 85.82292
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bileipada",
@@ -1967,8 +1967,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 1,
-    "lat": 20.94039,
-    "lon": 86.11313
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "cuttack",
@@ -1976,8 +1976,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 1,
-    "lat": 20.47195,
-    "lon": 85.84874
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jaleshwar",
@@ -2012,8 +2012,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 1,
-    "lat": 22.26582,
-    "lon": 86.17483
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rourkela",
@@ -2021,8 +2021,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 3,
-    "lat": 22.21852,
-    "lon": 84.85111
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "suakati",
@@ -2048,8 +2048,8 @@
     "state": "Odisha",
     "country": "India",
     "station_count": 1,
-    "lat": 21.86999,
-    "lon": 85.16702
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "puducherry",
@@ -2057,8 +2057,8 @@
     "state": "Puducherry",
     "country": "India",
     "station_count": 1,
-    "lat": 11.9309,
-    "lon": 79.8027
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "amritsar",
@@ -2066,8 +2066,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 31.62,
-    "lon": 74.87651
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bathinda",
@@ -2084,8 +2084,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 31.32191,
-    "lon": 75.57891
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "khanna",
@@ -2093,8 +2093,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 30.73606,
-    "lon": 76.20969
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ludhiana",
@@ -2102,8 +2102,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 30.9028,
-    "lon": 75.8086
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mandi-gobindgarh",
@@ -2111,8 +2111,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 30.64996,
-    "lon": 76.33144
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "mullanpur-dhaka",
@@ -2129,8 +2129,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 30.34939,
-    "lon": 76.36664
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rupnagar",
@@ -2138,8 +2138,8 @@
     "state": "Punjab",
     "country": "India",
     "station_count": 1,
-    "lat": 31.03255,
-    "lon": 76.5623
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "-dholpur",
@@ -2147,8 +2147,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.69956,
-    "lon": 77.89888
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ajmer",
@@ -2156,8 +2156,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.47086,
-    "lon": 74.64659
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "alwar",
@@ -2165,8 +2165,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 27.55479,
-    "lon": 76.61154
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "banswara",
@@ -2174,8 +2174,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 23.55519,
-    "lon": 74.44001
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "baran",
@@ -2183,8 +2183,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.10601,
-    "lon": 76.46995
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "barmer",
@@ -2192,8 +2192,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.7473,
-    "lon": 71.39399
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bhilwara",
@@ -2201,8 +2201,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.33961,
-    "lon": 74.61888
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bhiwadi",
@@ -2210,8 +2210,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 2,
-    "lat": 28.20109,
-    "lon": 76.84579
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bikaner",
@@ -2219,8 +2219,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 28.01879,
-    "lon": 73.29266
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bundi",
@@ -2228,8 +2228,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.43577,
-    "lon": 75.64427
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chittorgarh",
@@ -2237,8 +2237,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 24.89205,
-    "lon": 74.62353
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "churu",
@@ -2246,8 +2246,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 28.29614,
-    "lon": 74.9617
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dausa",
@@ -2255,8 +2255,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.89555,
-    "lon": 76.33475
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dungarpur",
@@ -2264,8 +2264,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 23.838,
-    "lon": 73.71507
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hanumangarh",
@@ -2273,8 +2273,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 29.61075,
-    "lon": 74.28361
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jaipur",
@@ -2282,8 +2282,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 6,
-    "lat": 26.89344,
-    "lon": 75.78899
+    "lat": 26.91641,
+    "lon": 75.79949
   },
   {
     "slug": "jaisalmer",
@@ -2291,8 +2291,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.91233,
-    "lon": 70.90917
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jalore",
@@ -2300,8 +2300,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.33889,
-    "lon": 72.63546
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jhalawar",
@@ -2309,8 +2309,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 24.5884,
-    "lon": 76.17278
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jhunjhunu",
@@ -2318,8 +2318,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 28.10899,
-    "lon": 75.38658
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jodhpur",
@@ -2327,8 +2327,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 5,
-    "lat": 26.27833,
-    "lon": 73.03917
+    "lat": 26.26825,
+    "lon": 73.01939
   },
   {
     "slug": "karauli",
@@ -2336,8 +2336,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.50618,
-    "lon": 77.02599
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kishangarh",
@@ -2354,8 +2354,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 3,
-    "lat": 25.168,
-    "lon": 75.84502
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "nagaur",
@@ -2363,8 +2363,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 27.21349,
-    "lon": 73.73444
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pali",
@@ -2372,8 +2372,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.77106,
-    "lon": 73.34023
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pratapgarh",
@@ -2381,8 +2381,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 24.0412,
-    "lon": 74.7807
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rajsamand",
@@ -2390,8 +2390,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 25.03636,
-    "lon": 73.8835
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sawai-madhopur",
@@ -2399,8 +2399,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.03144,
-    "lon": 76.35933
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sikar",
@@ -2408,8 +2408,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 27.60891,
-    "lon": 75.1533
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sirohi",
@@ -2417,8 +2417,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 24.88526,
-    "lon": 72.85755
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sri-ganganagar",
@@ -2426,8 +2426,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 29.93162,
-    "lon": 73.86451
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tonk",
@@ -2435,8 +2435,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 26.15993,
-    "lon": 75.78052
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "udaipur",
@@ -2444,8 +2444,8 @@
     "state": "Rajasthan",
     "country": "India",
     "station_count": 1,
-    "lat": 24.58862,
-    "lon": 73.63214
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gangtok",
@@ -2453,8 +2453,8 @@
     "state": "Sikkim",
     "country": "India",
     "station_count": 1,
-    "lat": 27.33853,
-    "lon": 88.6141
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ariyalur",
@@ -2462,8 +2462,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 11.06825,
-    "lon": 79.07033
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "auroville",
@@ -2480,8 +2480,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 12.87773,
-    "lon": 80.08348
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chennai",
@@ -2489,8 +2489,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 10,
-    "lat": 13.06864,
-    "lon": 80.24157
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "coimbatore",
@@ -2498,8 +2498,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 3,
-    "lat": 10.98763,
-    "lon": 77.00695
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "cuddalore",
@@ -2507,8 +2507,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 2,
-    "lat": 11.72338,
-    "lon": 79.75159
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dindigul",
@@ -2516,8 +2516,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.35854,
-    "lon": 77.98432
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gummidipoondi",
@@ -2525,8 +2525,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 13.4127,
-    "lon": 80.1081
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hosur",
@@ -2534,8 +2534,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 12.747,
-    "lon": 77.81381
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kanchipuram",
@@ -2543,8 +2543,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 12.86462,
-    "lon": 79.65997
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "karambakkudi",
@@ -2561,8 +2561,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.96782,
-    "lon": 78.08088
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "madurai",
@@ -2579,8 +2579,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 11.27399,
-    "lon": 78.16355
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "negapatam",
@@ -2588,8 +2588,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.79855,
-    "lon": 79.83821
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ooty",
@@ -2597,8 +2597,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 2,
-    "lat": 11.40683,
-    "lon": 76.7139
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "palkalaiperur",
@@ -2606,8 +2606,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.68116,
-    "lon": 78.74175
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "perundurai",
@@ -2615,8 +2615,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 11.25824,
-    "lon": 77.55276
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "pudukkottai",
@@ -2624,8 +2624,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.42342,
-    "lon": 78.78489
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ramanathapuram",
@@ -2633,8 +2633,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 9.36399,
-    "lon": 78.83198
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ranipet",
@@ -2642,8 +2642,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 12.95271,
-    "lon": 79.30394
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "salem",
@@ -2651,8 +2651,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 11.67911,
-    "lon": 78.12505
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "semmandalam",
@@ -2678,8 +2678,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.76548,
-    "lon": 79.139
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tiruchirappalli",
@@ -2687,8 +2687,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 10.81135,
-    "lon": 78.67614
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tirunelveli",
@@ -2696,8 +2696,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 8.72778,
-    "lon": 77.69403
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tirupparangunram",
@@ -2705,8 +2705,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 9.86594,
-    "lon": 78.02267
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "tirupur",
@@ -2714,8 +2714,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 11.09736,
-    "lon": 77.32287
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "vellore",
@@ -2723,8 +2723,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 12.90949,
-    "lon": 79.13186
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "virudhunagar",
@@ -2732,8 +2732,8 @@
     "state": "Tamil Nadu",
     "country": "India",
     "station_count": 1,
-    "lat": 9.55938,
-    "lon": 77.94883
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hyderabad",
@@ -2741,8 +2741,8 @@
     "state": "Telangana",
     "country": "India",
     "station_count": 19,
-    "lat": 18.39595,
-    "lon": 77.21582
+    "lat": 22.73898,
+    "lon": 71.70483
   },
   {
     "slug": "agartala",
@@ -2750,8 +2750,8 @@
     "state": "Tripura",
     "country": "India",
     "station_count": 2,
-    "lat": 23.84019,
-    "lon": 91.28072
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "agra",
@@ -2759,8 +2759,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 6,
-    "lat": 27.18414,
-    "lon": 77.99072
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "baghpat",
@@ -2768,8 +2768,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 28.96495,
-    "lon": 77.27876
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bareilly",
@@ -2777,8 +2777,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 2,
-    "lat": 28.37435,
-    "lon": 79.42205
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "bulandshahr",
@@ -2786,8 +2786,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 28.40696,
-    "lon": 77.84983
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dasna",
@@ -2795,8 +2795,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 28.69453,
-    "lon": 77.49471
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "firozabad",
@@ -2804,8 +2804,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 2,
-    "lat": 27.16415,
-    "lon": 78.38613
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "ghaziabad",
@@ -2813,8 +2813,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 5,
-    "lat": 28.65268,
-    "lon": 77.38133
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "gorakhpur",
@@ -2831,8 +2831,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 2,
-    "lat": 28.51489,
-    "lon": 77.46783
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "hapur",
@@ -2840,8 +2840,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 28.72565,
-    "lon": 77.74968
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jhansi",
@@ -2849,8 +2849,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 25.4547,
-    "lon": 78.6039
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kanpur",
@@ -2858,8 +2858,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 26.48007,
-    "lon": 80.2837
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "khurja",
@@ -2867,8 +2867,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 28.23489,
-    "lon": 77.8683
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "loni",
@@ -2876,8 +2876,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 2,
-    "lat": 28.7505,
-    "lon": 77.28678
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "lucknow",
@@ -2885,8 +2885,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 6,
-    "lat": 26.85063,
-    "lon": 80.94613
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "meerut",
@@ -2894,8 +2894,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 28.99726,
-    "lon": 77.71802
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "moradabad",
@@ -2903,8 +2903,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 6,
-    "lat": 28.83501,
-    "lon": 78.73869
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "muradnagar",
@@ -2912,8 +2912,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 28.79745,
-    "lon": 77.53892
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "muzaffarnagar",
@@ -2921,8 +2921,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 29.47235,
-    "lon": 77.7194
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "nautanwa",
@@ -2939,8 +2939,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 5,
-    "lat": 28.58209,
-    "lon": 77.3462
+    "lat": 28.62455,
+    "lon": 77.35771
   },
   {
     "slug": "pachperwa",
@@ -2957,8 +2957,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 3,
-    "lat": 25.45627,
-    "lon": 81.86917
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "salon",
@@ -2966,8 +2966,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 26.0946,
-    "lon": 81.3678
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "sector",
@@ -2975,8 +2975,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 2,
-    "lat": 28.6017,
-    "lon": 77.36691
+    "lat": 28.58349,
+    "lon": 77.43171
   },
   {
     "slug": "varanasi",
@@ -2984,8 +2984,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 4,
-    "lat": 25.30966,
-    "lon": 82.97435
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "vrindavan",
@@ -2993,8 +2993,8 @@
     "state": "Uttar Pradesh",
     "country": "India",
     "station_count": 1,
-    "lat": 27.57141,
-    "lon": 77.65576
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dehradun",
@@ -3002,8 +3002,8 @@
     "state": "Uttarakhand",
     "country": "India",
     "station_count": 1,
-    "lat": 30.26944,
-    "lon": 78.04417
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "kashipur",
@@ -3011,8 +3011,8 @@
     "state": "Uttarakhand",
     "country": "India",
     "station_count": 1,
-    "lat": 29.21241,
-    "lon": 78.96118
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "rishikesh",
@@ -3083,8 +3083,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 9,
-    "lat": 23.67449,
-    "lon": 87.01168
+    "lat": 23.70476,
+    "lon": 86.96983
   },
   {
     "slug": "ashoknagar-kalyangarh",
@@ -3119,8 +3119,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": null,
-    "lon": null
+    "lat": 24.09174,
+    "lon": 88.24678
   },
   {
     "slug": "baidyabati",
@@ -3191,8 +3191,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 3,
-    "lat": 23.22667,
-    "lon": 86.96953
+    "lat": 23.25209,
+    "lon": 87.02734
   },
   {
     "slug": "bansbaria",
@@ -3236,8 +3236,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 5,
-    "lat": 22.76619,
-    "lon": 88.37732
+    "lat": 22.76985,
+    "lon": 88.38251
   },
   {
     "slug": "baruipur",
@@ -3245,8 +3245,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 2,
-    "lat": null,
-    "lon": null
+    "lat": 22.41631,
+    "lon": 88.41584
   },
   {
     "slug": "beldanga",
@@ -3308,8 +3308,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": 22.84807,
-    "lon": 88.38601
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "chandrakona",
@@ -3317,8 +3317,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 2,
-    "lat": 22.64041,
-    "lon": 87.32313
+    "lat": 22.68704,
+    "lon": 87.42155
   },
   {
     "slug": "chittaranjan",
@@ -3416,8 +3416,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": 21.62323,
-    "lon": 87.52153
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "dinhata",
@@ -3452,8 +3452,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 11,
-    "lat": 23.5417,
-    "lon": 87.29874
+    "lat": 23.54332,
+    "lon": 87.29212
   },
   {
     "slug": "egra",
@@ -3470,8 +3470,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": 26.52788,
-    "lon": 89.19395
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "farakka",
@@ -3542,8 +3542,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 6,
-    "lat": 21.99542,
-    "lon": 88.10227
+    "lat": 21.97916,
+    "lon": 88.1004
   },
   {
     "slug": "haldibari",
@@ -3560,8 +3560,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 5,
-    "lat": 22.58589,
-    "lon": 88.31639
+    "lat": 22.58033,
+    "lon": 88.31833
   },
   {
     "slug": "haringhata",
@@ -3578,8 +3578,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 5,
-    "lat": 22.59458,
-    "lon": 88.30749
+    "lat": 22.60571,
+    "lon": 88.25712
   },
   {
     "slug": "ingraj-bazar",
@@ -3767,8 +3767,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 24,
-    "lat": 22.54668,
-    "lon": 88.38208
+    "lat": 22.54924,
+    "lon": 88.38734
   },
   {
     "slug": "konnagar",
@@ -3821,8 +3821,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": null,
-    "lon": null
+    "lat": 23.08027,
+    "lon": 88.53153
   },
   {
     "slug": "madhyamgram",
@@ -3830,8 +3830,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 19,
-    "lat": 22.69445,
-    "lon": 88.45768
+    "lat": 22.69589,
+    "lon": 88.45746
   },
   {
     "slug": "masila",
@@ -3920,8 +3920,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": null,
-    "lon": null
+    "lat": 23.40781,
+    "lon": 88.36318
   },
   {
     "slug": "odlabari",
@@ -3992,8 +3992,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 2,
-    "lat": 23.26166,
-    "lon": 88.53852
+    "lat": 23.21852,
+    "lon": 88.54836
   },
   {
     "slug": "raniganj",
@@ -4055,8 +4055,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 1,
-    "lat": null,
-    "lon": null
+    "lat": 23.23511,
+    "lon": 88.42327
   },
   {
     "slug": "shiliguri",
@@ -4091,8 +4091,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 2,
-    "lat": 26.68805,
-    "lon": 88.41399
+    "lat": 26.6878,
+    "lon": 88.4153
   },
   {
     "slug": "siuri",
@@ -4163,8 +4163,8 @@
     "state": "West Bengal",
     "country": "India",
     "station_count": 14,
-    "lat": 22.70395,
-    "lon": 88.52365
+    "lat": 22.70455,
+    "lon": 88.52359
   },
   {
     "slug": "changunarayan",
@@ -4190,8 +4190,8 @@
     "state": "Central Region",
     "country": "Nepal",
     "station_count": 4,
-    "lat": 27.5413,
-    "lon": 82.65387
+    "lat": 27.64992,
+    "lon": 84.36891
   },
   {
     "slug": "dhulikhel",
@@ -4271,8 +4271,8 @@
     "state": "Central Region",
     "country": "Nepal",
     "station_count": 22,
-    "lat": 27.6679,
-    "lon": 85.31728
+    "lat": 27.66578,
+    "lon": 85.31811
   },
   {
     "slug": "pipara-simara",
@@ -4298,8 +4298,8 @@
     "state": "Eastern Region",
     "country": "Nepal",
     "station_count": 2,
-    "lat": 26.46067,
-    "lon": 87.28361
+    "lat": 26.45611,
+    "lon": 87.28389
   },
   {
     "slug": "dhankuta",
@@ -4496,8 +4496,8 @@
     "state": "Balochistan",
     "country": "Pakistan",
     "station_count": 9,
-    "lat": 30.15953,
-    "lon": 66.99206
+    "lat": 30.14221,
+    "lon": 66.98808
   },
   {
     "slug": "gilgit",
@@ -4523,8 +4523,8 @@
     "state": "Islamabad",
     "country": "Pakistan",
     "station_count": 44,
-    "lat": 33.68825,
-    "lon": 73.06617
+    "lat": 33.68673,
+    "lon": 73.06422
   },
   {
     "slug": "abbottabad",
@@ -4577,8 +4577,8 @@
     "state": "Khyber Pakhtunkhwa",
     "country": "Pakistan",
     "station_count": 37,
-    "lat": 34.00329,
-    "lon": 71.49121
+    "lat": 34.00725,
+    "lon": 71.49007
   },
   {
     "slug": "aliabad",
@@ -4676,8 +4676,8 @@
     "state": "Punjab",
     "country": "Pakistan",
     "station_count": 1,
-    "lat": 31.7167,
-    "lon": 72.9833
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "daska-kalan",
@@ -4883,8 +4883,8 @@
     "state": "Punjab",
     "country": "Pakistan",
     "station_count": 2,
-    "lat": 32.2451,
-    "lon": 74.1572
+    "lat": 32.21804,
+    "lon": 74.15492
   },
   {
     "slug": "lahore",
@@ -4892,8 +4892,8 @@
     "state": "Punjab",
     "country": "Pakistan",
     "station_count": 192,
-    "lat": 31.50259,
-    "lon": 74.35104
+    "lat": 31.50314,
+    "lon": 74.34941
   },
   {
     "slug": "lodhran",
@@ -4955,8 +4955,8 @@
     "state": "Punjab",
     "country": "Pakistan",
     "station_count": 23,
-    "lat": 30.1673,
-    "lon": 71.46226
+    "lat": 30.16884,
+    "lon": 71.45966
   },
   {
     "slug": "muridke",
@@ -4973,8 +4973,8 @@
     "state": "Punjab",
     "country": "Pakistan",
     "station_count": 7,
-    "lat": 33.90757,
-    "lon": 73.39508
+    "lat": 33.90758,
+    "lon": 73.39576
   },
   {
     "slug": "muzaffargarh",
@@ -5108,8 +5108,8 @@
     "state": "Punjab",
     "country": "Pakistan",
     "station_count": 32,
-    "lat": 33.57309,
-    "lon": 73.07604
+    "lat": 33.57665,
+    "lon": 73.07519
   },
   {
     "slug": "rojhan",
@@ -5423,8 +5423,8 @@
     "state": "Northern Province",
     "country": "Sri Lanka",
     "station_count": 1,
-    "lat": 8.9435,
-    "lon": 79.9948
+    "lat": null,
+    "lon": null
   },
   {
     "slug": "jaffna",
