@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, useEffect } from 'react'
+import { AQI_BANDS, BAND_KEYS, bandKey, pm25Color } from '@/lib/aqi'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
   CartesianGrid, PieChart, Pie, Cell,
@@ -20,24 +21,19 @@ interface AnalystTrayProps {
   stations: TrayStation[]
 }
 
-// ── Histogram bins matching risk_engine thresholds ──
-const BINS = [
-  { label: '0–35',   min: 0,   max: 35,  band: 'good' },
-  { label: '35–75',  min: 35,  max: 75,  band: 'moderate' },
-  { label: '75–150', min: 75,  max: 150, band: 'unhealthy' },
-  { label: '150–250',min: 150, max: 250, band: 'very_unhealthy' },
-  { label: '250+',   min: 250, max: Infinity, band: 'severe' },
-]
+// ── Histogram bins: the US EPA 2024 PM2.5 categories (lib/aqi), one per band ──
+const BINS = AQI_BANDS.map((b, i) => ({
+  label: b.pm25Max == null ? `${AQI_BANDS[i - 1].pm25Max}+` : `${i === 0 ? 0 : AQI_BANDS[i - 1].pm25Max}–${b.pm25Max}`,
+  min: i === 0 ? 0 : (AQI_BANDS[i - 1].pm25Max as number),
+  max: b.pm25Max ?? Infinity,
+  band: b.key as string,
+}))
 
-const BAND_ORDER = ['good', 'moderate', 'unhealthy', 'very_unhealthy', 'severe']
+const BAND_ORDER = BAND_KEYS as readonly string[]
 
-// ── PM2.5 → color (matches public app AQI-style bands) ──
+// ── PM2.5 → colour (same classification as the markers) ──
 function getPM25Color(pm25: number): string {
-  if (pm25 <= 35) return '#6ecc39'    // good
-  if (pm25 <= 75) return '#f0c20c'    // moderate
-  if (pm25 <= 150) return '#ef7855'   // unhealthy
-  if (pm25 <= 250) return '#a070b5'   // very_unhealthy
-  return '#991b1b'                     // severe
+  return pm25Color(pm25)
 }
 
 // ── Station Trend Panel (24h PM2.5 bar chart) ──
@@ -365,7 +361,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
               />
               <Bar dataKey="mean" radius={[0, 3, 3, 0]}>
                 {topCities.map((entry, i) => {
-                  const band = entry.mean <= 35 ? 'good' : entry.mean <= 75 ? 'moderate' : entry.mean <= 150 ? 'unhealthy' : entry.mean <= 250 ? 'very_unhealthy' : 'severe'
+                  const band = bandKey(entry.mean)
                   return <Cell key={i} fill={BAND_COLORS[band] || '#9ca3af'} />
                 })}
               </Bar>
@@ -517,7 +513,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
                   />
                   <Bar dataKey="mean" radius={[0, 3, 3, 0]}>
                     {topCities.map((entry, i) => {
-                      const band = entry.mean <= 35 ? 'good' : entry.mean <= 75 ? 'moderate' : entry.mean <= 150 ? 'unhealthy' : entry.mean <= 250 ? 'very_unhealthy' : 'severe'
+                      const band = bandKey(entry.mean)
                       return <Cell key={i} fill={BAND_COLORS[band] || '#9ca3af'} />
                     })}
                   </Bar>

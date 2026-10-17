@@ -4,6 +4,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ChatMessage } from './ChatMessage'
 import { AnalystPanel, StationTrendPanel, type TrayStation, type StationTrendInfo } from './AnalystTray'
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
+import { useOptionalSelection } from '@/lib/selection'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
 const DESK_PREFIX = `${API_BASE}/api/v1/ops/analyst-desk`
@@ -48,6 +49,10 @@ interface CopilotChatProps {
 export function CopilotChat({ selectedDate, trackerMode = false, onAction, stationMention, cityMention, onMentionConsumed, stations, onStreamingChange, activeTab: externalTab }: CopilotChatProps) {
   const [internalTab, setInternalTab] = useState<'chat' | 'analytics'>('chat')
   const activeTab = externalTab ?? internalTab
+  // Shared selection: sent with every request so the answer describes what the map shows
+  const selection = useOptionalSelection()
+  const selectionContext = selection?.toContext()
+  const selectionLine = selection?.describe()
   const setActiveTab = setInternalTab
   const [messages, setMessages] = useState<ChatMessageType[]>(() => {
     // Tracker mode never reads from cache — briefs per selected date
@@ -293,7 +298,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
       setTrackerBriefedDate(selectedDate)
       const assistantId = crypto.randomUUID()
       setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
-      streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate }, assistantId)
+      streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate, context: selectionContext }, assistantId)
       return
     }
 
@@ -305,7 +310,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
     }
     const assistantId = crypto.randomUUID()
     setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
-    streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate }, assistantId)
+    streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate, context: selectionContext }, assistantId)
   }, [selectedDate, trackerBriefedDate, briefingDone, sessionId, streamResponse, trackerMode])
 
   // Send a message
@@ -335,6 +340,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
       session_id: sessionId,
       message: text.trim(),
       date: selectedDate,
+      context: selectionContext,
     }, assistantId)
 
     inputRef.current?.focus()
@@ -455,6 +461,11 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
       )}
 
       {/* Input */}
+      {selectionLine && activeTab === 'chat' && (
+        <div className="px-3 py-1 border-t border-slate-100 text-[10px] text-slate-400 truncate" title="The assistant answers about this selection">
+          Answering about: <span className="text-slate-600">{selectionLine}</span>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-slate-100">
         <div className="flex items-center gap-1.5">
           <input

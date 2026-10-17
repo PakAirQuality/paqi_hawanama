@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
 
 const modules = [
   { id: 'aqi-tracker', name: 'Air Quality Tracker', href: '/' },
@@ -51,13 +52,10 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
               {/* Center info - hidden on mobile */}
               <div className="hidden md:flex items-center gap-6 text-sm">
-                <div className="flex items-center gap-2 text-slate-600">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Live Monitoring</span>
-                </div>
+                <FreshnessBadge />
                 <div className="text-slate-400">|</div>
                 <div className="text-slate-600">
-                  South Asia Air Quality Network
+                  Pakistan Air Quality Initiative
                 </div>
               </div>
 

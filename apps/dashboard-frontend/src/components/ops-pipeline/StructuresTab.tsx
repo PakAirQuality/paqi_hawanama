@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, ChevronLeft, Search, MapPin } from 'lucide-react'
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
@@ -111,24 +112,16 @@ export interface StructuresTabProps {
   initialView?: 'stations' | 'sources'
 }
 
+// Health classification: one implementation for the whole dashboard (lib/aqi)
 function pm25ToBandColor(pm25: number): string {
-  if (pm25 <= 35) return '#6ecc39'
-  if (pm25 <= 75) return '#f0c20c'
-  if (pm25 <= 150) return '#f18017'
-  if (pm25 <= 250) return '#a070b5'
-  return '#ef4444'
+  return pm25Color(pm25)
 }
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
 
-// ── PM2.5 bar color (matches public app AQI palette) ──
+// ── PM2.5 bar color (same categories as the markers) ──
 function pm25BarColor(v: number): string {
-  if (v <= 12) return 'rgba(110,204,57,1)'
-  if (v <= 35) return 'rgba(240,194,12,1)'
-  if (v <= 55) return 'rgba(241,128,23,1)'
-  if (v <= 150) return 'rgba(239,120,85,1)'
-  if (v <= 250) return '#a070b5'
-  return '#991b1b'
+  return pm25Color(v)
 }
 
 // ── Canvas bar chart for 24h PM2.5 ──
@@ -393,7 +386,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             onChange={e => setSortBy(e.target.value as 'pm25' | 'name' | 'city' | 'network')}
             className="text-[11px] text-slate-500 bg-white border border-slate-200/80 rounded-xl px-2.5 py-2 outline-none shrink-0"
           >
-            <option value="pm25">AQI level</option>
+            <option value="pm25">PM2.5 (highest first)</option>
             <option value="city">City</option>
             <option value="network">Network</option>
             <option value="name">A → Z</option>
@@ -933,14 +926,10 @@ function StationDetailView({ station, selectedDate, onBack, onFlyTo }: StationDe
     return { text: 'Offline', bg: '#fef2f2', color: '#dc2626' }
   })()
 
-  // AQI band label — uses same palette as pm25ToBandColor
+  // Health category (US EPA 2024 PM2.5 breakpoints, lib/aqi)
   const aqiBand = (() => {
-    const v = station.pm25
-    if (v <= 35) return { label: 'Good', color: '#6ecc39', bg: 'rgba(110,204,57,0.12)' }
-    if (v <= 75) return { label: 'Moderate', color: '#d4a017', bg: 'rgba(240,194,12,0.12)' }
-    if (v <= 150) return { label: 'Unhealthy', color: '#e07916', bg: 'rgba(241,128,23,0.12)' }
-    if (v <= 250) return { label: 'V. Unhealthy', color: '#a070b5', bg: 'rgba(160,112,181,0.12)' }
-    return { label: 'Hazardous', color: '#c0392b', bg: 'rgba(192,57,43,0.12)' }
+    const b = classifyPm25(station.pm25)
+    return { label: b.shortLabel, color: b.color, bg: b.color + '1f' }
   })()
 
   const stats24h = useMemo(() => {
@@ -1150,7 +1139,7 @@ function StationInsight({ station, stats, rolling7d, selectedDate }: { station: 
   }
 
   const accentColor = pm25ToBandColor(stats.mean)
-  const conditionLabel = stats.mean > 150 ? 'severe' : stats.mean > 55 ? 'unhealthy' : stats.mean > 35 ? 'moderate' : 'good'
+  const conditionLabel = classifyPm25(stats.mean).label.toLowerCase()
 
   // Build station-specific narrative
   const lines: string[] = []

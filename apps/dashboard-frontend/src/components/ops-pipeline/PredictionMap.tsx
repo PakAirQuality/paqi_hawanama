@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState, useEffect } from 'react'
+import { bandKey, markerClass, normalizeBand, bandColor } from '@/lib/aqi'
 import { esc } from '@/lib/html'
 import { useRouter } from 'next/navigation'
 import { Loader2, X } from 'lucide-react'
@@ -69,33 +70,24 @@ interface HoverPM25 {
   label: string
 }
 
-// AQI band classification + marker factory (same as analyst desk ForecastMap)
+// Health classification: one implementation for the whole dashboard (lib/aqi, US EPA 2024)
 function pm25ToBand(pm25: number): string {
-  if (pm25 <= 35) return 'good'
-  if (pm25 <= 75) return 'moderate'
-  if (pm25 <= 150) return 'unhealthy'
-  if (pm25 <= 250) return 'very_unhealthy'
-  return 'severe'
+  return bandKey(pm25)
 }
 
 function bandToMarkerClass(band: string): string {
-  switch (band) {
+  switch (normalizeBand(band)) {
     case 'good': return 'bg-good'
     case 'moderate': return 'bg-moderate'
+    case 'unhealthy_sensitive': return 'bg-unhealthy-sensitive'
     case 'unhealthy': return 'bg-unhealthy'
     case 'very_unhealthy': return 'bg-very-unhealthy'
-    case 'severe': return 'bg-hazardous'
-    default: return 'bg-moderate'
+    case 'hazardous': return 'bg-hazardous'
+    default: return 'bg-no-reading'
   }
 }
 
-const BAND_COLORS: Record<string, string> = {
-  good: '#6ecc39',
-  moderate: '#f0c20c',
-  unhealthy: '#ef7855',
-  very_unhealthy: '#a070b5',
-  severe: '#991b1b',
-}
+const BAND_COLORS: Record<string, string> = new Proxy({}, { get: (_t, k: string) => bandColor(k) })
 
 function createMarkerEl(value: number | null | undefined, colorClass: string): HTMLDivElement {
   const container = document.createElement('div')

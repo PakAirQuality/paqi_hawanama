@@ -13,8 +13,11 @@ import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
 import { fetchFires } from '@/components/analyst-desk/api'
 import { loadPakBoundary, isInsidePakistan } from '@/components/analyst-desk/pakistan'
+import { useSelection } from '@/lib/selection'
+import { formatDateOnly, pktToday } from '@/lib/time'
 
 export default function OpsPipelinePage() {
+  const selection = useSelection()
   const [selectedPredDate, setSelectedPredDate] = useState<string | null>(null)
   const [model, setModel] = useState<'backbone' | 'support_aware'>('backbone')
 
@@ -97,9 +100,10 @@ export default function OpsPipelinePage() {
     enabled: !!selectedPredDate,
   })
 
+  // Grid stats for the model the map is showing (area average over the model domain)
   const { data: predictionData } = useQuery({
-    queryKey: ['ops-prediction-data', selectedPredDate],
-    queryFn: () => fetchPredictionData(selectedPredDate!),
+    queryKey: ['ops-prediction-data', selectedPredDate, model],
+    queryFn: () => fetchPredictionData(selectedPredDate!, model),
     enabled: !!selectedPredDate,
   })
 
@@ -174,9 +178,14 @@ export default function OpsPipelinePage() {
       .filter((s: any) => s.pm25 != null)
   }, [stationData, stationIdLookup, providerMap])
 
-  // Exclude today — daily station aggregation hasn't completed yet
-  const today = new Date().toISOString().slice(0, 10)
-  const dates = (tileDates?.dates || []).filter((d: string) => d < today)
+  // Only days whose Pakistan calendar day has ended (station daily aggregation can exist).
+  // The API says which (details[].complete); fall back to the PKT date, never the browser's UTC date.
+  const dates = useMemo(() => {
+    const details = tileDates?.details
+    if (details?.length) return details.filter(d => d.complete).map(d => d.date)
+    const today = pktToday()
+    return (tileDates?.dates || []).filter((d: string) => d < today)
+  }, [tileDates])
   const currentIndex = selectedPredDate ? dates.indexOf(selectedPredDate) : -1
 
   useEffect(() => {
@@ -185,10 +194,16 @@ export default function OpsPipelinePage() {
     }
   }, [dates, selectedPredDate])
 
-  const formatDisplayDate = (dateStr: string) => {
-    const d = new Date(dateStr)
-    return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
-  }
+  // Mirror the page's choices into the shared selection (map, cards, chat all read it)
+  useEffect(() => {
+    selection.setDate(selectedPredDate, !!selectedPredDate && selectedPredDate === dates[dates.length - 1])
+  }, [selectedPredDate, dates]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { selection.setModel(model) }, [model]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    selection.setLayer('kilns', showKilns); selection.setLayer('industry', showIndustry); selection.setLayer('fires', showFires)
+  }, [showKilns, showIndustry, showFires]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const formatDisplayDate = (dateStr: string) => formatDateOnly(dateStr)
 
   if (tileDatesLoading) {
     return (

@@ -61,8 +61,9 @@ export async function fetchPredictions(limit: number = 30): Promise<PredictionsR
   return res.json()
 }
 
-export async function fetchPredictionData(date: string): Promise<PredictionData> {
-  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/predictions/${date}`, {
+export async function fetchPredictionData(date: string, model: 'backbone' | 'support_aware' = 'backbone'): Promise<PredictionData> {
+  const q = model !== 'backbone' ? `?model=${model}` : ''
+  const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/predictions/${date}${q}`, {
     headers,
     cache: 'no-store'
   })
@@ -155,7 +156,16 @@ export interface DailyBrief {
   date: string
   narrative: string
   station_count: number
+  /** unweighted mean across reporting stations (same value as reporting_station_mean) */
   obs_mean: number | null
+  reporting_station_mean?: number | null
+  mean_basis?: string
+  period?: { date: string; tz: string; aggregation: string }
+  band_scale?: string
+  /** area averages over the model grid, per model */
+  grid_mean?: { backbone: number | null; support_aware: number | null }
+  /** prediction sampled at station points minus observation, per model */
+  matched_bias?: { backbone: { bias: number; mae: number; n: number } | null; support_aware: { bias: number; mae: number; n: number } | null }
   data_sources: {
     stations: boolean
     predictions: boolean
