@@ -94,7 +94,8 @@ def main() -> int:
                 if cur.fetchone()["st_contains"]:
                     found = name
                     break
-            if found and norm(found) != norm(s["state"] or "") and norm(found) not in norm(s["state"] or ""):
+            stored = norm(s["state"] or "")
+            if found and norm(found) != stored and norm(found) not in stored and stored not in norm(found):
                 mismatches.append({**s, "polygon_admin1": found})
     else:
         print("note: PostGIS or adm1 file unavailable; province check skipped", file=sys.stderr)
