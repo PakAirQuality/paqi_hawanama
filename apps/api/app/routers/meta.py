@@ -202,9 +202,17 @@ async def get_provinces(
 @router.get("/cities")
 async def get_cities(
     province_name: Optional[str] = None,
+    country_name: Optional[str] = None,
+    province: Optional[str] = None,
+    country: Optional[str] = None,
     db: AsyncSession = Depends(get_database)
 ) -> List[str]:
-    """Get scrollable list of cities with station data. If no province_name provided, shows all cities for selection."""
+    """Get scrollable list of cities with station data. If no province_name provided, shows all cities for selection.
+    `province`/`country` are accepted as aliases (the dashboard used them and was silently unfiltered).
+    The province filter applies to the station's own state as well as the city's, so a city
+    row attached to the wrong state cannot leak into another province's list."""
+    province_name = province_name or province
+    country_name = country_name or country
     try:
         # Get cities that have active stations
         query = """
@@ -216,10 +224,13 @@ async def get_cities(
         WHERE c.active = true AND s.active = true AND co.active = true AND st.active = true
         """
         params = {}
-        
+
         if province_name:
-            query += " AND LOWER(s.name) = LOWER(:province_name)"
+            query += " AND LOWER(s.name) = LOWER(:province_name) AND st.state_id = s.id"
             params["province_name"] = province_name
+        if country_name:
+            query += " AND LOWER(co.name) = LOWER(:country_name)"
+            params["country_name"] = country_name
         # If no province_name provided, show all cities for scrollable selection
             
         query += " ORDER BY co.name, s.name, c.name"

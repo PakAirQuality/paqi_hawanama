@@ -261,16 +261,16 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
   }
 }
 
-# 4b. FIRMS Fire Data Ingestion - 2:00 AM UTC daily
+# 4b. FIRMS Fire Data Ingestion - every 3 hours (VIIRS overpasses ~08 and ~20 UTC; FIRMS NRT latency ≤3 h)
 resource "google_cloud_scheduler_job" "firms_fire_ingest" {
   name        = "firms-fire-ingest"
-  description = "Daily FIRMS VIIRS fire data fetch from NASA API at 2:00 AM UTC"
-  schedule    = "0 2 * * *"  # 2:00 AM UTC daily (7:00 AM PKT)
+  description = "FIRMS VIIRS (NOAA-20/21, SNPP) fire detections, last 2 UTC days re-keyed to Pakistan days, every 3 h"
+  schedule    = "20 */3 * * *"
   time_zone   = "UTC"
 
   http_target {
     http_method = "POST"
-    uri         = "${local.ingest_base_url}/api/v1/ops/analyst-desk/fires/ingest?days_back=3"
+    uri         = "${local.ingest_base_url}/api/v1/ops/analyst-desk/fires/ingest?window_days=2"
 
     headers = {
       "Content-Type" = "application/json"
