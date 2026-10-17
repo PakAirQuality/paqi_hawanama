@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { formatPkt } from '@/lib/time'
 import { bandKey, classifyPm25, markerClass, normalizeBand, pm25Color } from '@/lib/aqi'
 import { esc } from '@/lib/html'
 import mapboxgl from 'mapbox-gl'
@@ -555,11 +556,11 @@ export function ForecastMap({
         const coords = (e.features[0].geometry as GeoJSON.Point).coordinates.slice() as [number, number]
         firePopup.setLngLat(coords).setHTML(`
           <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">
-            <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Fire Detection</div>
-            <div>FRP: <b>${esc(props.frp)} MW</b></div>
+            <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Satellite fire detection</div>
+            <div>FRP: <b>${esc(props.frp)} MW</b> <span style="color:#94a3b8">(radiative power)</span></div>
             <div>Confidence: <b style="text-transform:capitalize">${esc(props.confidence)}</b></div>
-            <div>Satellite: <b>${esc(props.satellite)}</b></div>
-            <div style="color:#64748b;font-size:11px;margin-top:2px">${esc(props.acq_date)}</div>
+            <div>Satellite: <b>${esc(props.satellite)}</b> VIIRS</div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">Acquired ${esc(props.acq_datetime_utc ? formatPkt(props.acq_datetime_utc) : props.acq_date)}</div>
           </div>
         `).addTo(map.current)
       })

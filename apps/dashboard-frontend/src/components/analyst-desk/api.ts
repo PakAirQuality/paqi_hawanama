@@ -59,9 +59,29 @@ export async function fetchCurrentStations(): Promise<{ stations: CurrentStation
   return res.json()
 }
 
+export type FiresStatus = 'ok' | 'empty' | 'partial' | 'stale' | 'unavailable'
+
+export interface FiresSource {
+  source: string
+  status: 'ok' | 'error'
+  rows?: number
+  error?: string | null
+}
+
 export interface FiresGeoJSON {
   type: "FeatureCollection"
+  /** Pakistan day the detections belong to (may differ from requested_date when status is 'stale') */
   date: string
+  requested_date?: string
+  status?: FiresStatus
+  count?: number
+  layer?: string
+  tz?: string
+  day_basis?: 'acq_pkt' | 'acq_utc'
+  sources?: FiresSource[] | null
+  last_successful_fetch?: string | null
+  observation_period?: { start: string; end: string } | null
+  note?: string
   features: Array<{
     type: "Feature"
     geometry: { type: "Point"; coordinates: [number, number] }
@@ -70,6 +90,8 @@ export interface FiresGeoJSON {
       confidence: string
       satellite: string
       acq_date: string
+      acq_time?: string
+      acq_datetime_utc?: string
     }
   }>
 }

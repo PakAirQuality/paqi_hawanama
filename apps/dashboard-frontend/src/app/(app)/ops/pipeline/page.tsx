@@ -113,8 +113,10 @@ export default function OpsPipelinePage() {
     enabled: !!selectedPredDate,
   })
 
-  // Active fires (FIRMS VIIRS) — fetch, filter to Pakistan, strict date match
-  const { data: firesRaw } = useQuery({
+  // Satellite fire detections — fetched for the selected Pakistan day, filtered to Pakistan.
+  // The response carries an explicit status (ok/empty/partial/stale/unavailable); the panel
+  // shows it, so a stale or missing day is never disguised as "no fires".
+  const { data: firesGeoJSON, isLoading: firesLoading, isFetching: firesFetching, isError: firesError, error: firesErrorObj } = useQuery({
     queryKey: ['ops-fires', selectedPredDate],
     queryFn: async () => {
       await loadPakBoundary()
@@ -128,13 +130,8 @@ export default function OpsPipelinePage() {
       }
     },
     enabled: !!selectedPredDate,
+    retry: 1,
   })
-  // If API returned data for a different date (fallback), show empty instead of stale fires
-  const firesGeoJSON = firesRaw && firesRaw.date === selectedPredDate
-    ? firesRaw
-    : firesRaw
-      ? { type: 'FeatureCollection' as const, date: selectedPredDate!, features: [] as any[] }
-      : undefined  // still loading
 
   // Station directory — fetch once, used to resolve station_ids for navigation
   const { data: stationDirectory } = useQuery({
@@ -296,6 +293,10 @@ export default function OpsPipelinePage() {
             firesData={firesGeoJSON ?? null}
             onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
             selectedDate={selectedPredDate}
+            isLoading={firesLoading}
+            isFetching={firesFetching}
+            isError={firesError}
+            errorMessage={firesErrorObj instanceof Error ? firesErrorObj.message : null}
           />
         </div>
 
