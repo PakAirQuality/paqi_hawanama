@@ -154,3 +154,9 @@ async def test_missing_key_is_500_missing_key(app, monkeypatch):
 
 def test_backfill_route_is_gone():
     assert not any(getattr(r, "path", "").endswith("/fires/backfill") for r in analyst_desk.router.routes)
+
+
+def test_real_fire_recorder_builds():
+    """The route builds its recorder at request time; the other tests replace it, so build it here."""
+    rec = analyst_desk._fire_recorder()
+    assert isinstance(rec, RunRecorder) and rec._sf is not None
