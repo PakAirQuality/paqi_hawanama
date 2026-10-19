@@ -12,8 +12,10 @@ interface FreshnessSource {
   latest_ts: string | null
   latest_ingested_at?: string | null
   age_min: number | null
-  threshold_min: number
+  threshold_min: number | null
   status: string
+  last_run_status?: string | null
+  last_run_error?: string | null
 }
 
 async function fetchFreshness(): Promise<{ status: string; sources: FreshnessSource[] }> {
@@ -42,10 +44,27 @@ export function FreshnessBadge() {
 
   const historical = selection && selection.date && !selection.isLatest
 
+  // Satellite fires: judged by the API from the last ingest run (3-hourly)
+  const fires = data?.sources?.find(s => s.source === 'fires')
+  const firesOk = fires?.status === 'ok'
+  const firesText = !fires ? null
+    : fires.last_run_error === 'invalid_key' ? 'Fires: feed key rejected'
+    : fires.latest_ingested_at ? `Fires ${relativeAge(fires.latest_ingested_at)}`
+    : 'Fires: no recent update'
+  const firesTitle = fires
+    ? `Satellite fire feed ${firesOk ? 'up to date' : 'delayed'}; last successful fetch ${fires.latest_ingested_at ? formatPkt(fires.latest_ingested_at) : 'unknown'}${fires.last_run_status && fires.last_run_status !== 'success' ? ` (last run ${fires.last_run_status}${fires.last_run_error ? `: ${fires.last_run_error}` : ''})` : ''}`
+    : undefined
+
   return (
     <div className="flex items-center gap-2 text-slate-600" title={title}>
       <div className={`w-2 h-2 rounded-full ${dot} ${ok ? 'animate-pulse' : ''}`} />
       <span>{label}</span>
+      {firesText && (
+        <span className={`ml-1 hidden sm:inline-flex items-center gap-1 text-[11px] ${firesOk ? 'text-slate-500' : 'text-amber-700'}`} title={firesTitle}>
+          <span className={`w-1.5 h-1.5 rounded-full ${firesOk ? 'bg-orange-400' : 'bg-amber-500'}`} />
+          {firesText}
+        </span>
+      )}
       {historical && (
         <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Historical view · {selection.date}</span>
       )}

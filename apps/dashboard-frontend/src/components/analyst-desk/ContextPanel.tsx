@@ -6,6 +6,7 @@ import type { FiresGeoJSON } from './api'
 import { loadPakBoundary, isInsidePakistan, isPakBoundaryLoaded } from './pakistan'
 import { BAND_KEYS, BAND_SCALE_LABEL, bandColor, bandCounts, bandKey, bandLabel, unhealthyOrWorse } from '@/lib/aqi'
 import { formatDateOnly, formatPkt, pktToday } from '@/lib/time'
+import { firesShortLabel, firesStatus } from '@/lib/fires'
 
 interface ContextPanelProps {
   currentStations: CurrentStation[]
@@ -16,7 +17,7 @@ interface ContextPanelProps {
   selectedDate?: string | null
 }
 
-export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selectedHorizon, selectedDate }: ContextPanelProps) {
+export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selectedDate }: ContextPanelProps) {
   // Load Pakistan boundary on mount
   useEffect(() => { loadPakBoundary() }, [])
 
@@ -65,12 +66,14 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       worstCities,
       rampCount: ramps.length,
       latestObservation: latest,
-      fireCount: firesGeoJSON?.features?.filter((f: any) => {
+      fireCount: firesGeoJSON?.features?.filter(f => {
         const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
         return isInsidePakistan(lng, lat)
       }).length || 0,
     }
   }, [currentStations, forecasts, firesGeoJSON])
+
+  const fireLabel = firesShortLabel(firesGeoJSON, stats?.fireCount ?? 0)
 
   if (!stats) {
     return (
@@ -174,8 +177,12 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
         <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Evidence</div>
         <div className="grid grid-cols-2 gap-2">
           <div className="px-2.5 py-2 rounded-lg bg-orange-50 border border-orange-100">
-            <div className="text-lg font-bold text-orange-600 tabular-nums">{stats.fireCount}</div>
-            <div className="text-[10px] text-orange-500">Satellite fire detections</div>
+            <div className="text-lg font-bold text-orange-600 tabular-nums">{firesStatus(firesGeoJSON) === 'unavailable' ? '—' : stats.fireCount}</div>
+            <div className={`text-[10px] ${fireLabel.warn ? 'text-amber-700' : 'text-orange-500'}`}>
+              {firesStatus(firesGeoJSON) === 'unavailable' ? 'Fire data unavailable'
+                : firesStatus(firesGeoJSON) === 'stale' ? `Fire detections (${firesGeoJSON?.date})`
+                : `Satellite fire detections${fireLabel.warn ? ` · ${fireLabel.text.split(' · ').slice(1).join(' · ')}` : ''}`}
+            </div>
           </div>
           <div className="px-2.5 py-2 rounded-lg bg-amber-50 border border-amber-100">
             <div className="text-lg font-bold text-amber-600 tabular-nums">{stats.rampCount}</div>

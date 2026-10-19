@@ -5,6 +5,7 @@ import { Flame, ChevronLeft, Navigation, AlertTriangle, RefreshCw } from 'lucide
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
 import type { FiresGeoJSON, FiresStatus } from '@/components/analyst-desk/api'
 import { formatDateOnly, formatPkt } from '@/lib/time'
+import { firesDelayed } from '@/lib/fires'
 
 interface FireFeature {
   type: "Feature"
@@ -79,11 +80,13 @@ export function describeFiresState(
   const day = data.date ? formatDateOnly(data.date) : ''
   const fetched = data.last_successful_fetch ? ` · fetched ${formatPkt(data.last_successful_fetch)}` : ''
   const window = data.observation_period ? ` · overpasses ${formatPkt(data.observation_period.start)} to ${formatPkt(data.observation_period.end)}` : ''
+  const delayed = firesDelayed(data)
+  const delayNote = delayed ? `Last update ${Math.round(data.fetched_age_hours ?? 0)} h ago; the 3-hourly fire feed is behind, so recent overpasses may be missing. ` : ''
   switch (status) {
     case 'ok':
-      return { tone: 'ok', title: `${data.features.length} detections on ${day}`, detail: `Pakistan day${window}${fetched}` }
+      return { tone: delayed ? 'warn' : 'ok', title: `${data.features.length} detections on ${day}`, detail: `${delayNote}Pakistan day${window}${fetched}` }
     case 'empty':
-      return { tone: 'empty', title: `No detections returned for ${day}`, detail: `The satellites passed and found no thermal anomalies in the area${fetched}` }
+      return { tone: delayed ? 'warn' : 'empty', title: `No detections returned for ${day}`, detail: `${delayNote}The satellites passed and found no thermal anomalies in the area${fetched}` }
     case 'partial': {
       const failed = (data.sources ?? []).filter((s) => s.status !== 'ok').map((s) => s.source.replace('VIIRS_', '').replace('_NRT', ''))
       return { tone: 'warn', title: `Partial coverage for ${day}`, detail: `${failed.join(', ') || 'A source'} failed on the latest fetch; detections may be missing${fetched}` }
