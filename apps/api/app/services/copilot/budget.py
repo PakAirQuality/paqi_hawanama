@@ -105,7 +105,13 @@ async def record_tokens(ip: str, prompt_tokens: int, completion_tokens: int) -> 
 
 
 def usage_tokens(usage) -> tuple[int, int]:
-    """Extract (prompt, completion) token counts from a pydantic-ai usage object."""
+    """Extract (prompt, completion) token counts from a pydantic-ai usage object.
+
+    Pass ``result.usage`` uncalled: it is a method in some pydantic-ai releases and a
+    ``RunUsage`` property in others (calling the property raised TypeError after every run).
+    """
+    if callable(usage):
+        usage = usage()
     if usage is None:
         return 0, 0
     prompt = getattr(usage, "input_tokens", None)

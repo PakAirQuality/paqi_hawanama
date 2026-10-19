@@ -171,7 +171,7 @@ async def copilot_chat(req: ChatRequest, request: Request):
                         except json.JSONDecodeError:
                             pass
                 session.set_history(result.all_messages())
-                p, c = budget.usage_tokens(result.usage())
+                p, c = budget.usage_tokens(result.usage)
             await budget.record_tokens(ip, p, c)
 
     return StreamingResponse(_stream_with_fallback(_run_with_agent, ip, "copilot chat"), media_type="text/event-stream")
@@ -207,7 +207,7 @@ async def copilot_briefing(req: ChatRequest, request: Request):
                 if final.strip():
                     yield _sse_event({"type": "text", "content": final})
                 session.set_history(result.all_messages())
-                p, c = budget.usage_tokens(result.usage())
+                p, c = budget.usage_tokens(result.usage)
             await budget.record_tokens(ip, p, c)
 
     return StreamingResponse(_stream_with_fallback(_run_briefing_with_agent, ip, "copilot briefing"), media_type="text/event-stream")
