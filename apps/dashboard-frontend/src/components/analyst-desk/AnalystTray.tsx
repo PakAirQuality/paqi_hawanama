@@ -214,7 +214,7 @@ export function StationTrendPanel({
                     fontSize: '11px',
                     padding: '6px',
                   }}
-                  formatter={(value: number) => [`${value} µg/m³`, isDaily ? 'Daily avg' : 'PM2.5']}
+                  formatter={(value?: number) => [`${value} µg/m³`, isDaily ? 'Daily avg' : 'PM2.5']}
                   labelFormatter={(_label, payload) => {
                     const d = payload?.[0]?.payload?.timestamp_pk
                     if (!d) return ''
@@ -301,7 +301,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
               <XAxis dataKey="label" tick={{ fontSize: 10 }} />
               <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
               <Tooltip
-                formatter={(value: number) => [`${value} stations`, 'Count']}
+                formatter={(value?: number) => [`${value} stations`, 'Count']}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
               />
               <Bar dataKey="count" radius={[3, 3, 0, 0]}>
@@ -333,7 +333,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
                 ))}
               </Pie>
               <Tooltip
-                formatter={(value: number, name: string) => [`${value}`, name]}
+                formatter={(value?: number, name?: string) => [`${value}`, name]}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
               />
             </PieChart>
@@ -356,7 +356,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
               <XAxis type="number" tick={{ fontSize: 10 }} />
               <YAxis dataKey="city" type="category" width={70} tick={{ fontSize: 9 }} />
               <Tooltip
-                formatter={(value: number) => [`${value} µg/m³`, 'Mean PM2.5']}
+                formatter={(value?: number) => [`${value} µg/m³`, 'Mean PM2.5']}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
               />
               <Bar dataKey="mean" radius={[0, 3, 3, 0]}>
@@ -452,7 +452,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
                   <XAxis dataKey="label" tick={{ fontSize: 10 }} />
                   <YAxis allowDecimals={false} tick={{ fontSize: 10 }} />
                   <Tooltip
-                    formatter={(value: number) => [`${value} stations`, 'Count']}
+                    formatter={(value?: number) => [`${value} stations`, 'Count']}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
                   <Bar dataKey="count" radius={[3, 3, 0, 0]}>
@@ -484,7 +484,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
                     ))}
                   </Pie>
                   <Tooltip
-                    formatter={(value: number, name: string) => [`${value}`, name]}
+                    formatter={(value?: number, name?: string) => [`${value}`, name]}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
                 </PieChart>
@@ -508,7 +508,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
                   <XAxis type="number" tick={{ fontSize: 10 }} />
                   <YAxis dataKey="city" type="category" width={70} tick={{ fontSize: 9 }} />
                   <Tooltip
-                    formatter={(value: number) => [`${value} µg/m³`, 'Mean PM2.5']}
+                    formatter={(value?: number) => [`${value} µg/m³`, 'Mean PM2.5']}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}
                   />
                   <Bar dataKey="mean" radius={[0, 3, 3, 0]}>

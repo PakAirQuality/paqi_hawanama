@@ -161,7 +161,7 @@ export function reportToCsv(report: Report): string {
   const lines: string[] = []
   const m = report.meta as Record<string, unknown>
   lines.push(`# Hawanama report · generated ${new Date().toISOString()}`)
-  lines.push(`# interval ${m.start_utc} to ${m.end_utc} (UTC) = ${(m as any).start_pk ?? ''} to ${(m as any).end_pk ?? ''} (Asia/Karachi)`)
+  lines.push(`# interval ${m.start_utc} to ${m.end_utc} (UTC) = ${m.start_pk ?? ''} to ${m.end_pk ?? ''} (Asia/Karachi)`)
   lines.push(`# aggregation: ${m.aggregation}`)
   if (report.kind === 'stations') {
     lines.push(`# stations: ${report.meta.stations.map((s) => `${s.name} [${s.station_id}, ${s.provider || 'unknown provider'}]`).join('; ')}`)

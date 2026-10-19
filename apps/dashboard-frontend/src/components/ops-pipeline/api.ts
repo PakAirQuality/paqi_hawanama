@@ -187,13 +187,27 @@ export interface StationDirectoryItem {
   lon: number
 }
 
+// Station shape as /api/v1/stations returns it (field names vary by row source)
+type RawStation = {
+  id?: string
+  station_id?: string
+  name: string
+  country?: string
+  state?: string
+  city?: string
+  latitude?: number
+  longitude?: number
+  lat?: number
+  lon?: number
+}
+
 export async function fetchStationDirectory(country?: string): Promise<StationDirectoryItem[]> {
   const params = country ? `?country=${encodeURIComponent(country)}` : ''
   const res = await fetch(`${API_BASE}/api/v1/stations${params}`, { headers })
   if (!res.ok) throw new Error('Failed to load station directory')
   const data = await res.json()
   const stations = data.stations || data
-  return stations.map((s: any) => ({
+  return stations.map((s: RawStation) => ({
     station_id: s.id || s.station_id,
     name: s.name,
     country: s.country || '',

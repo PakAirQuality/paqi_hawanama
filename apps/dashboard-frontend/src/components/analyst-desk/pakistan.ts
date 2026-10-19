@@ -4,7 +4,7 @@
  */
 
 type Ring = [number, number][]
-let pakMultiPoly: Ring[][][] | null = null
+let pakMultiPoly: Ring[][] | null = null
 let loadPromise: Promise<void> | null = null
 
 export async function loadPakBoundary(): Promise<void> {

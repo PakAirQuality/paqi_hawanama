@@ -16,7 +16,7 @@ interface LayersPanelProps {
 }
 
 const LAYER_ITEMS: {
-  key: keyof Pick<LayersPanelProps, 'showStations' | 'showSatellite' | 'showFires' | 'showWind'>
+  key: keyof Pick<LayersPanelProps, 'showStations' | 'showSatellite' | 'showFires' | 'showWind' | 'showPopulation'>
   label: string
   description: string
   icon: typeof Flame

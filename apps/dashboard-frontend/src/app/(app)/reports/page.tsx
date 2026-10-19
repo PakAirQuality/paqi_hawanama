@@ -66,8 +66,8 @@ export default function ReportsPage() {
     setLoading(true); setError(null); setReport(null)
     try {
       setReport(await runReport(request))
-    } catch (e: any) {
-      setError(e?.message || 'The report request failed.')
+    } catch (e) {
+      setError((e instanceof Error && e.message) || 'The report request failed.')
     } finally {
       setLoading(false)
     }

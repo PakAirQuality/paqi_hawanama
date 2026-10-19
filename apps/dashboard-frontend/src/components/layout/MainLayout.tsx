@@ -9,7 +9,6 @@ const modules = [
   { id: 'aqi-tracker', name: 'Air Quality Tracker', href: '/' },
   { id: 'analyst-desk', name: 'Analyst Desk', href: '/analyst-desk' },
   { id: 'reports', name: 'Reports', href: '/reports' },
-  { id: 'bam', name: 'BAM Monitor', href: '/bam', group: 'Staff tools' },
 ]
 
 function cn(...classes: (string | false | undefined)[]) {
@@ -100,9 +99,6 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                     )}
                   >
                     {module.name}
-                    {'group' in module && module.group && (
-                      <span className="ml-1.5 rounded px-1 py-px text-[9px] uppercase tracking-wide bg-slate-700 text-slate-300">{module.group}</span>
-                    )}
                     {/* Active indicator - bottom border */}
                     {isActive && (
                       <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-amber-400 rounded-t-full" />

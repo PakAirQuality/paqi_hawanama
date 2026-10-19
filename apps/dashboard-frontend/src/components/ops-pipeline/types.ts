@@ -10,6 +10,7 @@ export interface StationReading {
   longitude?: number
   valid_hours?: number | null
   complete?: boolean
+  station_id?: string
 }
 
 export interface StationDailyResponse {
