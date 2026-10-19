@@ -1,0 +1,27 @@
+{
+  "displayName": "Hawanama data freshness degraded",
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "`/api/v1/health/freshness` answered non-2xx from at least two regions for 10 minutes. It returns 503 when a source is past its threshold: IQAir stations (180 min), Punjab EPA (180 min) or satellite fires (540 min since the last successful ingest-fires run). Open https://hawanama-152782825429.asia-south1.run.app/api/v1/health/freshness and read `sources[].status`, `last_run_error` and `runs`. For fires see the runbook at the top of apps/api/app/services/fires.py (key rotation, satellites)."
+  },
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "freshness check failing",
+    "conditionThreshold": {
+      "filter": "metric.type=\"monitoring.googleapis.com/uptime_check/check_passed\" AND metric.label.check_id=\"__CHECK_ID__\" AND resource.type=\"uptime_url\"",
+      "aggregations": [{
+        "alignmentPeriod": "1200s",
+        "perSeriesAligner": "ALIGN_NEXT_OLDER",
+        "crossSeriesReducer": "REDUCE_COUNT_FALSE",
+        "groupByFields": ["resource.label.*"]
+      }],
+      "comparison": "COMPARISON_GT",
+      "thresholdValue": 1,
+      "duration": "600s",
+      "trigger": { "count": 1 }
+    }
+  }],
+  "alertStrategy": { "autoClose": "86400s" },
+  "notificationChannels": ["__CHANNEL__"],
+  "enabled": true
+}

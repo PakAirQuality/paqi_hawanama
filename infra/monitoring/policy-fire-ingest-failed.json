@@ -1,0 +1,21 @@
+{
+  "displayName": "Hawanama FIRMS fire ingest failed",
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "The fire ingest (task ingest-fires on hawanama-ingest) finished with status failed. `error=invalid_key` means NASA rejected the FIRMS map key: request a new key at https://firms.modaps.eosdis.nasa.gov/api/map_key/, add it as a new version of the FIRMS_MAP_KEY secret, roll hawanama-ingest and hawanama with `--update-secrets=FIRMS_MAP_KEY=FIRMS_MAP_KEY:latest`, then run the firms-fire-ingest scheduler job. `error=all_sources_failed` means every satellite request failed (NASA outage or network); it usually recovers on the next 3-hourly run. Full runbook: apps/api/app/services/fires.py."
+  },
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "ingest-fires run failed",
+    "conditionMatchedLog": {
+      "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"hawanama-ingest\" AND textPayload:\"FIRMS ingest: status=failed\"",
+      "labelExtractors": { "error": "REGEXP_EXTRACT(textPayload, \"error=(\\\\w+)\")" }
+    }
+  }],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "10800s" },
+    "autoClose": "86400s"
+  },
+  "notificationChannels": ["__CHANNEL__"],
+  "enabled": true
+}
