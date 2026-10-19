@@ -1,3 +1,4 @@
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
 from typing import List, Optional
 
@@ -40,6 +41,19 @@ class Settings(BaseSettings):
     
     # Security
     TASKS_API_SECRET: Optional[str] = None  # Secret for protecting tasks endpoints
+
+    # Secret Manager values created with `echo` carry a trailing newline; a bearer header can
+    # never contain one, so every constant-time comparison would fail. Strip surrounding
+    # whitespace from every secret and key before use.
+    @field_validator(
+        "TASKS_API_SECRET", "PUBLIC_API_SECRET", "PARTNER_API_KEYS", "NASA_API_KEY",
+        "BAM_INGEST_TOKEN", "GEMINI_API_KEY", "IQAIR_API_KEY", "OPENAQ_API_KEY",
+        "FIRMS_MAP_KEY", "PUNJAB_EPA_API_KEY", "LANGFUSE_SECRET_KEY", "LANGFUSE_PUBLIC_KEY",
+        mode="before", check_fields=False,
+    )
+    @classmethod
+    def _strip_secret(cls, v):
+        return v.strip() if isinstance(v, str) else v
     # Cloud Scheduler calls hawanama-ingest with an OIDC token for this service account and
     # this audience; the ingest role verifies both (app/core/security.py).
     SCHEDULER_SERVICE_ACCOUNT: str = "scheduler-invoker@hawanama-2.iam.gserviceaccount.com"

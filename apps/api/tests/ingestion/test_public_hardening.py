@@ -95,3 +95,14 @@ def test_session_expires_after_max_age_even_when_active():
         assert again is not s
     finally:
         context._sessions.clear()
+
+
+def test_settings_strip_trailing_newline_from_secrets(monkeypatch):
+    """Secret Manager values created with `echo` end in a newline; headers cannot carry one."""
+    from app.core.config import Settings
+
+    monkeypatch.setenv("TASKS_API_SECRET", "abc123\n")
+    monkeypatch.setenv("FIRMS_MAP_KEY", "  key  ")
+    s = Settings(POSTGRES_SERVER="x", POSTGRES_USER="x", POSTGRES_PASSWORD="x", POSTGRES_DB="x", POSTGRES_PORT=1)
+    assert s.TASKS_API_SECRET == "abc123"
+    assert s.FIRMS_MAP_KEY == "key"
