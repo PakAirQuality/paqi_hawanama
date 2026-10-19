@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useRef, useState, useCallback } from 'react'
-import { canRenderMap } from '@/lib/webgl'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { canRenderMap, type MapErrorEvent } from '@/lib/webgl'
 import { formatPkt } from '@/lib/time'
 import { bandKey, classifyPm25, markerClass, normalizeBand, pm25Color } from '@/lib/aqi'
 import { esc } from '@/lib/html'
@@ -10,6 +10,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 import type { ForecastEntry, CurrentStation, CopilotAction, StationMention } from './types'
 import { WindParticleRenderer, type WindMetadata } from './WindParticleLayer'
 import type { FiresGeoJSON } from './api'
+import { firesShortLabel } from '@/lib/fires'
 import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 
 // the deployed build reads a token restricted to this site's own addresses
@@ -120,7 +121,6 @@ interface ForecastMapProps {
   onToggleSatellite?: () => void
   onToggleFires?: () => void
   onToggleWind?: () => void
-  showPopulation?: boolean
   onTogglePopulation?: () => void
   mapRef?: React.MutableRefObject<{ resize: () => void } | null>
 }
@@ -196,6 +196,10 @@ export function ForecastMap({
   // Ref to latest fire data for use in map load callback
   const firesRef = useRef(firesGeoJSON)
   firesRef.current = firesGeoJSON
+  const fireLabel = useMemo(() => firesShortLabel(
+    firesGeoJSON,
+    firesGeoJSON ? firesGeoJSON.features.filter(f => { const [lng, lat] = f.geometry.coordinates; return isInsidePakistan(lng, lat) }).length : 0,
+  ), [firesGeoJSON])
 
   // Keep refs to latest data to avoid stale closures in map callbacks
   const dataRef = useRef({ forecasts, currentStations, selectedHorizon, onStationClick, onDistrictClick })
@@ -233,7 +237,7 @@ export function ForecastMap({
       antialias: true,
     })
 
-    map.current.on('error', (ev: any) => {
+    map.current.on('error', (ev: MapErrorEvent) => {
       const status = ev?.error?.status ?? ev?.error?.statusCode
       if (status === 404 || status === 400 || ev?.sourceId || ev?.tile) return
       console.warn('[forecast map] error', ev?.error?.message ?? ev)
@@ -269,7 +273,7 @@ export function ForecastMap({
       // ── 3D Buildings (city-level detail) ──
       const layers = map.current.getStyle().layers || []
       const labelLayerId = layers.find(
-        (layer: any) => layer.type === 'symbol' && layer.layout?.['text-field']
+        layer => layer.type === 'symbol' && layer.layout?.['text-field']
       )?.id
 
       map.current.addLayer({
@@ -594,7 +598,7 @@ export function ForecastMap({
         if (src) {
           const filtered = {
             ...firesRef.current,
-            features: firesRef.current.features.filter((f: any) => {
+            features: firesRef.current.features.filter(f => {
               const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
               return isInsidePakistan(lng, lat)
             }),
@@ -914,9 +918,9 @@ export function ForecastMap({
   }
 
   // Update markers when data changes
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => {
     renderMarkers()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [forecasts, currentStations, selectedHorizon, onStationClick, networkFilter, showStations])
 
   // Handle copilot map actions
@@ -959,7 +963,7 @@ export function ForecastMap({
       // Filter to Pakistan only
       const filtered = {
         ...firesGeoJSON,
-        features: firesGeoJSON.features.filter((f: any) => {
+        features: firesGeoJSON.features.filter(f => {
           const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
           return isInsidePakistan(lng, lat)
         }),
@@ -1257,13 +1261,16 @@ export function ForecastMap({
         </div>
 
         {/* Fire count */}
-        {showFires && firesGeoJSON && firesGeoJSON.features.length > 0 && (
-          <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg text-[11px] font-medium text-amber-400 ring-1 ring-white/10">
+        {showFires && firesGeoJSON && (
+          <div
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg text-[11px] font-medium ring-1 ${fireLabel.warn ? 'text-amber-300 ring-amber-400/40' : 'text-amber-400 ring-white/10'}`}
+            title={firesGeoJSON.last_successful_fetch ? `Satellite fire detections · fetched ${firesGeoJSON.last_successful_fetch}` : 'Satellite fire detections'}
+          >
             <svg className="w-3.5 h-3.5 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 23c-3.6 0-8-3.2-8-9.1C4 7.4 11.3 1.3 11.6 1.1a.7.7 0 01.9 0c.2.2 7.5 6.3 7.5 12.8 0 5.9-4.4 9.1-8 9.1zm0-19.6C10 5.5 6 10.2 6 13.9 6 18.5 9.3 21 12 21s6-2.5 6-7.1c0-3.7-4-8.4-6-10.5z"/>
               <path d="M12 21c-2 0-4-1.6-4-4.6 0-2.4 3.3-5.5 3.5-5.6a.7.7 0 01.9 0c.2.1 3.6 3.2 3.6 5.6 0 3-2 4.6-4 4.6zm0-8c-1.2 1.3-2 3-2 3.4 0 2 1.2 3 2 3s2-1 2-3c0-.5-.8-2.1-2-3.4z"/>
             </svg>
-            <span>{firesGeoJSON.features.length} active</span>
+            <span>{fireLabel.text}</span>
           </div>
         )}
       </div>

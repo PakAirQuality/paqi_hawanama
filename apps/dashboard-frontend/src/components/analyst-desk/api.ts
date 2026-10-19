@@ -80,6 +80,8 @@ export interface FiresGeoJSON {
   day_basis?: 'acq_pkt' | 'acq_utc'
   sources?: FiresSource[] | null
   last_successful_fetch?: string | null
+  /** Hours since last_successful_fetch, computed by the API */
+  fetched_age_hours?: number | null
   observation_period?: { start: string; end: string } | null
   note?: string
   features: Array<{
