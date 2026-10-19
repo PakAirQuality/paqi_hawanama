@@ -2288,10 +2288,10 @@ async def get_fire_activity(
             date,
             {
                 "date_requested": date,
-                "date_used": actual_date,
+                "date_used": None,
                 "total_fires": 0,
                 "high_confidence": 0,
-                "message": "No FIRMS fire data available for this date range.",
+                "message": f"No FIRMS fire detections stored for {date} or the two days before it; say so rather than inferring fire activity.",
             },
             tool="aq_fire_activity",
             target=city or "national",
@@ -2364,6 +2364,9 @@ async def get_fire_activity(
         "high_confidence": high_conf,
         "frp_stats": frp_stats,
     }
+    if actual_date != date:
+        data["note"] = (f"No detections stored for {date}; these are the latest available, for {actual_date}. "
+                        "Tell the user which day the fire data is from.")
     if city_clusters:
         data["city_clusters"] = city_clusters
     if city and city_centroid:

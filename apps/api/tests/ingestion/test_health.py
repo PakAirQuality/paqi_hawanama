@@ -161,3 +161,54 @@ async def test_metrics_and_db_timestamps_are_z():
     r2 = await _get(app, "/api/v1/health/metrics")
     assert Z_RE.match(r1.json()["statistics"]["latest_reading"])
     assert Z_RE.match(r2.json()["data_freshness"]["latest_reading"]) and Z_RE.match(r2.json()["timestamp"])
+
+
+def _fire_runs(status, finished_min_ago, error=None):
+    now = datetime.now(timezone.utc)
+    return [{"task": "ingest-fires", "run_id": "f1", "status": status, "started_at": now - timedelta(minutes=finished_min_ago + 1),
+             "finished_at": now - timedelta(minutes=finished_min_ago), "error_class": error, "expected_count": 3,
+             "failed_count": 0 if status == "success" else 3, "rows_written": 1779,
+             "latest_observation_ts": now - timedelta(minutes=finished_min_ago + 90)}]
+
+
+async def test_freshness_fires_from_last_run(monkeypatch):
+    monkeypatch.setattr(settings, "FRESHNESS_MAX_AGE_MIN", '{"airvisual": 180, "fires": 540, "default": 360}')
+    good = _fire_runs("success", 60)
+    db = FakeDB({"FROM readings": _freshness_rows(10), "status IN": good, "ops.ingest_runs": good})
+    r = await _get(_app(db), "/api/v1/health/freshness")
+    assert r.status_code == 200, r.text
+    f = next(s for s in r.json()["sources"] if s["source"] == "fires")
+    assert f["status"] == "ok" and f["threshold_min"] == 540 and 59 <= f["age_min"] <= 61
+    assert f["task"] == "ingest-fires" and f["active_24h"] == 1779 and Z_RE.match(f["latest_ts"])
+
+    # last run failed (invalid key) even though a success exists an hour ago -> degraded, 503
+    db = FakeDB({"FROM readings": _freshness_rows(10), "status IN": good, "ops.ingest_runs": _fire_runs("failed", 5, "invalid_key")})
+    r = await _get(_app(db), "/api/v1/health/freshness")
+    f = next(s for s in r.json()["sources"] if s["source"] == "fires")
+    assert r.status_code == 503 and f["status"] == "degraded" and f["last_run_error"] == "invalid_key"
+
+    # last success too old (three missed runs) -> degraded
+    old = _fire_runs("success", 600)
+    db = FakeDB({"FROM readings": _freshness_rows(10), "status IN": old, "ops.ingest_runs": old})
+    r = await _get(_app(db), "/api/v1/health/freshness")
+    assert r.status_code == 503 and next(s for s in r.json()["sources"] if s["source"] == "fires")["status"] == "degraded"
+
+    # never ran -> degraded, with no age
+    db = FakeDB({"FROM readings": _freshness_rows(10), "status IN": [], "ops.ingest_runs": []})
+    r = await _get(_app(db), "/api/v1/health/freshness")
+    f = next(s for s in r.json()["sources"] if s["source"] == "fires")
+    assert r.status_code == 503 and f["status"] == "degraded" and f["age_min"] is None
+
+
+async def test_freshness_bam_is_informational_without_threshold(monkeypatch):
+    monkeypatch.setattr(settings, "FRESHNESS_MAX_AGE_MIN", '{"airvisual": 180, "default": 360}')
+    db = FakeDB({"FROM readings": _freshness_rows(10), "ops.ingest_runs": []})
+    r = await _get(_app(db), "/api/v1/health/freshness")
+    bam = next(s for s in r.json()["sources"] if s["source"] == "bam")
+    assert r.status_code == 200 and bam["status"] == "no_threshold" and bam["threshold_min"] is None
+
+    # a BAM reading present but old is still informational until a threshold is configured
+    rows = _freshness_rows(10) + [{"source": "bam", "scope_type": "station", "latest_ts": datetime.now(timezone.utc) - timedelta(days=3),
+                                   "latest_ingested_at": None, "active_24h": 0}]
+    r = await _get(_app(FakeDB({"FROM readings": rows, "ops.ingest_runs": []})), "/api/v1/health/freshness")
+    assert r.status_code == 200 and next(s for s in r.json()["sources"] if s["source"] == "bam")["status"] == "no_threshold"

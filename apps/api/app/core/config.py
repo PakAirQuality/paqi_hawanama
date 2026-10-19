@@ -168,7 +168,10 @@ class Settings(BaseSettings):
     INGEST_LEASE_TTL_S: int = 3300                   # must stay below the Cloud Run request timeout (3600)
     OPS_TABLES_REQUIRED: bool = True                 # quota: fail loudly if ops.* is missing; runs/leases warn and continue
     # Health: max observation age per readings.source before /health/freshness reports degraded
-    FRESHNESS_MAX_AGE_MIN: str = '{"airvisual": 180, "punjab": 180, "bam": 180, "default": 360}'
+    # "fires" is judged from the last ingest-fires run (3-hourly; 540 min = three missed runs).
+    # "bam" has no threshold while the SFL push feed is silent (shown as no_threshold); add it back
+    # here when that feed resumes.
+    FRESHNESS_MAX_AGE_MIN: str = '{"airvisual": 180, "punjab": 180, "fires": 540, "default": 360}'
     LOG_LEVEL: str = "INFO"
     
     @property
