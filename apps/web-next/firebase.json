@@ -1,6 +1,7 @@
 {
   "hosting": {
     "public": "out",
+    "trailingSlash": true,
     "ignore": [
       "firebase.json",
       "**/.*",
@@ -14,9 +15,41 @@
     ],
     "headers": [
       {
-        "source": "**/*.@(js|css|png|jpg|svg|woff2)",
+        "source": "**",
+        "headers": [
+          { "key": "X-Content-Type-Options", "value": "nosniff" },
+          { "key": "X-Frame-Options", "value": "DENY" },
+          { "key": "Referrer-Policy", "value": "strict-origin-when-cross-origin" },
+          { "key": "Permissions-Policy", "value": "geolocation=(self), camera=(), microphone=(), payment=()" },
+          { "key": "Strict-Transport-Security", "value": "max-age=31536000; includeSubDomains" },
+          {
+            "key": "Content-Security-Policy-Report-Only",
+            "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://api.mapbox.com; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://hawanama-152782825429.asia-south1.run.app https://api.mapbox.com https://events.mapbox.com https://*.tiles.mapbox.com https://tile.openstreetmap.org; worker-src 'self' blob:; child-src blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+          }
+        ]
+      },
+      {
+        "source": "/_next/static/**",
         "headers": [
           { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      },
+      {
+        "source": "**/*.@(v1.png|woff2)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=31536000, immutable" }
+        ]
+      },
+      {
+        "source": "/@(sitemap.xml|robots.txt)",
+        "headers": [
+          { "key": "Cache-Control", "value": "public, max-age=3600" }
+        ]
+      },
+      {
+        "source": "/api/**",
+        "headers": [
+          { "key": "Vary", "value": "Accept-Encoding" }
         ]
       }
     ]

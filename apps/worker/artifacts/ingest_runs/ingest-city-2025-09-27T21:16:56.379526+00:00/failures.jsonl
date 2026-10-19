@@ -1,0 +1,42 @@
+{"scope_key": "pakistan|balochistan|kharan", "city": "Kharan", "state": "Balochistan", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|balochistan|kot malik barkhurdar", "city": "Kot Malik Barkhurdar", "state": "Balochistan", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|balochistan|quetta", "city": "Quetta", "state": "Balochistan", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|gilgit-baltistan|skardu", "city": "Skardu", "state": "Gilgit-Baltistan", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|islamabad|islamabad", "city": "Islamabad", "state": "Islamabad", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|khyber pakhtunkhwa|abbottabad", "city": "Abbottabad", "state": "Khyber Pakhtunkhwa", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|khyber pakhtunkhwa|haripur", "city": "Haripur", "state": "Khyber Pakhtunkhwa", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|khyber pakhtunkhwa|malam jabba", "city": "Malam Jabba", "state": "Khyber Pakhtunkhwa", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|khyber pakhtunkhwa|peshawar", "city": "Peshawar", "state": "Khyber Pakhtunkhwa", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|bahawalpur", "city": "Bahawalpur", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|bhopalwala", "city": "Bhopalwala", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|chak jhumra", "city": "Chak Jhumra", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|daska kalan", "city": "Daska Kalan", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|eminabad", "city": "Eminabad", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|faisalabad", "city": "Faisalabad", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|gujranwala", "city": "Gujranwala", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|hundal", "city": "Hundal", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|jhang", "city": "Jhang", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|jhelum", "city": "Jhelum", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|kahna nau", "city": "Kahna Nau", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|kotli loharan", "city": "Kotli Loharan", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|ladhewala waraich", "city": "Ladhewala Waraich", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|lahore", "city": "Lahore", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|lodhran", "city": "Lodhran", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|mandi bahauddin", "city": "Mandi Bahauddin", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|multan", "city": "Multan", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|murree", "city": "Murree", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|pasrur", "city": "Pasrur", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|pattoki", "city": "Pattoki", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|qadirpur ran", "city": "Qadirpur Ran", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|rahim yar khan", "city": "Rahim Yar Khan", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|raiwind", "city": "Raiwind", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|rawalpindi", "city": "Rawalpindi", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|rojhan", "city": "Rojhan", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|sheikhupura", "city": "Sheikhupura", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|punjab|sialkot", "city": "Sialkot", "state": "Punjab", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|sindh|hyderabad", "city": "Hyderabad", "state": "Sindh", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|sindh|karachi", "city": "Karachi", "state": "Sindh", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|sindh|khairpur mir's", "city": "Khairpur Mir's", "state": "Sindh", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|sindh|malir cantonment", "city": "Malir Cantonment", "state": "Sindh", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|sindh|mirpur khas", "city": "Mirpur Khas", "state": "Sindh", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}
+{"scope_key": "pakistan|sindh|sukkur", "city": "Sukkur", "state": "Sindh", "country": "Pakistan", "error": "ConnectionError: Error 61 connecting to localhost:6380. Connection refused."}

@@ -1,111 +1,214 @@
-from fastapi import APIRouter, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import text
-from app.core.database import get_database
-from datetime import datetime
-from typing import Dict, Any
-import psutil
-import os
+"""
+Health endpoints.
 
+  GET /health/            liveness: process is up (no database dependency)
+  GET /health/ready       readiness: database answers SELECT 1
+  GET /health/freshness   data freshness per readings.source, last run per task;
+                          503 when any configured source is older than its threshold
+  GET /health/db, /health/metrics   detailed statistics (unchanged semantics)
+
+The old single endpoint only reported `degraded` when the database query itself
+failed; a database that answered but had received no readings for a day was
+still "ok".
+"""
+
+import json
+import logging
+import os
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
+
+import psutil
+from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.config import settings
+from app.core.database import get_database
+from app.ingestion.provenance import describe as describe_provenance
+from app.utils.timefmt import iso_z
+
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
+
+_iso = iso_z   # RFC 3339 with a Z suffix (shared helper)
+
+
+def _thresholds() -> Dict[str, int]:
+    try:
+        raw = json.loads(settings.FRESHNESS_MAX_AGE_MIN or "{}")
+        out = {str(k): int(v) for k, v in raw.items()}
+    except Exception as exc:
+        logger.warning("FRESHNESS_MAX_AGE_MIN is not valid JSON (%s); using default 360", exc)
+        out = {}
+    out.setdefault("default", 360)
+    return out
+
+
 @router.get("/")
-async def health_check(db: AsyncSession = Depends(get_database)) -> Dict[str, Any]:
-    """Comprehensive health check for the API"""
-    health_data = {
+async def health_check() -> Dict[str, Any]:
+    """Liveness. Deliberately has no database dependency."""
+    health_data: Dict[str, Any] = {
         "status": "ok",
         "service": "hawanama-api",
         "version": "1.0.0",
-        "timestamp": datetime.utcnow().isoformat() + "Z",
-        "environment": os.getenv("ENVIRONMENT", "development")
+        "timestamp": _iso(datetime.now(timezone.utc)),
+        "environment": os.getenv("ENVIRONMENT", "development"),
+        "provenance": describe_provenance(),
     }
-    
-    # Database health check
-    try:
-        result = await db.execute(text("SELECT 1"))
-        
-        # Check data freshness using new schema
-        freshness_query = text("""
-            SELECT 
-                (SELECT COUNT(*) FROM stations) as total_stations,
-                COUNT(DISTINCT scope_key) as active_stations_24h,
-                MAX(ts_utc) as latest_reading,
-                AVG(pm25) as avg_pm25
-            FROM readings 
-            WHERE ts_utc >= NOW() - INTERVAL '24 hours'
-                AND scope_type = 'station'
-        """)
-        
-        freshness_result = await db.execute(freshness_query)
-        stats = dict(freshness_result.fetchone()._mapping)
-        
-        health_data["database"] = {
-            "status": "connected",
-            "latest_reading": stats["latest_reading"].isoformat() + "Z" if stats["latest_reading"] else None,
-            "active_stations_24h": stats["active_stations_24h"],
-            "avg_pm25_24h": float(stats["avg_pm25"]) if stats["avg_pm25"] else None
-        }
-        
-    except Exception as e:
-        health_data["status"] = "degraded"
-        health_data["database"] = {
-            "status": "error",
-            "error": str(e)
-        }
-    
-    # System metrics
     try:
         health_data["system"] = {
-            "cpu_percent": psutil.cpu_percent(interval=1),
+            # interval=None returns immediately (interval=1 slept a full second per probe)
+            "cpu_percent": psutil.cpu_percent(interval=None),
             "memory_percent": psutil.virtual_memory().percent,
-            "disk_percent": psutil.disk_usage('/').percent
+            "disk_percent": psutil.disk_usage("/").percent,
         }
     except Exception:
-        # If psutil is not available, skip system metrics
         pass
-    
     return health_data
+
+
+@router.get("/ready")
+async def readiness(db: AsyncSession = Depends(get_database)):
+    """Readiness: the database answers."""
+    try:
+        await db.execute(text("SELECT 1"))
+        return {"status": "ready", "timestamp": _iso(datetime.now(timezone.utc))}
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"status": "not_ready", "error": str(exc)[:300],
+                                                      "timestamp": _iso(datetime.now(timezone.utc))})
+
+
+FRESHNESS_SQL = text("""
+    SELECT source,
+           scope_type::text AS scope_type,
+           MAX(ts_utc)      AS latest_ts,
+           MAX(ingested_at) AS latest_ingested_at,
+           COUNT(DISTINCT scope_key) FILTER (WHERE ts_utc >= now() - interval '24 hours') AS active_24h
+    FROM readings
+    WHERE ts_utc >= now() - interval '7 days'
+    GROUP BY source, scope_type
+""")
+
+LAST_RUNS_SQL = text("""
+    SELECT DISTINCT ON (task)
+           task, run_id, status, started_at, finished_at, error_class,
+           expected_count, failed_count, rows_written, latest_observation_ts
+    FROM ops.ingest_runs
+    ORDER BY task, started_at DESC
+""")
+
+
+@router.get("/freshness")
+async def freshness(db: AsyncSession = Depends(get_database)):
+    """
+    Observation age per readings.source/scope_type against FRESHNESS_MAX_AGE_MIN
+    (JSON: {"airvisual": 180, ..., "default": 360}). Sources named in the
+    thresholds but absent from the last 7 days are reported degraded too.
+    Returns 503 when degraded so uptime checks can alert on stale data.
+    """
+    now = datetime.now(timezone.utc)
+    thresholds = _thresholds()
+    try:
+        rows = (await db.execute(FRESHNESS_SQL)).fetchall()
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"status": "degraded", "error": f"readings query failed: {str(exc)[:300]}",
+                                                      "timestamp": _iso(now)})
+
+    sources: List[Dict[str, Any]] = []
+    seen = set()
+    for r in rows:
+        m = dict(r._mapping)
+        source = m["source"] or "unknown"
+        seen.add(source)
+        latest = m["latest_ts"]
+        if latest is not None and latest.tzinfo is None:
+            latest = latest.replace(tzinfo=timezone.utc)
+        age_min = int((now - latest).total_seconds() // 60) if latest else None
+        limit = thresholds.get(source, thresholds["default"])
+        sources.append({
+            "source": source, "scope_type": m["scope_type"],
+            "latest_ts": _iso(latest), "latest_ingested_at": _iso(m["latest_ingested_at"]),
+            "active_24h": int(m["active_24h"] or 0),
+            "age_min": age_min, "threshold_min": limit,
+            "status": "ok" if (age_min is not None and age_min <= limit) else "degraded",
+        })
+    for source, limit in thresholds.items():
+        if source != "default" and source not in seen:
+            sources.append({"source": source, "scope_type": None, "latest_ts": None, "latest_ingested_at": None,
+                            "active_24h": 0, "age_min": None, "threshold_min": limit, "status": "degraded"})
+
+    runs: List[Dict[str, Any]] = []
+    runs_error: Optional[str] = None
+    try:
+        for r in (await db.execute(LAST_RUNS_SQL)).fetchall():
+            m = dict(r._mapping)
+            started = m["started_at"]
+            if started is not None and started.tzinfo is None:
+                started = started.replace(tzinfo=timezone.utc)
+            stale_running = (m["status"] == "running" and started is not None and
+                             (now - started).total_seconds() > int(settings.INGEST_LEASE_TTL_S))
+            runs.append({
+                "task": m["task"], "run_id": m["run_id"],
+                "status": "stale_running" if stale_running else m["status"],
+                "started_at": _iso(started), "finished_at": _iso(m["finished_at"]),
+                "error_class": m["error_class"], "expected": m["expected_count"], "failed": m["failed_count"],
+                "rows_written": m["rows_written"], "latest_observation_ts": _iso(m["latest_observation_ts"]),
+            })
+    except Exception as exc:
+        # ops.ingest_runs may not exist yet (migration 001 not applied); not a freshness failure.
+        runs_error = str(exc)[:200]
+
+    degraded = any(s["status"] == "degraded" for s in sources)
+    body = {
+        "status": "degraded" if degraded else "ok",
+        "timestamp": _iso(now),
+        "sources": sources,
+        "runs": runs,
+        "runs_error": runs_error,
+        "thresholds_min": thresholds,
+    }
+    return JSONResponse(status_code=503 if degraded else 200, content=body)
+
 
 @router.get("/db")
 async def health_check_db(db: AsyncSession = Depends(get_database)):
     """Detailed database health check"""
     try:
-        # Basic connection test
         await db.execute(text("SELECT 1"))
-        
-        # Database statistics using new schema
         stats_query = text("""
-            SELECT 
+            SELECT
                 (SELECT COUNT(*) FROM stations) as total_stations,
                 (SELECT COUNT(*) FROM readings WHERE ts_utc >= NOW() - INTERVAL '1 hour') as readings_last_hour,
                 (SELECT COUNT(*) FROM readings WHERE ts_utc >= NOW() - INTERVAL '24 hours') as readings_last_24h,
                 (SELECT MAX(ts_utc) FROM readings) as latest_reading,
                 (SELECT pg_size_pretty(pg_database_size(current_database()))) as database_size
         """)
-        
         result = await db.execute(stats_query)
         stats = dict(result.fetchone()._mapping)
-        
         return {
-            "status": "ok", 
+            "status": "ok",
             "database": "connected",
             "statistics": {
                 "total_stations": stats["total_stations"],
                 "readings_last_hour": stats["readings_last_hour"],
                 "readings_last_24h": stats["readings_last_24h"],
-                "latest_reading": stats["latest_reading"].isoformat() + "Z" if stats["latest_reading"] else None,
-                "database_size": stats["database_size"]
-            }
+                "latest_reading": _iso(stats["latest_reading"]),
+                "database_size": stats["database_size"],
+            },
         }
     except Exception as e:
         return {"status": "error", "database": str(e)}
+
 
 @router.get("/metrics")
 async def get_metrics(db: AsyncSession = Depends(get_database)) -> Dict[str, Any]:
     """Get detailed API metrics"""
     try:
         metrics_query = text("""
-            SELECT 
+            SELECT
                 (SELECT COUNT(*) FROM stations) as total_stations,
                 COUNT(DISTINCT CASE WHEN r.ts_utc >= NOW() - INTERVAL '1 hour' THEN r.scope_key END) as active_stations_1h,
                 COUNT(DISTINCT CASE WHEN r.ts_utc >= NOW() - INTERVAL '24 hours' THEN r.scope_key END) as active_stations_24h,
@@ -117,29 +220,21 @@ async def get_metrics(db: AsyncSession = Depends(get_database)) -> Dict[str, Any
             FROM readings r
             WHERE r.scope_type = 'station'
         """)
-        
         result = await db.execute(metrics_query)
         metrics = dict(result.fetchone()._mapping)
-        
         return {
-            "timestamp": datetime.utcnow().isoformat() + "Z",
+            "timestamp": _iso(datetime.now(timezone.utc)),
             "stations": {
                 "total": metrics["total_stations"],
                 "active_1h": metrics["active_stations_1h"],
-                "active_24h": metrics["active_stations_24h"]
+                "active_24h": metrics["active_stations_24h"],
             },
-            "readings": {
-                "last_1h": metrics["readings_1h"],
-                "last_24h": metrics["readings_24h"]
-            },
+            "readings": {"last_1h": metrics["readings_1h"], "last_24h": metrics["readings_24h"]},
             "air_quality": {
                 "avg_pm25_24h": float(metrics["avg_pm25_24h"]) if metrics["avg_pm25_24h"] else None,
-                "avg_aqi_24h": float(metrics["avg_aqi_24h"]) if metrics["avg_aqi_24h"] else None
+                "avg_aqi_24h": float(metrics["avg_aqi_24h"]) if metrics["avg_aqi_24h"] else None,
             },
-            "data_freshness": {
-                "latest_reading": metrics["latest_reading"].isoformat() + "Z" if metrics["latest_reading"] else None
-            }
+            "data_freshness": {"latest_reading": _iso(metrics["latest_reading"])},
         }
-        
     except Exception as e:
-        return {"error": str(e), "timestamp": datetime.utcnow().isoformat() + "Z"}
+        return {"error": str(e), "timestamp": _iso(datetime.now(timezone.utc))}

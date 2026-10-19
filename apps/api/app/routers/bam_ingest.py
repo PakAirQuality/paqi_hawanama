@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from typing import Deque, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+
+from app.core.ratelimit import client_ip
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,6 +27,7 @@ from app.services.ingestion.bam_service import (
     ensure_bam_provider,
     evaluate_bam_qc,
     pm25_to_aqi_us,
+    bam_aqi_provenance,
     upsert_bam_reading,
     upsert_bam_station,
     wind_dir_to_deg,
@@ -132,10 +135,15 @@ def _ts_from_event_id(event_id: Optional[str]) -> Optional[datetime]:
 
 
 def _client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    # Rightmost X-Forwarded-For hop: the address Google's front end connected from.
+    # The leftmost entry is whatever the client wrote and must not drive an allow-list.
+    return client_ip(request)
+
+
+def _prune_request_log(now: float) -> None:
+    """Drop idle keys so rotating source addresses cannot grow the table forever."""
+    for ip in [k for k, dq in _REQUEST_LOG.items() if not dq or now - dq[-1] > 60]:
+        del _REQUEST_LOG[ip]
 
 
 async def enforce_bam_ip_allowlist(request: Request) -> None:
@@ -153,6 +161,8 @@ async def bam_rate_limit(request: Request) -> None:
     if not limit or limit <= 0:
         return
     now = time.time()
+    if len(_REQUEST_LOG) > 1000:
+        _prune_request_log(now)
     ip = _client_ip(request)
     log = _REQUEST_LOG[ip]
     while log and now - log[0] > 60:
@@ -244,6 +254,7 @@ async def ingest_bam_reading(
                 "wind_dir": d.wind_dir,
                 "pressure_raw": d.pressure,
                 "qc": {"state": qc_state, "flags": qc_flags, "detail": qc_detail},
+                "prov": {"aqi": bam_aqi_provenance(d.pm25)},
                 "v": "bam_push_v2",
             },
         )

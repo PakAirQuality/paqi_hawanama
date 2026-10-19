@@ -4,9 +4,11 @@ import { useRef, useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
-import { API_BASE, API_TOKEN } from './api'
+import { API_BASE } from './api'
 import type { FeatureInfo } from './types'
 
+// the deployed build reads a token restricted to this site's own addresses
+// (.env.production.local); the literal is the development fallback
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
 const STYLE_URL = 'mapbox://styles/rehan0900/cmmh9p69z009m01qu0nnn3iwu'
@@ -44,10 +46,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
       attributionControl: false,
       transformRequest: (url: string) => {
         if (url.includes('/ops/pipeline/tiles/')) {
-          return {
-            url,
-            headers: { Authorization: `Bearer ${API_TOKEN}` }
-          }
+          return { url }
         }
         return { url }
       }
@@ -282,8 +281,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
         // Fetch feature value
         try {
           const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/features/${feature.name}/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}`,
-            { headers: { Authorization: `Bearer ${API_TOKEN}` } }
+            `${API_BASE}/api/v1/ops/pipeline/tiles/features/${feature.name}/${selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}`
           )
           if (res.ok) {
             const data = await res.json()

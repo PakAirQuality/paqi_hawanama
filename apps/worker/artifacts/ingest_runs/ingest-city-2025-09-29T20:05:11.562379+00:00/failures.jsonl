@@ -1,0 +1,4 @@
+{"scope_key": "pakistan|khyber pakhtunkhwa|dera ismail khan", "city": "Dera Ismail Khan", "state": "Khyber Pakhtunkhwa", "country": "Pakistan", "error": "CityNotFound: city_not_found"}
+{"scope_key": "pakistan|punjab|bhopalwala", "city": "Bhopalwala", "state": "Punjab", "country": "Pakistan", "error": "CityNotFound: city_not_found"}
+{"scope_key": "pakistan|punjab|murree", "city": "Murree", "state": "Punjab", "country": "Pakistan", "error": "CityNotFound: city_not_found"}
+{"scope_key": "pakistan|punjab|qadirpur ran", "city": "Qadirpur Ran", "state": "Punjab", "country": "Pakistan", "error": "CityNotFound: city_not_found"}

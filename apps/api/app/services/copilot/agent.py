@@ -48,12 +48,46 @@ from the monitoring network — these show real current conditions, not predicti
 | "Show satellite image" / "Sentinel imagery" | `aq_satellite_image` (pass lat/lon, optional date range and cloud threshold) |
 | "How many people are exposed?" / "Population at risk?" | `aq_exposed_population` (city_name or lat/lon, returns pop by risk band) |
 | "Give me the impact brief" / "Full city assessment" | `aq_impact_brief` (city_name — combines hazard, exposure, assets, sources) |
+| "What happened on Dec 21?" / past-date AQ question | `aq_historical_snapshot` (date required) |
+| "How many fires on Jan 6?" / fire activity on date | `aq_fire_activity` (date required) |
+| "Where did the air come from?" / trajectory / transport | `aq_trajectory` (city required) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
 For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
 The station remains focused until the user mentions a different station or changes topic.
 
 One tool call usually suffices.
+
+## Date routing
+- No date / "today" / "current" → existing tools with no date param (uses latest data)
+- "yesterday" = current_date - 1; "last week" = current_date - 7
+- Specific past date → pass `date=YYYY-MM-DD` to the right tool:
+  - "Who was worst on Dec 15?" → `aq_hotspots_daily(date="2025-12-15", country="Pakistan")`
+  - "What was Lahore like on Dec 15?" → `aq_city_detail(city_name="Lahore", date="2025-12-15")`
+  - "Why was it bad on Dec 15?" → `aq_explain_drivers(city_or_station="...", date="2025-12-15")`
+  - "Incidents on Dec 15?" → `aq_incident_summary(date="2025-12-15")`
+  - "National picture on Dec 15?" → `aq_historical_snapshot(date="2025-12-15")` (broad overview + 7-day context)
+  - "Fires on Dec 15?" → `aq_fire_activity(date="2025-12-15")`
+  - "Compare Dec 15 to Dec 22?" → `aq_compare_dates(date1="2025-12-15", date2="2025-12-22")`
+  - "Station trend on Dec 15?" → `aq_station_history(date="2025-12-15", hours=24)` (after focus)
+  - "Where did Lahore air come from on Jan 6?" → `aq_trajectory(city="Lahore", date="2025-01-06")`
+- ALL major tools accept a `date` parameter and query the observation archive for that day.
+- `aq_historical_snapshot` is best for broad national overviews with 7-day context. \
+For ranked hotspots, city station detail, or driver attribution on a past date, use those \
+specific tools directly with `date=...`.
+- When a user establishes a historical date ("let's look at December 15"), the session stores \
+it and all subsequent tool calls should pass that same date unless the user explicitly changes it.
+- GCS forecast/watchlist/driver files may not exist for old dates; tools gracefully fall back \
+to DB observations in that case.
+
+## Historical reasoning
+- `aq_historical_snapshot` queries the multi-year observation archive (readings table), \
+NOT forecasts. It returns actual measured PM2.5 values.
+- `aq_fire_activity` uses archived VIIRS satellite fire detections from FIRMS (2020+). \
+These are real satellite observations, not predictions.
+- `aq_trajectory` returns back-trajectory analysis. If status is "wind_estimated", \
+clearly caveat that this is a surface wind estimate, not a full HYSPLIT trajectory. \
+If status is "ok", this is a real HYSPLIT 72h back-trajectory.
 
 ## Critical: data coverage and availability
 - The monitoring database has **multi-year historical data** — do NOT assume any retention limit.
@@ -77,8 +111,13 @@ if action_hint is `{{ACTION:{"type":"zoom_to_city","city":"Lahore"}}}` then writ
 string on its own line.
 - End your response with 2-3 suggested follow-up questions drawn from the `followups` field.
 
-## Risk bands (PM2.5 µg/m³)
-good: 0–35 · moderate: 35–75 · unhealthy: 75–150 · very_unhealthy: 150–250 · severe: >250
+## Health bands (US EPA 2024 PM2.5 categories; every `band`/`risk_band` field uses these keys)
+good: 0–9.0 µg/m³ (AQI 0–50) · moderate: 9.1–35.4 (51–100) · unhealthy_sensitive: 35.5–55.4 \
+(101–150, "Unhealthy for Sensitive Groups") · unhealthy: 55.5–125.4 (151–200) · \
+very_unhealthy: 125.5–225.4 (201–300) · hazardous: >225.4 (301+). Always say "PM2.5 µg/m³" \
+when quoting a concentration and name the category with its EPA label. Means over stations are \
+"reporting-station means" (unweighted across the stations that reported), never a national \
+area or population average.
 
 ## Forecast accuracy
 MAE, RMSE, Bias (positive = over-prediction), R² (1.0 = perfect), F1@150. \
@@ -205,15 +244,29 @@ def get_agent(model_name: str | None = None):
     async def inject_session_context(ctx: RunContext[CopilotSession]) -> str:
         s = ctx.deps
         dt = s.current_date or "unknown"
+        model_label = "Enhanced (support_aware)" if s.model == "support_aware" else "Satellite backbone"
         lines = [
             f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'.",
+            f"The user is viewing the {model_label} PM2.5 model, pollutant {s.pollutant} in µg/m³, "
+            f"times in {s.tz}. When you quote model values or bias, say which model they are for; "
+            f"'the map' means this model.",
         ]
-        if s.focused_city or s.last_entities or s.focused_station_id:
+        if s.active_layers:
+            lines.append(f"Evidence layers currently shown on the map: {', '.join(s.active_layers)}.")
+        if s.focused_station_name:
+            lines.append(f"Selected station on the map: {s.focused_station_name} (station_id={s.focused_station_id}).")
+        if s.focused_city or s.last_entities or s.focused_station_id or s.active_historical_date:
             lines.append("")
             lines.append("Session context:")
             lines.append(f"- Focus: {s.focus_type} — {s.focused_city or 'national'}")
             if s.focused_station_id:
                 lines.append(f"- Currently focused station: station_id={s.focused_station_id}")
+            if s.active_historical_date:
+                lines.append(
+                    f"- Active historical date: {s.active_historical_date} — pass this as the "
+                    f"`date` argument to all tool calls unless the user explicitly changes the date "
+                    f"or asks about current conditions."
+                )
             if s.comparison_date:
                 lines.append(f"- Last comparison date: {s.comparison_date}")
             if s.last_entities:
@@ -248,6 +301,9 @@ def get_agent(model_name: str | None = None):
     agent.tool(tools.aq_satellite_image)
     agent.tool(tools.aq_exposed_population)
     agent.tool(tools.aq_impact_brief)
+    agent.tool(tools.aq_historical_snapshot)
+    agent.tool(tools.aq_fire_activity)
+    agent.tool(tools.aq_trajectory)
 
     # ── Langfuse tracing via OTEL (opt-in via env var) ──
     if os.getenv("LANGFUSE_SECRET_KEY"):

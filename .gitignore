@@ -44,8 +44,11 @@ node_modules/
 .env.local
 .env
 
-# Database schema (contains credentials in dump)
-db_schema/
+# Database schema dump (contains credentials) — but keep reviewed migrations and one-off SQL
+db_schema/*
+!db_schema/migrations/
+!db_schema/oneoff/
+!db_schema/station_metadata.md
 
 # Editor config
 .vscode/
@@ -58,19 +61,40 @@ prod_db_explorer/
 exports/
 external_data/
 
-# Provider station manifests and raw API responses — regenerated at runtime, never committed
-# (contain per-station coordinates and owner-supplied names; see DATA.md)
+# Research report (local only)
+report/
+
+# Dashboard video capture artifacts (contains auth cookies)
+video-output/
+
+# Local data dumps from the OpenAQ export
+openaq_readings*.csv
+openaq_stations*.csv
+
+# IQAir device API export — contains live un-authenticated device API tokens; never commit
+iqair_device_apis.csv
+
+# GB station data exports (DB + IQAir dashboard pulls) — local data dumps, don't commit
+gb_stations_*.csv
+
+# Local data dumps for comparison plots (CSVs only — plots PNGs are kept)
+data/
+
+# local verification runs (scripts/verify_iqair_match.py)
+verify/
+
+# Large local data extracts (GitHub rejects >100 MB; keep out of history)
+2021_2025_readings.csv
+
+# Kept from the public release: local-only tooling and artifacts
+.claude/
+CLAUDE.md
+* 2.*
+**/city_manifests/
+**/station_manifests/
 apps/*/artifacts/
 apps/*/tasks/artifacts/
-**/station_manifests/
-**/city_manifests/
-apps/worker/tasks/raw_api_data/
 apps/worker/tasks/city_raw_api_data/
-# Internal notes / debug dumps
-CLAUDE.md
-.claude/
+apps/worker/tasks/raw_api_data/
 debug-gap.txt
-# macOS duplicate artefacts
-* 2.*
-# Partner monitor host lists (kept out of the public tree)
 external_data/

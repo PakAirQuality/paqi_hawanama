@@ -41,6 +41,27 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# Public, unauthenticated routes: every analysis window is bounded so one request cannot
+# ask the database to gap-fill years of 5-minute buckets.
+_UPTIME_MAX_DAYS = {"5m": 31, "1h": 400, "1d": 1830}
+
+
+def _bounded_window(from_: Optional[datetime], to: Optional[datetime], max_days: int) -> tuple[datetime, datetime]:
+    """Default to the last ``max_days`` ending now; reject inverted or oversized windows."""
+    if to is None:
+        to = datetime.now(timezone.utc)
+    elif to.tzinfo is None:
+        to = to.replace(tzinfo=timezone.utc)
+    if from_ is None:
+        from_ = to - timedelta(days=min(365, max_days))
+    elif from_.tzinfo is None:
+        from_ = from_.replace(tzinfo=timezone.utc)
+    if from_ >= to:
+        raise HTTPException(status_code=400, detail="'from' must be before 'to'")
+    if to - from_ > timedelta(days=max_days):
+        raise HTTPException(status_code=400, detail=f"Window too large; at most {max_days} days for this query")
+    return from_, to
+
 # WHO/Local thresholds (µg/m³)
 WHO_24H_PM25 = 15.0
 LOCAL_24H_PM25 = 35.0
@@ -317,11 +338,7 @@ async def get_station_overview(
         if station is None:
             raise HTTPException(status_code=404, detail="Station not found")
 
-        # Default window: last 365 days
-        if to is None:
-            to = datetime.now(timezone.utc)
-        if from_ is None:
-            from_ = to - timedelta(days=365)
+        from_, to = _bounded_window(from_, to, max_days=400)
 
         data_availability = await compute_data_availability(db, station_id, from_, to)
         pollutant_summary = await compute_pollutant_summary(db, station_id, to, pollutant)
@@ -605,11 +622,8 @@ async def get_station_uptime(
         if station is None:
             raise HTTPException(status_code=404, detail="Station not found")
 
-        # Default window: last 365 days
-        if to is None:
-            to = datetime.now(timezone.utc)
-        if from_ is None:
-            from_ = to - timedelta(days=365)
+        # Gap-filled buckets are materialised, so the window scales with the bucket size.
+        from_, to = _bounded_window(from_, to, max_days=_UPTIME_MAX_DAYS[bucket])
 
         return await compute_station_uptime(db, station_id, bucket, from_, to)
         
@@ -872,11 +886,7 @@ async def get_station_diurnal(
         if station is None:
             raise HTTPException(status_code=404, detail="Station not found")
 
-        # Default window: last 365 days
-        if to is None:
-            to = datetime.now(timezone.utc)
-        if from_ is None:
-            from_ = to - timedelta(days=365)
+        from_, to = _bounded_window(from_, to, max_days=400)
 
         tz = await get_station_timezone(db, station_id)
 

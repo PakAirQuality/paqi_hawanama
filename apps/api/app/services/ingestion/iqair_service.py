@@ -1,152 +1,224 @@
-import httpx
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
-from typing import Dict, List, Optional, Any, Tuple
+"""
+IQAir (AirVisual) API client — https://api-docs.iqair.com/
 
-# Dual-path imports for API container compatibility
-try:
-    from app.core.config import settings
-except ImportError:  # running in pure worker repo layout
-    from config.settings import settings
-import json
-import time
+Transport rules:
+  * HTTPS, one shared httpx client per event loop, explicit timeouts
+  * never logs response bodies or the API key (see app.ingestion.http)
+  * errors are typed: TransientError (5xx, network, timeout) is retried with
+    bounded jittered backoff; RateLimited honours Retry-After; Unauthorized
+    (401/403) is persistent and never retried
+  * every attempt (including retries) is paced locally and, when a quota
+    service is attached, reserved against the shared per-credential budget
+"""
+
 import asyncio
-from datetime import datetime, timezone
+import json
 import logging
+import time
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Any, Dict, List, Optional
 
-# Import cache abstraction with dual-path support
-try:
-    from app.services.ingestion.cache import cache
-except ImportError:  # running in pure worker repo layout
-    from services.cache import cache
+import httpx
+from tenacity import AsyncRetrying, retry_if_exception_type, stop_after_attempt, wait_random_exponential
+
+from app.core.config import settings as _settings
+from app.ingestion.http import default_timeout, get_shared_async_client, parse_retry_after, redact_url, register_secret
+from app.ingestion.quota import QuotaExhausted, default_quota
+from app.ingestion.ratelimit import LocalPacer
+
+_UNSET = object()
 
 logger = logging.getLogger(__name__)
 
-# === NEW: typed exceptions =====================================================
-class IQAirError(RuntimeError): pass
+
+# === typed exceptions =========================================================
+class IQAirError(RuntimeError):
+    retryable = False
+
+
+class TransientError(IQAirError):
+    """5xx, network or timeout: safe to retry."""
+    retryable = True
+
+
+class RateLimited(TransientError):
+    def __init__(self, msg: str = "rate_limited", retry_after_s: Optional[float] = None):
+        super().__init__(msg)
+        self.retry_after_s = retry_after_s
+
+
+class Unauthorized(IQAirError):
+    """401/403: the credential is bad for every request; never retried."""
+
+
 class BadRequest(IQAirError): pass
-class Unauthorized(IQAirError): pass
-class RateLimited(IQAirError): pass
 class StationNotFound(IQAirError): pass
 class CityNotFound(IQAirError): pass
 class StateNotFound(IQAirError): pass
 class FeatureNotAvailable(IQAirError): pass
 # ==============================================================================
 
+
+@dataclass
+class FetchEnvelope:
+    """A successful response plus the facts the raw archive and provenance need."""
+    data: Any
+    http_status: int
+    fetched_at: datetime
+    endpoint: str
+    params_redacted: Dict[str, Any] = field(default_factory=dict)
+    elapsed_ms: int = 0
+    attempts: int = 1
+
+
 class IQAirClient:
     """
     IQAir API client based on official documentation:
     https://api-docs.iqair.com/
+
+    `IQAirClient()` with no arguments keeps working for the read-path services.
+    Ingestion passes `quota=` so requests count against the shared budget.
     """
-    
-    def __init__(self):
-        self.base_url = "http://api.airvisual.com/v2"  # Official IQAir API URL
-        self.api_key = settings.IQAIR_API_KEY
-        self.cache = cache
-        self.rate_limit_key = "iqair:rate_limit"
 
-        # === CHANGES: make pacing configurable by calls/min ====================
-        self.max_calls_per_min = int(getattr(settings, "IQAIR_MAX_CALLS_PER_MIN", 90))
-        self.max_concurrency   = int(getattr(settings, "IQAIR_CONCURRENCY", 6))
-        self._rate_limiter = asyncio.Semaphore(self.max_concurrency)
-        self._last_request_time = 0.0
-        self._min_interval = max(0.001, 60.0 / float(self.max_calls_per_min))
-        # ======================================================================
-
+    def __init__(self, *, settings=None, http: Optional[httpx.AsyncClient] = None,
+                 quota=_UNSET, pacer: Optional[LocalPacer] = None, retry_sleep=None):
+        s = settings or _settings
+        self.settings = s
+        self.base_url = s.IQAIR_BASE_URL.rstrip("/")
+        self.api_key = s.IQAIR_API_KEY
         if not self.api_key:
             raise ValueError("IQAIR_API_KEY is required")
-    
-    def _check_rate_limit(self) -> bool:
-        """
-        Distributed minute bucket with cache (Redis/null).
-        Hard limit (default 90/min). If exceeded, caller should treat as RateLimited.
-        """
-        current_time = int(time.time())
-        minute_key = f"{self.rate_limit_key}:{current_time // 60}"
-        
-        current_count = self.cache.get(minute_key)
-        current_count = int(current_count) if current_count else 0
-        
-        if current_count >= self.max_calls_per_min:
-            logger.warning(f"Rate limit exceeded: {current_count} calls this minute")
-            return False
-        
-        # Increment counter with cache abstraction
-        new_count = current_count + 1
-        self.cache.setex(minute_key, 60, str(new_count))
-        
-        return True
-    
-    async def _global_rate_limit(self):
-        """Smooth per-request spacing to keep average under max_calls_per_min."""
-        async with self._rate_limiter:
-            now = time.time()
-            delta = now - self._last_request_time
-            if delta < self._min_interval:
-                await asyncio.sleep(self._min_interval - delta)
-            self._last_request_time = time.time()
+        register_secret(self.api_key)
 
-    # === CHANGES: retry only on transient/network issues =======================
-    @retry(
-        reraise=True,
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=5),
-        retry=retry_if_exception_type((RateLimited, httpx.RequestError, httpx.TimeoutException))
-    )
+        self.max_calls_per_min = int(s.IQAIR_MAX_CALLS_PER_MIN)
+        self.max_concurrency = int(s.IQAIR_CONCURRENCY)
+        self.credential_alias = s.IQAIR_CREDENTIAL_ALIAS
+
+        self._http = http
+        self._pacer = pacer or LocalPacer(self.max_calls_per_min, self.max_concurrency)
+        # Read-path services construct IQAirClient() with no quota: meter them best-effort
+        # (required=False) so the shared budget counts every request but never breaks a page.
+        # Ingestion tasks pass a required quota explicitly. quota=None disables metering.
+        self._quota = default_quota(required=False) if quota is _UNSET else quota
+        self._timeout = default_timeout(connect=float(s.IQAIR_HTTP_CONNECT_TIMEOUT_S),
+                                        read=float(s.IQAIR_HTTP_READ_TIMEOUT_S))
+        self._max_attempts = max(1, int(s.IQAIR_RETRY_MAX_ATTEMPTS))
+        self._max_wait = float(s.IQAIR_RETRY_MAX_WAIT_S)
+        self._retry_sleep = retry_sleep or asyncio.sleep
+
+    @property
+    def quota(self):
+        return self._quota
+
+    def _client(self) -> httpx.AsyncClient:
+        return self._http or get_shared_async_client()
+
+    # ---- retry policy ----------------------------------------------------------
+
+    def _wait(self, retry_state) -> float:
+        """Jittered exponential backoff, never shorter than the server's Retry-After."""
+        base = wait_random_exponential(multiplier=1, max=self._max_wait)(retry_state)
+        exc = retry_state.outcome.exception() if retry_state.outcome else None
+        hinted = getattr(exc, "retry_after_s", None)
+        if hinted:
+            return max(base, float(hinted))
+        return base
+
     async def _make_request(self, endpoint: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
-        """Make HTTP request to IQAir API with centralized rate limiting."""
-        
-        # Smooth local limiter
-        await self._global_rate_limit()
-        
-        # Distributed limiter (minute bucket)
-        if not self._check_rate_limit():
-            # trigger tenacity backoff & retry
-            raise RateLimited("local_minute_bucket_exceeded")
-        
-        request_params = {"key": self.api_key}
-        if params:
-            request_params.update(params)
-        
-        url = f"{self.base_url}/{endpoint}"
-        logger.info(f"Making IQAir API request: {endpoint} with params: {params}")
+        """Make an HTTP request to the IQAir API with pacing, quota and bounded retries."""
+        return (await self._request_envelope(endpoint, params)).data
 
+    async def _request_envelope(self, endpoint: str, params: Dict[str, Any] = None) -> FetchEnvelope:
+        """Same as _make_request but keeps HTTP status, fetch time and timing for provenance."""
+        attempts = 0
+        async for attempt in AsyncRetrying(
+            reraise=True,
+            stop=stop_after_attempt(self._max_attempts),
+            wait=self._wait,
+            retry=retry_if_exception_type(TransientError),
+            sleep=self._retry_sleep,
+        ):
+            with attempt:
+                attempts += 1
+                env = await self._request_once(endpoint, params)
+                env.attempts = attempts
+                return env
+
+    # ---- envelope-returning fetches used by ingestion (raw archive + provenance) ----
+    async def fetch_station(self, station: str, city: str = None, state: str = None, country: str = None) -> FetchEnvelope:
+        params = {"station": station}
+        if city:
+            params["city"] = city
+        if state:
+            params["state"] = state
+        if country:
+            params["country"] = country
+        return await self._request_envelope("station", params)
+
+    async def fetch_city(self, city: str, state: str, country: str) -> FetchEnvelope:
+        return await self._request_envelope("city", {"city": city, "state": state, "country": country})
+
+    async def fetch_nearest_city(self, lat: float, lon: float) -> FetchEnvelope:
+        return await self._request_envelope("nearest_city", {"lat": lat, "lon": lon})
+
+    async def _reserve_quota(self) -> None:
+        """Reserve one request against the shared per-credential budget (no-op without a quota service)."""
+        if self._quota is None:
+            return
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
-                response = await client.get(url, params=request_params)
-        except (httpx.RequestError, httpx.TimeoutException) as e:
-            logger.warning("HTTP error calling %s: %s", url, e)
-            # retryable by decorator
-            raise
+            await self._quota.reserve_or_wait(self.credential_alias, limit_per_min=self.max_calls_per_min,
+                                              max_wait_s=float(self.settings.IQAIR_QUOTA_MAX_WAIT_S))
+        except QuotaExhausted as exc:
+            # Let the normal bounded retry policy decide whether to try again.
+            raise RateLimited("shared_quota_exhausted", retry_after_s=exc.retry_in_s) from exc
 
-        # Map HTTP status codes -> typed errors
-        if response.status_code == 429:
-            logger.error("IQAir returned 429 (rate limited)")
-            raise RateLimited("remote_429")
-        if response.status_code == 403:
-            logger.error("Invalid API key or unauthorized access")
-            raise Unauthorized("invalid_api_key_or_unauthorized")
-        if response.status_code >= 500:
-            logger.error("Server error from IQAir: %s - %s", response.status_code, response.text)
-            # treat as generic error (tenacity will retry because not typed explicitly;
-            # but it's wrapped by RequestError normally; keep as IQAirError)
-            raise IQAirError(f"server_error_{response.status_code}")
+    async def _request_once(self, endpoint: str, params: Dict[str, Any] = None) -> FetchEnvelope:
+        url = f"{self.base_url}/{endpoint}"
+        request_params: Dict[str, Any] = dict(params or {})
+        request_params["key"] = self.api_key
+        params_redacted = {k: v for k, v in (params or {}).items()}
 
-        # Parse JSON
+        async with self._pacer:
+            await self._reserve_quota()
+            logger.info("IQAir request %s params=%s", endpoint, params_redacted)
+            fetched_at = datetime.now(timezone.utc)
+            t0 = time.monotonic()
+            try:
+                response = await self._client().get(url, params=request_params, timeout=self._timeout)
+            except httpx.TimeoutException as e:
+                logger.warning("IQAir timeout calling %s: %s", endpoint, type(e).__name__)
+                raise TransientError(f"timeout:{type(e).__name__}") from e
+            except httpx.TransportError as e:
+                logger.warning("IQAir transport error calling %s: %s", endpoint, type(e).__name__)
+                raise TransientError(f"transport_error:{type(e).__name__}") from e
+
+        status_code = response.status_code
+        if status_code == 429:
+            retry_after = parse_retry_after(response.headers)
+            logger.warning("IQAir 429 on %s (retry_after=%s)", endpoint, retry_after)
+            raise RateLimited("remote_429", retry_after_s=retry_after)
+        if status_code in (401, 403):
+            logger.error("IQAir rejected the credential on %s: HTTP %d", endpoint, status_code)
+            raise Unauthorized(f"unauthorized_{status_code}")
+        if status_code >= 500:
+            # Status and size only — never the body.
+            logger.warning("IQAir server error on %s: HTTP %d (%d bytes)", endpoint, status_code, len(response.content or b""))
+            raise TransientError(f"server_error_{status_code}")
+
         try:
             payload = response.json()
-        except json.JSONDecodeError:
-            logger.error(f"Invalid JSON response: {response.text[:200]}")
-            raise IQAirError("invalid_json")
+        except (json.JSONDecodeError, ValueError):
+            logger.error("IQAir returned non-JSON on %s: HTTP %d (%d bytes)", endpoint, status_code, len(response.content or b""))
+            raise IQAirError(f"invalid_json_{status_code}")
 
-        status = payload.get("status")
-        data   = payload.get("data")
+        status = payload.get("status") if isinstance(payload, dict) else None
+        data = payload.get("data") if isinstance(payload, dict) else None
 
-        if response.status_code == 400 or status == "fail":
-            # Extract canonical message text
+        if status_code == 400 or status == "fail":
             msg = ""
             if isinstance(data, dict):
-                msg = (data.get("message") or "").lower()
-            # Map to typed errors
+                msg = str(data.get("message") or "").lower()
             if "station_not_found" in msg:
                 raise StationNotFound("station_not_found")
             if "city_not_found" in msg:
@@ -155,15 +227,14 @@ class IQAirClient:
                 raise StateNotFound("state_not_found")
             if "feature_not_available" in msg:
                 raise FeatureNotAvailable("feature_not_available")
-            # Any other 400/fail
-            raise BadRequest(msg or f"bad_request_{response.text[:120]}")
+            raise BadRequest(msg[:120] or f"bad_request_{status_code}")
 
         if status != "success":
-            # Defensive: unexpected shape
             raise IQAirError(f"unexpected_status:{status}")
 
-        logger.info(f"Successful API response for {endpoint}")
-        return data  # NOTE: return the API 'data' object exactly as before
+        logger.debug("IQAir %s ok (%s)", endpoint, redact_url(url))
+        return FetchEnvelope(data=data, http_status=status_code, fetched_at=fetched_at, endpoint=endpoint,
+                             params_redacted=params_redacted, elapsed_ms=int((time.monotonic() - t0) * 1000))
 
     # ---------------- History (pollution) ----------------
     async def get_station_history_pollution(

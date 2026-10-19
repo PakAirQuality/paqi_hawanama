@@ -1,0 +1,27 @@
+{
+  "status": "success",
+  "states_processed": 6,
+  "cities_processed": 41,
+  "stations_discovered": 198,
+  "stations_created": 0,
+  "stations_updated": 198,
+  "completion_time_utc": "2025-09-29T22:02:54.786147+00:00",
+  "states_skipped": [
+    {
+      "state": "Azad Kashmir",
+      "reason": "aliases_exhausted"
+    },
+    {
+      "state": "FATA",
+      "reason": "aliases_exhausted"
+    }
+  ],
+  "cities_skipped": [
+    {
+      "city": "Kharan",
+      "state": "Balochistan",
+      "reason": "DBAPIError"
+    }
+  ],
+  "run_id": "discovery-2025-09-29T22:00:00.015168+00:00"
+}

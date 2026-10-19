@@ -39,7 +39,8 @@ async def get_llm_data(
             "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
             "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
         ]
-    )
+    ),
+    _auth=Depends(verify_tasks_token)
 ):
     """
     Get the complete LLM data payload for bot tweet generation.
@@ -113,7 +114,8 @@ async def get_llm_prompt(
         "master",
         description="Prompt type to use",
         enum=["master", "airpocalypse"]
-    )
+    ),
+    _auth=Depends(verify_tasks_token)
 ):
     """
     Get the formatted LLM prompt with current data inserted.
@@ -179,7 +181,8 @@ async def check_triggers(
         ...,
         description="City name",
         example="Lahore"
-    )
+    ),
+    _auth=Depends(verify_tasks_token)
 ):
     """
     Check if current air quality conditions trigger additional bot posts.
@@ -391,7 +394,7 @@ async def run_bot_cycle(
     summary="Get Hawanama Bot status",
     description="Get current bot status, budget usage, and trigger conditions"
 )
-async def get_bot_status():
+async def get_bot_status(_auth=Depends(verify_tasks_token)):
     """
     Get comprehensive bot status information.
     
@@ -497,7 +500,7 @@ async def generate_llm_tweet(
     summary="Test Gemini AI connection",
     description="Test connection to Google Gemini AI service"
 )
-async def test_gemini_connection():
+async def test_gemini_connection(_auth=Depends(verify_tasks_token)):
     """
     Test the Gemini AI service connection.
     

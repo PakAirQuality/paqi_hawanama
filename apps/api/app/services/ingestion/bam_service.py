@@ -15,6 +15,8 @@ from typing import Any, Dict, Optional
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.services.aqi import AqiResult, aqi_provenance, pm25_to_aqi
+
 logger = logging.getLogger(__name__)
 
 # Pakistan country id (same value epa_service uses for its stations).
@@ -28,16 +30,6 @@ WIND_DIR_DEG = {
     "S": 180, "SSW": 203, "SW": 225, "WSW": 248,
     "W": 270, "WNW": 293, "NW": 315, "NNW": 338,
 }
-
-# EPA 2024 PM2.5 breakpoints (µg/m³) → US AQI, matching punjab_epa.py.
-PM25_BPTS = [
-    (0.0, 9.0, 0, 50),
-    (9.1, 35.4, 51, 100),
-    (35.5, 55.4, 101, 150),
-    (55.5, 125.4, 151, 200),
-    (125.5, 225.4, 201, 300),
-    (225.5, 500.4, 301, 500),
-]
 
 # ---- QC thresholds (reuse the values from exports_publish._apply_hourly_qc) ----
 PM25_ABS_MAX = 1000.0                    # hard ceiling; above → INVALID
@@ -116,16 +108,24 @@ def wind_dir_to_deg(wind_dir: Optional[str]) -> Optional[int]:
     return WIND_DIR_DEG.get(wind_dir.strip().upper())
 
 
+# Stored aqi_us policy for BAM: the column is rendered directly on the public
+# map (smallint), so it is capped at 500; the uncapped extrapolated index and
+# the averaging basis travel in readings.raw.prov.aqi (see bam_aqi()).
+BAM_AQI_ABOVE_500 = "cap"
+BAM_AQI_BASIS = "1h_subindex"
+
+
+def bam_aqi(pm25: Optional[float]) -> AqiResult:
+    return pm25_to_aqi(pm25, above_500=BAM_AQI_ABOVE_500, averaging_basis=BAM_AQI_BASIS)
+
+
 def pm25_to_aqi_us(pm25: Optional[float]) -> Optional[int]:
-    """US AQI from a single PM2.5 concentration (µg/m³), EPA piecewise-linear."""
-    if pm25 is None:
-        return None
-    # EPA truncates PM2.5 to 1 decimal before mapping.
-    c = int(float(pm25) * 10) / 10.0
-    for lo, hi, ilo, ihi in PM25_BPTS:
-        if lo <= c <= hi:
-            return round((ihi - ilo) / (hi - lo) * (c - lo) + ilo)
-    return None
+    """US AQI (2024 breakpoints, capped at 500) from a single hourly PM2.5 concentration."""
+    return bam_aqi(pm25).value
+
+
+def bam_aqi_provenance(pm25: Optional[float]) -> Dict[str, Any]:
+    return aqi_provenance(bam_aqi(pm25))
 
 
 async def ensure_bam_provider(db: AsyncSession) -> int:

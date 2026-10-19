@@ -4,39 +4,19 @@ import { useMemo, useEffect } from 'react'
 import type { CurrentStation, ForecastEntry } from './types'
 import type { FiresGeoJSON } from './api'
 import { loadPakBoundary, isInsidePakistan, isPakBoundaryLoaded } from './pakistan'
+import { BAND_KEYS, BAND_SCALE_LABEL, bandColor, bandCounts, bandKey, bandLabel, unhealthyOrWorse } from '@/lib/aqi'
+import { formatDateOnly, formatPkt, pktToday } from '@/lib/time'
 
 interface ContextPanelProps {
   currentStations: CurrentStation[]
   forecasts: ForecastEntry[]
   firesGeoJSON: FiresGeoJSON | null
   selectedHorizon: number
+  /** the day the desk is describing (YYYY-MM-DD, Pakistan); defaults to today PKT */
+  selectedDate?: string | null
 }
 
-function getBand(pm25: number): string {
-  if (pm25 <= 35) return 'good'
-  if (pm25 <= 75) return 'moderate'
-  if (pm25 <= 150) return 'unhealthy'
-  if (pm25 <= 250) return 'very_unhealthy'
-  return 'severe'
-}
-
-const BAND_COLORS: Record<string, string> = {
-  good: '#6ecc39',
-  moderate: '#f0c20c',
-  unhealthy: '#f18017',
-  very_unhealthy: '#a070b5',
-  severe: '#991b1b',
-}
-
-const BAND_LABELS: Record<string, string> = {
-  good: 'Good',
-  moderate: 'Moderate',
-  unhealthy: 'Unhealthy',
-  very_unhealthy: 'Very Unhealthy',
-  severe: 'Severe',
-}
-
-export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selectedHorizon }: ContextPanelProps) {
+export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selectedHorizon, selectedDate }: ContextPanelProps) {
   // Load Pakistan boundary on mount
   useEffect(() => { loadPakBoundary() }, [])
 
@@ -52,10 +32,6 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
     const pm25Values = stations.map(s => s.pm25!)
     const mean = pm25Values.reduce((a, b) => a + b, 0) / pm25Values.length
     const sorted = [...pm25Values].sort((a, b) => b - a)
-
-    // Band distribution
-    const bands: Record<string, number> = { good: 0, moderate: 0, unhealthy: 0, very_unhealthy: 0, severe: 0 }
-    stations.forEach(s => { bands[getBand(s.pm25!)]++ })
 
     // Worst cities
     const cityPm25: Record<string, number[]> = {}
@@ -73,14 +49,22 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
     // Ramp events from forecasts
     const ramps = forecasts.filter(f => f.ramp_detected && f.lead_days === 1)
 
+    // Freshness of the observations behind the mean
+    const latest = stations
+      .map(s => s.last_reading)
+      .filter((t): t is string => !!t)
+      .sort()
+      .at(-1) ?? null
+
     return {
       stationCount: stations.length,
       mean: Math.round(mean),
       max: Math.round(sorted[0]),
-      band: getBand(mean),
-      bands,
+      band: bandKey(mean),
+      bands: bandCounts(pm25Values),
       worstCities,
       rampCount: ramps.length,
+      latestObservation: latest,
       fireCount: firesGeoJSON?.features?.filter((f: any) => {
         const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
         return isInsidePakistan(lng, lat)
@@ -96,62 +80,68 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
     )
   }
 
-  const today = new Date().toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  const dayLabel = formatDateOnly(selectedDate || pktToday(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  const bad = unhealthyOrWorse(stats.bands)
 
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
       {/* Header */}
       <div className="px-4 py-3 border-b border-slate-100">
         <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Pakistan Daily Brief</div>
-        <div className="text-sm font-semibold text-slate-800 mt-0.5">{today}</div>
+        <div className="text-sm font-semibold text-slate-800 mt-0.5">{dayLabel} <span className="text-[10px] font-normal text-slate-400">PKT</span></div>
       </div>
 
-      {/* National average */}
+      {/* Reporting-station mean */}
       <div className="px-4 py-3 border-b border-slate-100">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Pakistan Average</div>
+            <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider" title="Unweighted mean of the latest hourly PM2.5 across the stations that reported; not an area or population average">
+              Reporting-station mean
+            </div>
             <div className="flex items-baseline gap-1.5 mt-1">
-              <span className="text-3xl font-bold tabular-nums" style={{ color: BAND_COLORS[stats.band] }}>
+              <span className="text-3xl font-bold tabular-nums" style={{ color: bandColor(stats.band) }}>
                 {stats.mean}
               </span>
-              <span className="text-xs text-slate-400">µg/m³</span>
+              <span className="text-xs text-slate-400">µg/m³ PM2.5</span>
             </div>
-            <div className="text-[11px] mt-0.5" style={{ color: BAND_COLORS[stats.band] }}>
-              {BAND_LABELS[stats.band]}
+            <div className="text-[11px] mt-0.5" style={{ color: bandColor(stats.band) }}>
+              {bandLabel(stats.band)}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-slate-400">Peak</div>
+            <div className="text-[10px] text-slate-400">Peak station</div>
             <div className="text-lg font-bold text-slate-700 tabular-nums">{stats.max}</div>
-            <div className="text-[10px] text-slate-400">{stats.stationCount} stations</div>
+            <div className="text-[10px] text-slate-400">{stats.stationCount} stations reporting</div>
           </div>
+        </div>
+        <div className="mt-2 text-[9px] text-slate-400">
+          Latest hourly readings · {stats.latestObservation ? `last observation ${formatPkt(stats.latestObservation)}` : 'observation time unknown'} · {BAND_SCALE_LABEL}
         </div>
       </div>
 
       {/* Band distribution */}
       <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Air Quality Distribution</div>
+        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Stations by category</div>
         <div className="flex h-2 rounded-full overflow-hidden gap-px">
-          {(['good', 'moderate', 'unhealthy', 'very_unhealthy', 'severe'] as const).map(band => {
+          {BAND_KEYS.map(band => {
             const pct = stats.bands[band] / stats.stationCount * 100
             if (pct === 0) return null
             return (
               <div
                 key={band}
-                style={{ width: `${pct}%`, backgroundColor: BAND_COLORS[band] }}
-                title={`${BAND_LABELS[band]}: ${stats.bands[band]} stations (${Math.round(pct)}%)`}
+                style={{ width: `${pct}%`, backgroundColor: bandColor(band) }}
+                title={`${bandLabel(band)}: ${stats.bands[band]} stations (${Math.round(pct)}%)`}
               />
             )
           })}
         </div>
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-2">
-          {(['good', 'moderate', 'unhealthy', 'very_unhealthy', 'severe'] as const).map(band => {
+          {BAND_KEYS.map(band => {
             if (!stats.bands[band]) return null
             return (
-              <div key={band} className="flex items-center gap-1 text-[10px] text-slate-500">
-                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: BAND_COLORS[band] }} />
-                {stats.bands[band]}
+              <div key={band} className="flex items-center gap-1 text-[10px] text-slate-500" title={bandLabel(band)}>
+                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: bandColor(band) }} />
+                {stats.bands[band]} {bandLabel(band, true)}
               </div>
             )
           })}
@@ -160,16 +150,16 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
 
       {/* Worst cities */}
       <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Most Polluted Cities</div>
+        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Highest city means</div>
         <div className="space-y-1.5">
           {stats.worstCities.map((c, i) => {
-            const band = getBand(c.avg)
+            const band = bandKey(c.avg)
             return (
               <div key={c.city} className="flex items-center gap-2">
                 <span className="text-[10px] text-slate-300 font-mono w-3">{i + 1}</span>
-                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: BAND_COLORS[band] }} />
+                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: bandColor(band) }} />
                 <span className="text-[11px] text-slate-700 flex-1 truncate">{c.city}</span>
-                <span className="text-[11px] font-semibold tabular-nums" style={{ color: BAND_COLORS[band] }}>
+                <span className="text-[11px] font-semibold tabular-nums" style={{ color: bandColor(band) }}>
                   {Math.round(c.avg)}
                 </span>
                 <span className="text-[9px] text-slate-400">({c.count})</span>
@@ -181,15 +171,15 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
 
       {/* Alerts row */}
       <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Alerts</div>
+        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Evidence</div>
         <div className="grid grid-cols-2 gap-2">
           <div className="px-2.5 py-2 rounded-lg bg-orange-50 border border-orange-100">
             <div className="text-lg font-bold text-orange-600 tabular-nums">{stats.fireCount}</div>
-            <div className="text-[10px] text-orange-500">Active fires</div>
+            <div className="text-[10px] text-orange-500">Satellite fire detections</div>
           </div>
           <div className="px-2.5 py-2 rounded-lg bg-amber-50 border border-amber-100">
             <div className="text-lg font-bold text-amber-600 tabular-nums">{stats.rampCount}</div>
-            <div className="text-[10px] text-amber-500">Ramp events</div>
+            <div className="text-[10px] text-amber-500">Forecast ramp events</div>
           </div>
         </div>
       </div>
@@ -197,14 +187,20 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       {/* Unhealthy stations */}
       <div className="px-4 py-3">
         <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-1">
-          {stats.bands.unhealthy + stats.bands.very_unhealthy + stats.bands.severe} stations above unhealthy threshold
+          {bad} station{bad === 1 ? '' : 's'} Unhealthy or worse (AQI above 150)
         </div>
         <div className="text-[10px] text-slate-400 leading-relaxed">
-          {stats.bands.severe > 0 && <span className="text-red-600 font-medium">{stats.bands.severe} severe</span>}
-          {stats.bands.severe > 0 && stats.bands.very_unhealthy > 0 && ', '}
-          {stats.bands.very_unhealthy > 0 && <span className="text-purple-600 font-medium">{stats.bands.very_unhealthy} very unhealthy</span>}
-          {(stats.bands.severe > 0 || stats.bands.very_unhealthy > 0) && stats.bands.unhealthy > 0 && ', '}
-          {stats.bands.unhealthy > 0 && <span className="text-orange-600 font-medium">{stats.bands.unhealthy} unhealthy</span>}
+          {(['hazardous', 'very_unhealthy', 'unhealthy'] as const)
+            .filter(k => stats.bands[k] > 0)
+            .map((k, i) => (
+              <span key={k}>
+                {i > 0 && ', '}
+                <span className="font-medium" style={{ color: bandColor(k) }}>{stats.bands[k]} {bandLabel(k).toLowerCase()}</span>
+              </span>
+            ))}
+          {stats.bands.unhealthy_sensitive > 0 && (
+            <span className="text-slate-400">{bad > 0 ? '; ' : ''}{stats.bands.unhealthy_sensitive} unhealthy for sensitive groups</span>
+          )}
         </div>
       </div>
     </div>

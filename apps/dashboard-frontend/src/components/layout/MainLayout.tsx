@@ -2,20 +2,28 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { UserMenu } from '@/components/auth/UserMenu'
+import { FreshnessBadge } from '@/components/layout/FreshnessBadge'
+import { useOptionalSelection } from '@/lib/selection'
 
 const modules = [
-  { id: 'aqi-dashboard', name: 'Dashboard', href: '/' },
-  { id: 'station-management', name: 'Stations', href: '/stations' },
-  { id: 'data-quality', name: 'Data Quality', href: '/data-quality' },
-  { id: 'reports', name: 'Reports', href: '/reports' },
+  { id: 'aqi-tracker', name: 'Air Quality Tracker', href: '/' },
   { id: 'analyst-desk', name: 'Analyst Desk', href: '/analyst-desk' },
-  { id: 'ml-ops', name: 'ML Ops', href: '/ops/pipeline' },
-  { id: 'kilns', name: 'Kilns', href: '/kilns' },
+  { id: 'reports', name: 'Reports', href: '/reports' },
+  { id: 'bam', name: 'BAM Monitor', href: '/bam', group: 'Staff tools' },
 ]
 
 function cn(...classes: (string | false | undefined)[]) {
   return classes.filter(Boolean).join(' ')
+}
+
+function SelectionStrip() {
+  const selection = useOptionalSelection()
+  if (!selection || !selection.date) return null
+  return (
+    <div className="hidden lg:block text-[11px] text-slate-500 rounded-full border border-slate-200 bg-slate-50 px-3 py-1 truncate max-w-[380px]" title="Current selection">
+      {selection.describe()}
+    </div>
+  )
 }
 
 export function MainLayout({ children }: { children: React.ReactNode }) {
@@ -25,9 +33,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
   const currentModule = modules.find(m =>
     m.href === normalizedPath || (m.href !== '/' && normalizedPath.startsWith(m.href))
-  )?.id || 'aqi-dashboard'
+  )?.id || 'aqi-tracker'
 
-  const isFullBleed = currentModule === 'aqi-dashboard' || currentModule === 'analyst-desk' || currentModule === 'ml-ops' || currentModule === 'kilns'
+  const isFullBleed = currentModule === 'aqi-tracker' || currentModule === 'analyst-desk'
   return (
     <div className="h-screen flex flex-col overflow-hidden">
       {/* Header container — shrink-0 keeps it fixed height, no sticky needed */}
@@ -55,18 +63,21 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
               {/* Center info - hidden on mobile */}
               <div className="hidden md:flex items-center gap-6 text-sm">
-                <div className="flex items-center gap-2 text-slate-600">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span>Live Monitoring</span>
-                </div>
+                <FreshnessBadge />
                 <div className="text-slate-400">|</div>
                 <div className="text-slate-600">
-                  South Asia Air Quality Network
+                  Pakistan Air Quality Initiative
                 </div>
               </div>
 
-              {/* User menu */}
-              <UserMenu />
+              <div className="flex items-center gap-4">
+                {/* Persistent selection strip: what every panel on the page is describing */}
+                <SelectionStrip />
+                {/* Public site: link back to the main map */}
+                <a href="https://hawanama.org" className="text-sm text-slate-500 hover:text-slate-900 hidden sm:block">
+                  hawanama.org
+                </a>
+              </div>
             </div>
           </div>
         </header>
@@ -74,7 +85,7 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
         {/* Row 2: Navigation strip */}
         <nav className="bg-gradient-to-r from-slate-800 to-slate-900">
           <div className="px-4 lg:px-8">
-            <div className="flex items-center h-11 -mb-px overflow-x-auto scrollbar-hide">
+            <div className="flex items-center h-11 -mb-px -ml-5 overflow-x-auto scrollbar-hide">
               {modules.map((module) => {
                 const isActive = currentModule === module.id
                 return (
@@ -89,6 +100,9 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                     )}
                   >
                     {module.name}
+                    {'group' in module && module.group && (
+                      <span className="ml-1.5 rounded px-1 py-px text-[9px] uppercase tracking-wide bg-slate-700 text-slate-300">{module.group}</span>
+                    )}
                     {/* Active indicator - bottom border */}
                     {isActive && (
                       <span className="absolute bottom-0 left-3 right-3 h-0.5 bg-amber-400 rounded-t-full" />

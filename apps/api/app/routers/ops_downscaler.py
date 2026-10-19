@@ -20,7 +20,12 @@ from typing import Any, Dict, List
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import Response
 
+import re
+
+from starlette.concurrency import run_in_threadpool
+
 from app.core.config import settings
+from app.core.filecache import BlobMissing, BoundedBlobCache
 from app.core.security import verify_tasks_token
 from ._tile_utils import (
     TURBO_CMAP,
@@ -106,14 +111,36 @@ def _validate_city(city_key: str):
         raise HTTPException(status_code=404, detail=f"Unknown city: {city_key}. Valid: {list(CITIES.keys())}")
 
 
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# Bounded, LRU-evicted local copies (Cloud Run /tmp is memory). Call from a worker thread.
+_BLOB_CACHE = BoundedBlobCache("downscaler", max_files=24, max_absent=1000)
+
+
+def _validate_pred_date(pred_date: str) -> str:
+    if not _DATE_RE.match(pred_date or ""):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    return pred_date
+
+
 def _download_to_temp(bucket_name: str, blob_path: str, suffix: str = ".tif") -> str:
     client = _gcs_client()
     blob = client.bucket(bucket_name).blob(blob_path)
     if not blob.exists(client):
-        raise HTTPException(status_code=404, detail=f"Not found: gs://{bucket_name}/{blob_path}")
+        raise BlobMissing(blob_path)
     tmp = tempfile.NamedTemporaryFile(suffix=suffix, delete=False)
     blob.download_to_filename(tmp.name)
     return tmp.name
+
+
+def _locate_and_fetch(bucket_name: str, pred_date: str, filename: str, suffix: str) -> str:
+    """Resolve the urban blob (two existence checks) and return a cached local copy.
+
+    Blocking: run via ``run_in_threadpool``.
+    """
+    blob_path = _resolve_urban_blob(bucket_name, pred_date, filename)
+    return _BLOB_CACHE.get_or_download(
+        f"{bucket_name}/{blob_path}", lambda: _download_to_temp(bucket_name, blob_path, suffix)
+    )
 
 
 def _resolve_urban_blob(bucket_name: str, pred_date: str, filename: str) -> str:
@@ -132,7 +159,7 @@ def _resolve_urban_blob(bucket_name: str, pred_date: str, filename: str) -> str:
         logger.debug(f"Falling back to NRT path for {filename} on {pred_date}")
         return nrt_path
 
-    raise HTTPException(status_code=404, detail=f"No urban data for {filename} on {pred_date}")
+    raise HTTPException(status_code=404, detail="No urban data for that city and date")
 
 
 def _empty_tile_png() -> bytes:
@@ -199,7 +226,7 @@ async def list_dates(
         raise
     except Exception as e:
         logger.error(f"Failed to list downscaler dates for {city}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 @router.get(
@@ -222,13 +249,13 @@ async def get_downscaler_tile(
     from rio_tiler.errors import TileOutsideBounds
 
     _validate_city(city)
+    _validate_pred_date(pred_date)
     Reader = _require_rio_tiler()
     bucket = _get_outputs_bucket()
 
     suffix = "_smoothed" if smoothed else ""
     filename = f"{city}{suffix}.tif"
-    blob_path = _resolve_urban_blob(bucket, pred_date, filename)
-    tmp_path = _download_to_temp(bucket, blob_path)
+    tmp_path = await run_in_threadpool(_locate_and_fetch, bucket, pred_date, filename, ".tif")
 
     try:
         with Reader(tmp_path) as src:
@@ -324,15 +351,14 @@ async def get_downscaler_tile(
 async def get_grid_json(
     city: str,
     pred_date: str,
-    _: bool = Depends(verify_tasks_token),
 ) -> Dict[str, Any]:
     """Full 1km grid data (lats, lons, pm25 values) for client-side O(1) hover."""
     import json as _json
 
     _validate_city(city)
+    _validate_pred_date(pred_date)
     bucket_name = _get_outputs_bucket()
-    blob_path = _resolve_urban_blob(bucket_name, pred_date, f"{city}.json")
-    tmp_path = _download_to_temp(bucket_name, blob_path, suffix=".json")
+    tmp_path = await run_in_threadpool(_locate_and_fetch, bucket_name, pred_date, f"{city}.json", ".json")
 
     try:
         with open(tmp_path) as f:
@@ -351,7 +377,7 @@ async def get_grid_json(
         raise
     except Exception as e:
         logger.error(f"Downscaler grid error {city}/{pred_date}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
     finally:
         try:
             os.unlink(tmp_path)
@@ -360,9 +386,7 @@ async def get_grid_json(
 
 
 @router.get("/summary", summary="Downscaler model card")
-async def get_summary(
-    _: bool = Depends(verify_tasks_token),
-) -> Dict[str, Any]:
+async def get_summary() -> Dict[str, Any]:
     """Model metadata: version, MAE, feature count, cities covered."""
     bucket_name = _get_models_bucket()
 

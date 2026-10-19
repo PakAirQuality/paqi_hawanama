@@ -7,8 +7,15 @@
 !apps/api/**
 !apps/worker/
 !apps/worker/**
-!apps/web-next/
-!apps/web-next/**
 !cloudbuild.yaml
 !Dockerfile
 !Dockerfile.*
+# Never upload credentials, whatever directory they sit in (these win over the re-includes above).
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*credentials*.json
+**/*service-account*.json
+# Ship the Docker ignore file so the image build applies the same exclusions.
+!.dockerignore

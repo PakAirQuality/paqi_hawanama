@@ -2,99 +2,77 @@
 
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Radio, ChevronUp, ChevronDown } from 'lucide-react'
+import { Radio, ChevronUp, ChevronDown, Info } from 'lucide-react'
 import type { StationReading, PredictionData, RunReport } from './types'
 import { fetchDailyBrief } from './api'
+import { BAND_KEYS, bandColor, bandCounts, bandKey, bandLabel, classifyPm25, unhealthyOrWorse, BAND_SCALE_LABEL } from '@/lib/aqi'
+import { formatDateOnly } from '@/lib/time'
+import { MODEL_HELP, MODEL_LABELS, type ModelKey } from '@/lib/selection'
 
 interface OpsContextPanelProps {
   selectedDate: string | null
-  model: 'backbone' | 'support_aware'
-  onModelChange: (m: 'backbone' | 'support_aware') => void
+  model: ModelKey
+  onModelChange: (m: ModelKey) => void
   stations: StationReading[]
+  /** stats of the prediction grid for `model` (an area average over the model domain) */
   predictionStats: PredictionData['stats'] | null
   runReport: RunReport | null
 }
 
-function getBand(pm25: number): string {
-  if (pm25 <= 35) return 'good'
-  if (pm25 <= 75) return 'moderate'
-  if (pm25 <= 150) return 'unhealthy'
-  if (pm25 <= 250) return 'very_unhealthy'
-  return 'severe'
+interface Obs {
+  count: number
+  mean: number
+  max: number
+  band: string
+  bands: ReturnType<typeof bandCounts>
+  worstCities: { city: string; avg: number; count: number }[]
 }
-
-const BAND_COLORS: Record<string, string> = {
-  good: '#6ecc39', moderate: '#f0c20c', unhealthy: '#f18017',
-  very_unhealthy: '#a070b5', severe: '#ef4444',
-}
-const BAND_LABELS: Record<string, string> = {
-  good: 'good', moderate: 'moderate', unhealthy: 'unhealthy',
-  very_unhealthy: 'very unhealthy', severe: 'severe',
-}
-const BANDS = ['good', 'moderate', 'unhealthy', 'very_unhealthy', 'severe'] as const
 
 function assessmentText(
-  obs: { count: number; mean: number; max: number; band: string; bands: Record<string, number>; worstCities: { city: string; avg: number; count: number }[] } | null,
-  predMean: number | null,
+  obs: Obs | null,
+  gridMean: number | null,
   coverage: number | null,
+  matched: { bias: number; mae: number; n: number } | null,
+  modelLabel: string,
 ): { text: string; severity: string; color: string } {
-  if (!obs && predMean == null) return { text: 'No observation or prediction data available for this date.', severity: 'Unknown', color: '#6b7280' }
+  if (!obs && gridMean == null) return { text: 'No observation or prediction data available for this date.', severity: 'Unknown', color: '#6b7280' }
 
   const parts: string[] = []
   let severity = 'Moderate'
   let color = '#3b82f6'
 
   if (obs) {
-    const unhealthy = obs.bands.unhealthy + obs.bands.very_unhealthy + obs.bands.severe
-    const unhealthyPct = Math.round((unhealthy / obs.count) * 100)
-
-    if (obs.mean > 150) {
-      severity = 'Severe'
-      color = '#ef4444'
-      parts.push(`Severe air quality day with a national station mean of ${Math.round(obs.mean)} µg/m³ across ${obs.count} reporting stations.`)
-    } else if (obs.mean > 75) {
-      severity = 'Unhealthy'
-      color = '#f18017'
-      parts.push(`Unhealthy air quality conditions recorded with a national mean of ${Math.round(obs.mean)} µg/m³ across ${obs.count} stations.`)
-    } else if (obs.mean > 35) {
-      severity = 'Moderate'
-      color = '#f0c20c'
-      parts.push(`Moderate air quality observed with a mean of ${Math.round(obs.mean)} µg/m³ across ${obs.count} stations.`)
-    } else {
-      severity = 'Good'
-      color = '#6ecc39'
-      parts.push(`Good air quality day — national mean of ${Math.round(obs.mean)} µg/m³ across ${obs.count} stations.`)
+    const band = classifyPm25(obs.mean)
+    severity = band.label
+    color = band.color
+    parts.push(
+      `${band.label} conditions at the reporting-station mean of ${Math.round(obs.mean)} µg/m³ PM2.5 across ${obs.count} reporting stations (${BAND_SCALE_LABEL}).`,
+    )
+    const bad = unhealthyOrWorse(obs.bands)
+    if (bad > 0) {
+      parts.push(`${bad} station${bad > 1 ? 's' : ''} (${Math.round((bad / obs.count) * 100)}%) were Unhealthy or worse.`)
     }
-
-    if (unhealthy > 0) {
-      parts.push(`${unhealthy} station${unhealthy > 1 ? 's' : ''} (${unhealthyPct}%) exceeded unhealthy thresholds.`)
-    }
-
     if (obs.worstCities.length > 0) {
       const worst = obs.worstCities[0]
-      parts.push(`${worst.city} recorded the highest levels at ${Math.round(worst.avg)} µg/m³.`)
+      parts.push(`${worst.city} recorded the highest city mean at ${Math.round(worst.avg)} µg/m³ (${worst.count} station${worst.count > 1 ? 's' : ''}).`)
     }
-
-    if (predMean != null) {
-      const bias = predMean - obs.mean
-      const absBias = Math.abs(bias)
-      if (absBias <= 5) {
-        parts.push(`Model prediction closely matched observations (bias ${bias > 0 ? '+' : ''}${bias.toFixed(1)} µg/m³).`)
-      } else if (absBias <= 15) {
-        parts.push(`Model ${bias > 0 ? 'over' : 'under'}predicted by ${absBias.toFixed(1)} µg/m³ — within acceptable range.`)
-      } else {
-        parts.push(`Significant model ${bias > 0 ? 'over' : 'under'}prediction of ${absBias.toFixed(1)} µg/m³ — requires investigation.`)
-      }
+    if (matched) {
+      const abs = Math.abs(matched.bias)
+      const dir = matched.bias > 0 ? 'over' : 'under'
+      parts.push(
+        abs <= 5
+          ? `The ${modelLabel} matched the stations closely (bias ${matched.bias > 0 ? '+' : ''}${matched.bias.toFixed(1)} µg/m³ at ${matched.n} matched stations).`
+          : `The ${modelLabel} ${dir}-estimated at the stations by ${abs.toFixed(1)} µg/m³ on average (${matched.n} matched stations, MAE ${matched.mae.toFixed(1)}).`,
+      )
+    } else if (gridMean != null) {
+      parts.push(`Modelled area-average PM2.5 was ${Math.round(gridMean)} µg/m³; no matched-station comparison is available for this date.`)
     }
-
-    if (coverage != null && coverage < 80) {
-      parts.push(`Grid coverage was limited at ${coverage}%.`)
-    }
-  } else if (predMean != null) {
-    const band = getBand(predMean)
-    severity = band === 'good' ? 'Good' : band === 'moderate' ? 'Moderate' : band === 'unhealthy' ? 'Unhealthy' : 'Severe'
-    color = BAND_COLORS[band]
-    parts.push(`Predicted national mean of ${Math.round(predMean)} µg/m³. No ground observations available for validation.`)
+    if (coverage != null && coverage < 80) parts.push(`Model grid coverage was limited at ${coverage}%.`)
+  } else if (gridMean != null) {
+    const band = classifyPm25(gridMean)
+    severity = band.label
+    color = band.color
+    parts.push(`Modelled area-average PM2.5 of ${Math.round(gridMean)} µg/m³. No ground observations were available for comparison.`)
   }
 
   return { text: parts.join(' '), severity, color }
@@ -102,29 +80,24 @@ function assessmentText(
 
 export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport }: OpsContextPanelProps) {
   const [minimized, setMinimized] = useState(false)
-  const obs = useMemo(() => {
+  const [showModelHelp, setShowModelHelp] = useState(false)
+
+  const obs = useMemo<Obs | null>(() => {
     const valid = stations.filter(s => s.pm25 != null)
     if (!valid.length) return null
     const values = valid.map(s => s.pm25)
     const mean = values.reduce((a, b) => a + b, 0) / values.length
     const max = Math.max(...values)
-    const bands: Record<string, number> = { good: 0, moderate: 0, unhealthy: 0, very_unhealthy: 0, severe: 0 }
-    valid.forEach(s => { bands[getBand(s.pm25)]++ })
     const cityMap: Record<string, number[]> = {}
     valid.forEach(s => { if (s.city) { (cityMap[s.city] ??= []).push(s.pm25) } })
     const worstCities = Object.entries(cityMap)
       .map(([city, vals]) => ({ city, avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length }))
       .sort((a, b) => b.avg - a.avg)
-    return { count: valid.length, mean, max: Math.round(max), band: getBand(mean), bands, worstCities }
+    return { count: valid.length, mean, max: Math.round(max), band: bandKey(mean), bands: bandCounts(values), worstCities }
   }, [stations])
 
   const coverage = predictionStats?.n_total
     ? Math.round((predictionStats.n_valid / predictionStats.n_total) * 100) : null
-
-  const assessment = useMemo(
-    () => assessmentText(obs, predictionStats?.mean ?? null, coverage),
-    [obs, predictionStats?.mean, coverage]
-  )
 
   const { data: brief, isLoading: briefLoading } = useQuery({
     queryKey: ['ops-brief', selectedDate],
@@ -134,8 +107,16 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
     retry: 1,
   })
 
+  const matched = brief?.matched_bias?.[model] ?? null
+  const modelLabel = MODEL_LABELS[model]
+
+  const assessment = useMemo(
+    () => assessmentText(obs, predictionStats?.mean ?? null, coverage, matched, modelLabel),
+    [obs, predictionStats?.mean, coverage, matched, modelLabel]
+  )
+
   const formattedDate = selectedDate
-    ? new Date(selectedDate).toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+    ? formatDateOnly(selectedDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
     : '—'
 
   return (
@@ -153,7 +134,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
         <div className="flex items-start justify-between">
           <div>
             <div className="text-[14px] font-bold text-white/90">Pakistan</div>
-            <div className="mt-0.5 text-[9px] text-slate-400">{formattedDate}</div>
+            <div className="mt-0.5 text-[9px] text-slate-400">{formattedDate} · Pakistan Standard Time · daily means of hourly PM2.5</div>
           </div>
           <button
             onClick={() => setMinimized(v => !v)}
@@ -168,13 +149,16 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
         {obs && !minimized && (
           <div className="mt-2 flex items-center gap-2 pb-1.5 text-[10px]">
             <Radio size={12} className="text-slate-500" />
-            <span className="text-slate-300">{obs.count} stations</span>
-            <span className="text-slate-600">·</span>
-            <span className="flex gap-2 text-[9px]">
-              {BANDS.map(band => obs.bands[band] > 0 ? (
-                <span key={band} style={{ color: BAND_COLORS[band] }}>{obs.bands[band]} {BAND_LABELS[band]}</span>
-              ) : null)}
+            <span className="text-slate-300" title="Unweighted mean across the stations that reported on this day; not an area or population average">
+              Reporting-station mean {Math.round(obs.mean)} µg/m³ · {obs.count} stations
             </span>
+          </div>
+        )}
+        {obs && !minimized && (
+          <div className="flex flex-wrap gap-x-2 gap-y-0.5 pb-1.5 text-[9px]">
+            {BAND_KEYS.map(k => obs.bands[k] > 0 ? (
+              <span key={k} style={{ color: bandColor(k) }}>{obs.bands[k]} {bandLabel(k, true)}</span>
+            ) : null)}
           </div>
         )}
       </div>
@@ -201,7 +185,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
             </div>
             <div className="px-3 pt-2 pb-2.5 text-[12px] leading-[1.6] text-white/80">
               {briefLoading ? (
-                <span className="text-white/40 italic">Generating brief…</span>
+                <span className="text-white/40 italic">Loading brief…</span>
               ) : brief?.narrative ? (
                 brief.narrative
               ) : (
@@ -210,8 +194,26 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
             </div>
           </div>
 
+          {/* ── Model figures for the selected model ── */}
+          <div className="mx-3 mb-2 grid grid-cols-2 gap-2 text-[10px]">
+            <div className="rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div className="text-[8px] uppercase tracking-wider text-white/30">Modelled area-average</div>
+              <div className="text-white/90 font-semibold tabular-nums text-[13px]">
+                {predictionStats?.mean != null ? `${Math.round(predictionStats.mean)} µg/m³` : '—'}
+              </div>
+              <div className="text-white/30">{modelLabel}{coverage != null ? ` · ${coverage}% grid coverage` : ''}</div>
+            </div>
+            <div className="rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
+              <div className="text-[8px] uppercase tracking-wider text-white/30">Matched-station bias</div>
+              <div className="text-white/90 font-semibold tabular-nums text-[13px]">
+                {matched ? `${matched.bias > 0 ? '+' : ''}${matched.bias.toFixed(1)} µg/m³` : '—'}
+              </div>
+              <div className="text-white/30">{matched ? `${matched.n} stations · MAE ${matched.mae.toFixed(1)}` : 'no matched comparison'}</div>
+            </div>
+          </div>
+
           {/* ── Model toggle ── */}
-          <div className="mx-3 mb-3">
+          <div className="mx-3 mb-2">
             <div
               className="flex rounded-lg overflow-hidden"
               style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}
@@ -236,12 +238,26 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
               >
                 Enhanced
               </button>
+              <button
+                onClick={() => setShowModelHelp(v => !v)}
+                className="px-2 text-white/30 hover:text-white/70"
+                title="What do these modes mean?"
+                aria-label="Explain model modes"
+              >
+                <Info size={12} />
+              </button>
             </div>
+            {showModelHelp && (
+              <div className="mt-1.5 text-[9px] leading-snug text-white/50">
+                <div><span className="text-white/70">Satellite:</span> {MODEL_HELP.backbone}</div>
+                <div className="mt-1"><span className="text-white/70">Enhanced:</span> {MODEL_HELP.support_aware}</div>
+              </div>
+            )}
           </div>
 
           {/* ── Source attribution ── */}
-          <div className="px-4 pb-2.5 text-center text-[7px] text-white/15">
-            LightGBM · ERA5 · MODIS AOD · TROPOMI
+          <div className="px-4 pb-2.5 text-center text-[8px] text-white/25">
+            {runReport?.model_version ? `Model ${runReport.model_version} · ` : ''}LightGBM · ERA5 · MODIS AOD · TROPOMI · {BAND_SCALE_LABEL}
           </div>
         </>
       )}

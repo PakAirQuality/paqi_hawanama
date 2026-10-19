@@ -22,33 +22,23 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.core.config import settings
+from app.core.security import verify_tasks_token
 
 logger = logging.getLogger(__name__)
+# The GET read routes here (forecasts/watchlists/summaries/overview) are
+# low-sensitivity air-quality data and stay public. Only the FIRMS
+# ingest/backfill POSTs are gated (per-route below) because they spend NASA
+# quota and write to GCS — those must not be anonymous.
 router = APIRouter()
 
 FORECASTS_BUCKET = settings.OPS_FORECASTS_BUCKET or "paqi-forecasts-hawanama-data"
 
 
-# ── Risk band thresholds for normalization ────────────────────────────────
-
-_PM25_BANDS = [
-    (35, "good"),
-    (75, "moderate"),
-    (150, "unhealthy"),
-    (250, "very_unhealthy"),
-]
-
-
-def _classify_band(pm25: float | None) -> str:
-    if pm25 is None:
-        return "unknown"
-    for threshold, band in _PM25_BANDS:
-        if pm25 <= threshold:
-            return band
-    return "severe"
+# ── Health bands: US EPA 2024 PM2.5 categories (app/services/aqi/pm25.py) ──
+from app.services.aqi.pm25 import band_key as _classify_band, normalize_band as _normalize_band  # noqa: E402
 
 
 def _normalize_forecast(data: dict) -> dict:
@@ -64,9 +54,12 @@ def _normalize_forecast(data: dict) -> dict:
         if not entry.get("city_name") and entry.get("city"):
             entry["city_name"] = entry["city"]
 
-        # Compute risk_band from pm25_forecast if missing
-        if not entry.get("risk_band"):
+        # risk_band always comes from the canonical classification of the forecast value;
+        # stored files may carry the retired 35/75/150/250 house bands ("severe").
+        if entry.get("pm25_forecast") is not None:
             entry["risk_band"] = _classify_band(entry.get("pm25_forecast"))
+        else:
+            entry["risk_band"] = _normalize_band(entry.get("risk_band"))
 
         # Defaults for decision-support fields
         if not entry.get("episode_state"):
@@ -75,9 +68,9 @@ def _normalize_forecast(data: dict) -> dict:
             entry["confidence"] = "medium"
         if not entry.get("priority"):
             band = entry.get("risk_band", "unknown")
-            if band in ("severe", "very_unhealthy"):
+            if band in ("hazardous", "very_unhealthy"):
                 entry["priority"] = "escalate"
-            elif band == "unhealthy":
+            elif band in ("unhealthy", "unhealthy_sensitive"):
                 entry["priority"] = "review"
             else:
                 entry["priority"] = "monitor"
@@ -221,7 +214,7 @@ async def get_overview(
     if summary:
         for city in summary.get("city_summaries", []):
             d1h = city.get("horizons", {}).get("D+1", {})
-            if d1h.get("worst_band") in ("unhealthy", "very_unhealthy", "severe"):
+            if d1h.get("worst_band") in ("unhealthy", "very_unhealthy", "hazardous"):
                 n_cities_unhealthy += 1
             if city.get("trend") == "worsening":
                 n_cities_worsening += 1
@@ -463,58 +456,218 @@ async def get_station_detail(
     description="VIIRS fire detections as GeoJSON for map overlay. Falls back to previous day if data not yet available.",
 )
 async def get_fires(
-    date: str = Query(None, description="Forecast date (YYYY-MM-DD). Defaults to latest."),
+    date: str = Query(None, description="Pakistan calendar day (YYYY-MM-DD). Defaults to the latest forecast date."),
 ) -> Dict[str, Any]:
-    init_date = date or _resolve_latest_date()
-    ds = _date_str(init_date)
+    """Satellite fire detections for a Pakistan day, with an explicit status.
 
-    # Try requested date, then fall back up to 2 days (FIRMS ~12h latency)
-    raw: Optional[str] = None
-    used_date = init_date
-    for offset in range(3):
-        d = datetime.strptime(init_date, "%Y-%m-%d") - timedelta(days=offset)
-        trial_ds = d.strftime("%Y%m%d")
-        raw = _gcs_read_text(f"hindcast/firms/firms_{trial_ds}.csv")
-        if raw and raw.strip():
-            used_date = d.strftime("%Y-%m-%d")
-            break
+    status: ok | empty (no detections that day) | partial (a satellite source failed on the
+    latest fetch) | stale (only an older day exists; `date` names it) | unavailable.
+    The response never silently substitutes another day's fires for the requested one.
+    """
+    from starlette.concurrency import run_in_threadpool
+    from app.services.fires import build_feature_collection
 
-    if not raw or not raw.strip():
-        return {
-            "type": "FeatureCollection",
-            "date": used_date,
-            "features": [],
-        }
+    requested = date or _resolve_latest_date()
+    _date_str(requested)  # validates the shape
+    try:
+        return await run_in_threadpool(build_feature_collection, requested, _gcs_read_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
-    # Parse CSV → GeoJSON features
-    features: List[Dict[str, Any]] = []
-    reader = csv.DictReader(io.StringIO(raw))
-    for row in reader:
-        try:
-            lat = float(row["latitude"])
-            lon = float(row["longitude"])
-        except (KeyError, ValueError, TypeError):
-            continue
-        try:
-            frp = float(row.get("frp", 0))
-        except (ValueError, TypeError):
-            frp = 0.0
-        features.append({
-            "type": "Feature",
-            "geometry": {"type": "Point", "coordinates": [lon, lat]},
-            "properties": {
-                "frp": round(frp, 1),
-                "confidence": row.get("confidence", ""),
-                "satellite": row.get("satellite", ""),
-                "acq_date": row.get("acq_date", used_date),
-            },
-        })
 
+# ── FIRMS fire data ingestion ────────────────────────────────────────────
+
+FIRMS_API_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
+# South Asia bounding box (covers Pakistan + neighbours for context)
+FIRMS_BBOX = "60,23,78,37"
+
+
+@router.post(
+    "/fires/ingest",
+    summary="Fetch FIRMS fire data from NASA and upload to GCS",
+    description="Fetches VIIRS NOAA-20 active fire detections from NASA FIRMS API "
+                "for the specified date range and uploads simplified CSVs to GCS.",
+)
+async def ingest_fires(
+    window_days: int = Query(2, ge=1, le=5, description="UTC days to fetch, ending today; every Pakistan day inside the window is rewritten"),
+    days_back: Optional[int] = Query(None, description="Deprecated alias of window_days"),
+    date: Optional[str] = Query(None, description="Treat this UTC date as 'today' (re-fetch a past window)"),
+    _auth=Depends(verify_tasks_token),
+) -> Dict[str, Any]:
+    """Fetch VIIRS detections (NOAA-20, NOAA-21, Suomi NPP while available) through the
+    FIRMS area API and store them per Pakistan acquisition day with a status sidecar.
+
+    Runs every few hours; the last days are always refreshed, zero-detection days are
+    stored as header-only files, and a failed source is recorded instead of silently
+    producing an empty day.
+    """
+    import time
+    import httpx
+    from app.services.fires import ingest_window
+
+    firms_key = settings.FIRMS_MAP_KEY
+    if not firms_key:
+        raise HTTPException(status_code=500, detail="FIRMS_MAP_KEY not configured")
+    window = min(max(days_back or window_days, 1), 5)
+    now_utc = None
+    if date:
+        _date_str(date)
+        now_utc = datetime.strptime(date, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=__import__("datetime").timezone.utc)
+
+    t0 = time.perf_counter()
+    client = _gcs_client()
+    bucket = client.bucket(FORECASTS_BUCKET)
+    async with httpx.AsyncClient(timeout=90.0) as http:
+        outcome = await ingest_window(http=http, key=firms_key, bucket=bucket, gcs_client=client, now_utc=now_utc, window_days=window)
+
+    sources = [{"source": s.source, "status": s.status, "rows": s.rows, "error": s.error} for s in outcome.sources]
+    ok = any(s.status == "ok" for s in outcome.sources)
+    logger.info("FIRMS ingest: days=%s sources=%s", outcome.per_day, [(s.source, s.status, s.rows) for s in outcome.sources])
     return {
-        "type": "FeatureCollection",
-        "date": used_date,
-        "features": features,
+        "ok": ok,
+        "window_days": window,
+        "days": outcome.per_day,
+        "sources": sources,
+        "elapsed_s": round(time.perf_counter() - t0, 2),
     }
+
+
+@router.post(
+    "/fires/backfill",
+    summary="Backfill historical FIRMS fire data from NASA archive",
+    description="Fetches VIIRS fire detections for a date range using the appropriate "
+                "NASA FIRMS product (SNPP SP for archive, NOAA-20 NRT for recent). "
+                "Batches in 5-day chunks. Skips dates already in GCS.",
+)
+async def backfill_fires(
+    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
+    end_date: str = Query(..., description="End date YYYY-MM-DD (inclusive)"),
+    overwrite: bool = Query(False, description="Re-fetch even if GCS file exists"),
+    source: Optional[str] = Query(None, description="Force FIRMS source (e.g. VIIRS_SNPP_SP, VIIRS_NOAA20_NRT). Auto-selects if omitted."),
+    _auth=Depends(verify_tasks_token),
+) -> Dict[str, Any]:
+    """Backfill historical FIRMS fire data in 5-day batches."""
+    import time
+    import httpx
+
+    firms_key = settings.FIRMS_MAP_KEY
+    if not firms_key:
+        raise HTTPException(status_code=500, detail="FIRMS_MAP_KEY not configured")
+
+    try:
+        dt_start = datetime.strptime(start_date, "%Y-%m-%d").date()
+        dt_end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+
+    if dt_start > dt_end:
+        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+
+    # Auto-select source: NRT for last 60 days, SNPP SP for archive
+    nrt_cutoff = datetime.utcnow().date() - timedelta(days=60)
+
+    client = _gcs_client()
+    bucket = client.bucket(FORECASTS_BUCKET)
+    t0 = time.perf_counter()
+    results = []
+
+    # Process in 5-day chunks (FIRMS API max)
+    chunk_start = dt_start
+    async with httpx.AsyncClient(timeout=90.0) as http:
+        while chunk_start <= dt_end:
+            chunk_days = min(5, (dt_end - chunk_start).days + 1)
+            chunk_end = chunk_start + timedelta(days=chunk_days - 1)
+
+            # Check which dates in this chunk already exist
+            dates_in_chunk = [chunk_start + timedelta(days=i) for i in range(chunk_days)]
+            missing_dates = []
+            for d in dates_in_chunk:
+                ds = d.strftime("%Y%m%d")
+                blob_path = f"hindcast/firms/firms_{ds}.csv"
+                if not overwrite and bucket.blob(blob_path).exists(client):
+                    results.append({"date": d.strftime("%Y-%m-%d"), "status": "skipped", "reason": "already_exists"})
+                else:
+                    missing_dates.append(d)
+
+            if not missing_dates:
+                chunk_start = chunk_end + timedelta(days=1)
+                continue
+
+            # Pick source for this chunk
+            if source:
+                firms_source = source
+            elif chunk_start >= nrt_cutoff:
+                firms_source = "VIIRS_NOAA20_NRT"
+            else:
+                firms_source = "VIIRS_SNPP_SP"
+
+            # Fetch entire chunk in one API call
+            url = f"{FIRMS_API_BASE}/{firms_key}/{firms_source}/{FIRMS_BBOX}/{chunk_days}/{chunk_start.strftime('%Y-%m-%d')}"
+            try:
+                resp = await http.get(url)
+                if resp.status_code != 200:
+                    for d in missing_dates:
+                        results.append({"date": d.strftime("%Y-%m-%d"), "status": "error", "reason": f"FIRMS API {resp.status_code}", "source": firms_source})
+                    chunk_start = chunk_end + timedelta(days=1)
+                    continue
+
+                raw_csv = resp.text
+                if not raw_csv.strip() or "latitude" not in raw_csv.split("\n")[0]:
+                    for d in missing_dates:
+                        results.append({"date": d.strftime("%Y-%m-%d"), "status": "error", "reason": "empty_or_invalid_response", "source": firms_source})
+                    chunk_start = chunk_end + timedelta(days=1)
+                    continue
+
+                # Parse all rows and bucket by acq_date
+                reader = csv.DictReader(io.StringIO(raw_csv))
+                by_date: Dict[str, list] = {}
+                for row in reader:
+                    try:
+                        acq = row.get("acq_date", "")
+                        by_date.setdefault(acq, []).append({
+                            "latitude": row["latitude"],
+                            "longitude": row["longitude"],
+                            "frp": row.get("frp", "0"),
+                            "confidence": row.get("confidence", ""),
+                            "acq_date": acq,
+                            "satellite": row.get("satellite", ""),
+                        })
+                    except (KeyError, ValueError):
+                        continue
+
+                # Write per-date CSVs to GCS
+                for d in missing_dates:
+                    d_str = d.strftime("%Y-%m-%d")
+                    rows = by_date.get(d_str, [])
+                    ds = d.strftime("%Y%m%d")
+                    blob_path = f"hindcast/firms/firms_{ds}.csv"
+
+                    if not rows:
+                        # Write empty CSV so we don't re-fetch this date
+                        output = io.StringIO()
+                        writer = csv.DictWriter(output, fieldnames=["latitude", "longitude", "frp", "confidence", "acq_date", "satellite"])
+                        writer.writeheader()
+                        bucket.blob(blob_path).upload_from_string(output.getvalue(), content_type="text/csv")
+                        results.append({"date": d_str, "status": "published", "fires": 0, "source": firms_source})
+                    else:
+                        output = io.StringIO()
+                        writer = csv.DictWriter(output, fieldnames=["latitude", "longitude", "frp", "confidence", "acq_date", "satellite"])
+                        writer.writeheader()
+                        writer.writerows(rows)
+                        bucket.blob(blob_path).upload_from_string(output.getvalue(), content_type="text/csv")
+                        results.append({"date": d_str, "status": "published", "fires": len(rows), "source": firms_source})
+                        logger.info(f"FIRMS backfill: {d_str} → {len(rows)} fires ({firms_source})")
+
+            except Exception as e:
+                logger.warning(f"FIRMS backfill failed for chunk {chunk_start}–{chunk_end}: {e}")
+                for d in missing_dates:
+                    results.append({"date": d.strftime("%Y-%m-%d"), "status": "error", "reason": str(e)})
+
+            chunk_start = chunk_end + timedelta(days=1)
+
+    elapsed = round(time.perf_counter() - t0, 2)
+    published = sum(1 for r in results if r["status"] == "published")
+    return {"ok": True, "results": results, "published": published, "total_dates": len(results), "elapsed_s": elapsed}
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────

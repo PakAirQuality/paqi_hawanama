@@ -1,9 +1,9 @@
 fastapi>=0.115.0
-uvicorn[standard]>=0.24.0
+uvicorn[standard]>=0.34.0,<1
 pydantic>=2.12.0
 pydantic-settings>=2.6.0
-sqlalchemy==2.0.23
-asyncpg==0.29.0
+sqlalchemy==2.0.55
+asyncpg==0.32.0
 psycopg2-binary==2.9.9
 geoalchemy2==0.14.2
 redis==5.0.1
@@ -11,8 +11,8 @@ httpx>=0.27.0
 requests==2.31.0
 tenacity==8.2.3
 slowapi==0.1.9
-python-multipart==0.0.6
-python-jose[cryptography]==3.3.0
+python-multipart>=0.0.31
+python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 pytest==7.4.3
 pytest-asyncio==0.21.1
@@ -25,9 +25,9 @@ alembic==1.13.2
 apscheduler==3.10.4
 pandera==0.17.2
 numpy==1.24.3
-pyarrow>=10.0.0
+pyarrow==20.0.0   # last line that imports with numpy 1.24.x; 21+ requires NumPy 2 (broke manifest reads 2026-10-15)
 pandas==2.1.3
-google-cloud-storage==2.14.0
+google-cloud-storage==2.19.0
 # AI Copilot (analyst desk)
 pydantic-ai-slim>=1.0.0
 google-genai>=1.31.0

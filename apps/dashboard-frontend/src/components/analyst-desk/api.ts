@@ -8,11 +8,9 @@ import type {
 } from './types'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
-const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
 
-const headers: Record<string, string> = {
-  ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
-}
+// Public read-only routes; no credential is ever sent from the browser.
+const headers: Record<string, string> = {}
 
 const DESK_PREFIX = `${API_BASE}/api/v1/ops/analyst-desk`
 
@@ -61,9 +59,29 @@ export async function fetchCurrentStations(): Promise<{ stations: CurrentStation
   return res.json()
 }
 
+export type FiresStatus = 'ok' | 'empty' | 'partial' | 'stale' | 'unavailable'
+
+export interface FiresSource {
+  source: string
+  status: 'ok' | 'error'
+  rows?: number
+  error?: string | null
+}
+
 export interface FiresGeoJSON {
   type: "FeatureCollection"
+  /** Pakistan day the detections belong to (may differ from requested_date when status is 'stale') */
   date: string
+  requested_date?: string
+  status?: FiresStatus
+  count?: number
+  layer?: string
+  tz?: string
+  day_basis?: 'acq_pkt' | 'acq_utc'
+  sources?: FiresSource[] | null
+  last_successful_fetch?: string | null
+  observation_period?: { start: string; end: string } | null
+  note?: string
   features: Array<{
     type: "Feature"
     geometry: { type: "Point"; coordinates: [number, number] }
@@ -72,6 +90,8 @@ export interface FiresGeoJSON {
       confidence: string
       satellite: string
       acq_date: string
+      acq_time?: string
+      acq_datetime_utc?: string
     }
   }>
 }

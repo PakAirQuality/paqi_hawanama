@@ -4,21 +4,26 @@ These endpoints expose the worker tasks as HTTP APIs for external scheduling sys
 """
 
 import logging
+from pathlib import Path
 from fastapi import APIRouter, HTTPException, Depends, Request, Query
+from fastapi.responses import JSONResponse
 from typing import Dict, Any, Optional
+from app.core.config import settings
 from app.core.security import verify_twitter_endpoint_access, verify_tasks_token
+from app.ingestion.provenance import describe as describe_provenance
+from app.ingestion.runs import RunOutcome, outcome_response, trigger_from_headers, worst_status
+from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
-# Setup worker compatibility layer BEFORE importing worker tasks
-try:
-    from app.worker_compat import *  # This sets up the import aliases
-    logger.info("Worker compatibility layer loaded")
-except Exception as e:
-    logger.error("Failed to load worker compatibility layer: %s", e)
 
-# Worker tasks will be imported lazily inside each endpoint to avoid import-time crashes
+def _trigger(request: Request) -> str:
+    return trigger_from_headers(request.headers)
+
+
+def _outcome_response(outcome: RunOutcome, message: str) -> JSONResponse:
+    return outcome_response(outcome, message)
 
 
 @router.post("/tasks/discover")
@@ -34,15 +39,10 @@ async def run_station_discovery(
     """
     try:
         logger.info("Starting station discovery via API endpoint (country=%s)", country or "all")
-        from app.tasks.station_discovery import StationDiscoveryTask  # lazy import
         discovery_task = StationDiscoveryTask()
-        summary = await discovery_task.discover_all_stations_comprehensive(country=country)
-        logger.info("Station discovery completed successfully: %s", summary)
-        return {
-            "status": "success",
-            "message": "Station discovery completed",
-            "summary": summary
-        }
+        outcome = await discovery_task.discover_all_stations_comprehensive(country=country, trigger=_trigger(request))
+        logger.info("Station discovery finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return _outcome_response(outcome, "Station discovery completed")
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("Station discovery failed: %s", error_msg)
@@ -66,15 +66,10 @@ async def run_station_ingestion(
     """
     try:
         logger.info("Starting station ingestion via API endpoint")
-        from app.tasks.data_ingestion import DataIngestionTask  # lazy import
         station_ingestion_task = DataIngestionTask()
-        summary = await station_ingestion_task.fetch_station_readings()
-        logger.info("Station ingestion completed successfully: %s", summary)
-        return {
-            "status": "success", 
-            "message": "Station ingestion completed",
-            "summary": summary
-        }
+        outcome = await station_ingestion_task.fetch_station_readings(trigger=_trigger(request))
+        logger.info("Station ingestion finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return _outcome_response(outcome, "Station ingestion completed")
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("Station ingestion failed: %s", error_msg)
@@ -100,15 +95,10 @@ async def run_city_ingestion(
     """
     try:
         logger.info("Starting city ingestion via API endpoint (country=%s)", country or "all")
-        from app.tasks.city_ingest import CityIngestionTask  # lazy import
         city_ingestion_task = CityIngestionTask()
-        summary = await city_ingestion_task.fetch_city_readings_hourly(country=country)
-        logger.info("City ingestion completed successfully: %s", summary)
-        return {
-            "status": "success",
-            "message": "City ingestion completed", 
-            "summary": summary
-        }
+        outcome = await city_ingestion_task.fetch_city_readings_hourly(country=country, trigger=_trigger(request))
+        logger.info("City ingestion finished with status=%s run_id=%s", outcome.status.value, outcome.run_id)
+        return _outcome_response(outcome, "City ingestion completed")
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("City ingestion failed: %s", error_msg)
@@ -135,37 +125,40 @@ async def run_full_pipeline(
     try:
         logger.info("Starting full pipeline via API endpoint")
         
-        # Import tasks lazily
-        from app.tasks.station_discovery import StationDiscoveryTask
-        from app.tasks.data_ingestion import DataIngestionTask
-        from app.tasks.city_ingest import CityIngestionTask
-        
         discovery_task = StationDiscoveryTask()
         station_ingestion_task = DataIngestionTask()
         city_ingestion_task = CityIngestionTask()
         
+        trigger = _trigger(request)
         # Step 1: Discovery
         logger.info("Pipeline step 1/3: Station discovery")
-        discovery_summary = await discovery_task.discover_all_stations_comprehensive()
+        discovery = await discovery_task.discover_all_stations_comprehensive(trigger=trigger)
         
         # Step 2: Station ingestion
         logger.info("Pipeline step 2/3: Station ingestion")
-        station_summary = await station_ingestion_task.fetch_station_readings()
+        stations = await station_ingestion_task.fetch_station_readings(trigger=trigger)
         
         # Step 3: City ingestion (all configured countries)
         logger.info("Pipeline step 3/3: City ingestion")
-        city_summary = await city_ingestion_task.fetch_city_readings_hourly(country=None)
-        
-        logger.info("Full pipeline completed successfully")
-        return {
-            "status": "success",
-            "message": "Full pipeline completed",
-            "summary": {
-                "discovery": discovery_summary,
-                "station_ingestion": station_summary,
-                "city_ingestion": city_summary
-            }
-        }
+        cities = await city_ingestion_task.fetch_city_readings_hourly(country=None, trigger=trigger)
+
+        status = worst_status(discovery, stations, cities)
+        logger.info("Full pipeline finished with status=%s", status.value)
+        # Reuse the HTTP mapping of whichever step was worst.
+        worst = next(o for o in (discovery, stations, cities) if o.status is status)
+        return JSONResponse(
+            status_code=worst.http_status(),
+            content={
+                "status": status.value,
+                "message": "Full pipeline completed",
+                "summary": {
+                    "discovery": discovery.to_dict(),
+                    "station_ingestion": stations.to_dict(),
+                    "city_ingestion": cities.to_dict(),
+                },
+                "provenance": describe_provenance(),
+            },
+        )
     except Exception as e:
         error_msg = str(e) if str(e) else "Unknown error - no exception message"
         logger.error("Full pipeline failed: %s", error_msg)
@@ -176,6 +169,50 @@ async def run_full_pipeline(
             status_code=500,
             detail=f"Full pipeline failed: {error_msg}"
         )
+
+
+# ---------------------------------------------------------------------------
+# OpenAQ v3 (independent source, shadow mode; gated by OPENAQ_ENABLED)
+# ---------------------------------------------------------------------------
+
+@router.post("/tasks/openaq/discover")
+async def run_openaq_discovery(
+    request: Request,
+    dry_run: bool = Query(False, description="Make the requests and report the inventory, but write nothing"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Discover Pakistan locations on OpenAQ → shadow stations + pm25 stream checkpoints."""
+    from app.services.ingestion.openaq.discovery import OpenAQDiscoveryTask
+    try:
+        outcome = await OpenAQDiscoveryTask().run(dry_run=dry_run, trigger=_trigger(request))
+        return _outcome_response(outcome, "OpenAQ discovery completed")
+    except Exception as e:
+        logger.error("OpenAQ discovery failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"OpenAQ discovery failed: {e}")
+
+
+@router.post("/tasks/openaq/ingest")
+async def run_openaq_ingest(request: Request, _: bool = Depends(verify_tasks_token)):
+    """Hourly: fetch the next window per active stream and reconcile into readings (source='openaq')."""
+    from app.services.ingestion.openaq.ingest import OpenAQIngestTask
+    try:
+        outcome = await OpenAQIngestTask().run(mode="ingest", trigger=_trigger(request))
+        return _outcome_response(outcome, "OpenAQ ingestion completed")
+    except Exception as e:
+        logger.error("OpenAQ ingestion failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"OpenAQ ingestion failed: {e}")
+
+
+@router.post("/tasks/openaq/reconcile")
+async def run_openaq_reconcile(request: Request, _: bool = Depends(verify_tasks_token)):
+    """Daily: re-read older windows (late/revised data) without moving the completed-window checkpoint."""
+    from app.services.ingestion.openaq.ingest import OpenAQIngestTask
+    try:
+        outcome = await OpenAQIngestTask().run(mode="reconcile", trigger=_trigger(request))
+        return _outcome_response(outcome, "OpenAQ reconciliation completed")
+    except Exception as e:
+        logger.error("OpenAQ reconciliation failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"OpenAQ reconciliation failed: {e}")
 
 
 @router.post("/tasks/twitter-lahore-pm25")
@@ -230,12 +267,10 @@ async def get_task_status(
     Get status information about available tasks and recent runs.
     """
     try:
-        # Check if manifests exist
-        from pathlib import Path
-        worker_root = Path(__file__).resolve().parents[3] / "worker"
-        
-        station_manifest_dir = worker_root / "artifacts" / "station_manifests"
-        city_manifest_dir = worker_root / "artifacts" / "city_manifests"
+        # Manifest locations must match what the tasks use (relative to the
+        # process working directory, /app in the image), not a worker checkout.
+        station_manifest_dir = Path(settings.STATION_MANIFEST_DIR)
+        city_manifest_dir = Path(settings.CITY_MANIFEST_DIR)
         
         station_manifest_exists = (
             (station_manifest_dir / "latest.parquet").exists() or 
@@ -253,13 +288,17 @@ async def get_task_status(
                 "POST /tasks/ingest-stations", 
                 "POST /tasks/ingest-cities",
                 "POST /tasks/full-pipeline",
+                "POST /tasks/openaq/discover?dry_run=true|false",
+                "POST /tasks/openaq/ingest",
+                "POST /tasks/openaq/reconcile",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
             ],
             "manifest_status": {
                 "station_manifest_exists": station_manifest_exists,
                 "city_manifest_exists": city_manifest_exists
-            }
+            },
+            "provenance": describe_provenance(),
         }
     except Exception as e:
         logger.error("Failed to get task status: %s", str(e))

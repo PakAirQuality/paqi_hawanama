@@ -19,13 +19,31 @@ resource "google_service_account" "scheduler_invoker" {
   description  = "Service account for Cloud Scheduler to invoke Cloud Run services"
 }
 
-# Grant the service account permission to invoke Cloud Run
+# Grant the service account permission to invoke the public API (kept for any
+# scheduler that targets hawanama; harmless if all jobs migrate to ingest).
 resource "google_cloud_run_service_iam_member" "scheduler_invoker" {
   project  = "hawanama-2"
   location = "asia-south1"
   service  = "hawanama"
   role     = "roles/run.invoker"
   member   = "serviceAccount:${google_service_account.scheduler_invoker.email}"
+}
+
+# Grant the service account permission to invoke the ingestion worker.
+# All scheduled jobs now POST to hawanama-ingest so they don't share resources
+# with the public read API.
+resource "google_cloud_run_service_iam_member" "scheduler_invoker_ingest" {
+  project  = "hawanama-2"
+  location = "asia-south1"
+  service  = "hawanama-ingest"
+  role     = "roles/run.invoker"
+  member   = "serviceAccount:${google_service_account.scheduler_invoker.email}"
+}
+
+# Base URL for all scheduled task invocations. Switching this single locals
+# value moves every scheduler job between services.
+locals {
+  ingest_base_url = "https://hawanama-ingest-152782825429.asia-south1.run.app"
 }
 
 # 1. Station Discovery - Twice Daily (2:00 AM and 2:00 PM UTC)
@@ -37,7 +55,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2am" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/discover"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/discover"
     
     headers = {
       "Content-Type" = "application/json"
@@ -45,6 +63,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2am" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -64,7 +83,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2pm" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/discover"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/discover"
     
     headers = {
       "Content-Type" = "application/json"
@@ -72,6 +91,7 @@ resource "google_cloud_scheduler_job" "station_discovery_2pm" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -92,7 +112,7 @@ resource "google_cloud_scheduler_job" "station_ingestion" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/ingest-stations"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/ingest-stations"
     
     headers = {
       "Content-Type" = "application/json"
@@ -100,6 +120,7 @@ resource "google_cloud_scheduler_job" "station_ingestion" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -120,7 +141,7 @@ resource "google_cloud_scheduler_job" "city_ingestion" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/ingest-cities"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/ingest-cities"
     
     headers = {
       "Content-Type" = "application/json"
@@ -128,6 +149,7 @@ resource "google_cloud_scheduler_job" "city_ingestion" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -151,7 +173,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_hourly" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/bot/execute"
+    uri         = "${local.ingest_base_url}/api/v1/bot/execute"
     
     headers = {
       "Content-Type" = "application/json"
@@ -163,6 +185,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_hourly" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -184,7 +207,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_test" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/bot/execute"
+    uri         = "${local.ingest_base_url}/api/v1/bot/execute"
     
     headers = {
       "Content-Type" = "application/json"
@@ -197,6 +220,7 @@ resource "google_cloud_scheduler_job" "hawanama_bot_test" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -217,7 +241,7 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/punjab/ingest/hourly"
+    uri         = "${local.ingest_base_url}/api/v1/punjab/ingest/hourly"
     
     headers = {
       "Content-Type" = "application/json"
@@ -225,6 +249,7 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
     
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -236,16 +261,16 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
   }
 }
 
-# 4b. FIRMS Fire Data Ingestion - 2:00 AM UTC daily
+# 4b. FIRMS Fire Data Ingestion - every 3 hours (VIIRS overpasses ~08 and ~20 UTC; FIRMS NRT latency ≤3 h)
 resource "google_cloud_scheduler_job" "firms_fire_ingest" {
   name        = "firms-fire-ingest"
-  description = "Daily FIRMS VIIRS fire data fetch from NASA API at 2:00 AM UTC"
-  schedule    = "0 2 * * *"  # 2:00 AM UTC daily (7:00 AM PKT)
+  description = "FIRMS VIIRS (NOAA-20/21, SNPP) fire detections, last 2 UTC days re-keyed to Pakistan days, every 3 h"
+  schedule    = "20 */3 * * *"
   time_zone   = "UTC"
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/ops/analyst-desk/fires/ingest?days_back=3"
+    uri         = "${local.ingest_base_url}/api/v1/ops/analyst-desk/fires/ingest?window_days=2"
 
     headers = {
       "Content-Type" = "application/json"
@@ -253,6 +278,7 @@ resource "google_cloud_scheduler_job" "firms_fire_ingest" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -273,7 +299,7 @@ resource "google_cloud_scheduler_job" "parquet_export_daily" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-readings-hourly-parquet"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-readings-hourly-parquet"
 
     headers = {
       "Content-Type" = "application/json"
@@ -288,6 +314,7 @@ resource "google_cloud_scheduler_job" "parquet_export_daily" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -308,7 +335,7 @@ resource "google_cloud_scheduler_job" "hourly_partitioned_export" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-readings-hourly-parquet-partitioned?days_back=3"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-readings-hourly-parquet-partitioned?days_back=3"
 
     headers = {
       "Content-Type" = "application/json"
@@ -316,6 +343,7 @@ resource "google_cloud_scheduler_job" "hourly_partitioned_export" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -336,7 +364,7 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/exports/publish/station-daily/parquet?start_date=2024-01-01&end_date=2026-12-31&only_missing=true&apply_qc=true"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-daily/parquet?start_date=2024-01-01&end_date=2026-12-31&only_missing=true&apply_qc=true"
 
     headers = {
       "Content-Type" = "application/json"
@@ -344,6 +372,7 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -366,7 +395,7 @@ resource "google_cloud_scheduler_job" "daily_brief_generation" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/ops/pipeline/generate-briefs?days_back=7"
+    uri         = "${local.ingest_base_url}/api/v1/ops/pipeline/generate-briefs?days_back=7"
 
     headers = {
       "Content-Type" = "application/json"
@@ -374,6 +403,7 @@ resource "google_cloud_scheduler_job" "daily_brief_generation" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -395,7 +425,7 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
 
   http_target {
     http_method = "POST"
-    uri         = "https://hawanama-152782825429.asia-south1.run.app/api/v1/tasks/full-pipeline"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/full-pipeline"
 
     headers = {
       "Content-Type" = "application/json"
@@ -403,6 +433,7 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
 
     oidc_token {
       service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
     }
   }
 
@@ -410,6 +441,102 @@ resource "google_cloud_scheduler_job" "full_pipeline_emergency" {
     retry_count = 1
     max_retry_duration = "7200s"  # 2 hours max retry duration
     min_backoff_duration = "120s"
+    max_backoff_duration = "600s"
+  }
+}
+# ---------------------------------------------------------------------------
+# 8. OpenAQ v3 (independent source, shadow mode). All three jobs start PAUSED:
+#    unpause after OPENAQ_API_KEY exists in Secret Manager, OPENAQ_ENABLED=true is
+#    deployed on hawanama-ingest, and a `discover?dry_run=true` inventory has been
+#    reviewed (stream count vs OPENAQ_RATE_PER_HOUR). The lease on the ingest side
+#    makes a scheduler retry of a live run a no-op.
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_scheduler_job" "openaq_discovery" {
+  name        = "openaq-discover-daily"
+  description = "OpenAQ: discover Pakistan locations → shadow stations + pm25 stream checkpoints (01:10 UTC)"
+  schedule    = "10 1 * * *"
+  time_zone   = "UTC"
+  paused      = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/openaq/discover"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
+    max_backoff_duration = "600s"
+  }
+}
+
+# Hourly at :40 — away from the IQAir station run (:15), the bot (:30), Punjab (:45)
+# and the 03:00–04:00 export jobs.
+resource "google_cloud_scheduler_job" "openaq_ingestion" {
+  name        = "openaq-ingest-hourly"
+  description = "OpenAQ: fetch the next window per active pm25 stream (shadow readings, source='openaq')"
+  schedule    = "40 * * * *"
+  time_zone   = "UTC"
+  paused      = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/openaq/ingest"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
+    max_backoff_duration = "600s"
+  }
+}
+
+resource "google_cloud_scheduler_job" "openaq_reconcile" {
+  name        = "openaq-reconcile-daily"
+  description = "OpenAQ: re-read older windows for late/revised data without moving checkpoints (05:10 UTC)"
+  schedule    = "10 5 * * *"
+  time_zone   = "UTC"
+  paused      = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/openaq/reconcile"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
     max_backoff_duration = "600s"
   }
 }

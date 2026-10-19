@@ -38,8 +38,11 @@ async def run_task(task_name: str):
     try:
         logger.info(f"Running task: {task_name}")
         result = await task_map[task_name.lower()]()
-        logger.info(f"Task completed successfully: {result}")
-        return True
+        status = getattr(getattr(result, "status", None), "value", None)
+        summary = result.to_dict() if hasattr(result, "to_dict") else result
+        logger.info(f"Task finished with status={status}: {summary}")
+        # A failed run exits non-zero so cron/CI notices; partial/skipped still exit 0.
+        return status != "failed"
     except Exception as exc:
         logger.error(f"Task failed: {exc}")
         return False

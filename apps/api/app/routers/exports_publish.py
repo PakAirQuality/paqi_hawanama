@@ -50,6 +50,39 @@ DEFAULT_GCS_OBJECT = os.getenv(
 DEFAULT_HOURLY_PREFIX = "raw/station_hourly"
 DEFAULT_DAILY_PREFIX = "raw/station_daily"
 
+
+def _allowed_targets() -> list[tuple[str, str]]:
+    """(bucket, prefix) pairs the publish routes may write to, from EXPORT_GCS_ALLOWED."""
+    from app.core.config import settings
+
+    out: list[tuple[str, str]] = []
+    for item in (settings.EXPORT_GCS_ALLOWED or "").split(","):
+        item = item.strip().strip("/")
+        if not item:
+            continue
+        bucket, _, prefix = item.partition("/")
+        out.append((bucket, prefix.strip("/")))
+    if DEFAULT_GCS_BUCKET and not any(b == DEFAULT_GCS_BUCKET for b, _ in out):
+        out.append((DEFAULT_GCS_BUCKET, ""))
+    return out
+
+
+def _check_target(bucket: str, object_or_prefix: str) -> None:
+    """400 unless ``bucket``/``object_or_prefix`` falls inside an allowed destination.
+
+    The runtime service account can write wherever IAM lets it; callers must not be able
+    to point the exporter at an arbitrary bucket or path.
+    """
+    key = (object_or_prefix or "").strip("/")
+    if ".." in key.split("/") or key.startswith("/") or "\\" in key:
+        raise HTTPException(status_code=400, detail="Invalid GCS object path")
+    for allowed_bucket, allowed_prefix in _allowed_targets():
+        if bucket != allowed_bucket:
+            continue
+        if not allowed_prefix or key == allowed_prefix or key.startswith(allowed_prefix + "/"):
+            return
+    raise HTTPException(status_code=400, detail="GCS destination not allowed")
+
 # QA Parameters for daily aggregation
 DEFAULT_MIN_HOURS = 18  # Minimum hours per day for "complete" flag
 DEFAULT_MIN_PUBLISH_HOURS = 6  # Don't publish station-day at all below this
@@ -318,6 +351,11 @@ def _build_all_stations_hourly_query(
     if provider_codes:
         where_clauses.append("LOWER(COALESCE(p.code, '')) IN :provider_codes")
         params["provider_codes"] = provider_codes
+    # Shadow-mode OpenAQ data (provider 'openaq' / source 'openaq') is never published
+    # to GCS unless a research caller asks for provider=openaq explicitly.
+    if "openaq" not in {str(c).lower() for c in (provider_codes or [])}:
+        where_clauses.append("COALESCE(p.code, '') <> 'openaq'")
+        where_clauses.append("r.source <> 'openaq'")
 
     where_sql = " AND ".join(where_clauses)
 
@@ -719,6 +757,7 @@ def upload_daily_partition_to_gcs(
                 station_records = []
                 for _, row in valid.iterrows():
                     station_records.append({
+                        "station_id": str(row.get("station_id", "")).strip(),
                         "name": str(row.get("station_name", "")),
                         "city": str(row.get("city_name", "")),
                         "lat": round(float(row[lat_col]), 5),
@@ -811,6 +850,7 @@ async def publish_station_readings_hourly_parquet_to_gcs(
         raise HTTPException(status_code=500, detail="GCS_EXPORT_BUCKET is not set (and no gcs_bucket provided).")
     if not obj:
         raise HTTPException(status_code=500, detail="GCS_EXPORT_OBJECT is empty (and no gcs_object provided).")
+    _check_target(bucket, obj)
 
     # Use the same export function by calling the GET handler logic internally would be messy;
     # instead we re-run the key steps here (station list + per-station query + parquet writer).
@@ -1029,6 +1069,7 @@ async def publish_station_readings_hourly_parquet_partitioned_to_gcs(
     prefix = gcs_prefix.strip().strip("/")
     if not bucket:
         raise HTTPException(status_code=500, detail="Missing GCS bucket")
+    _check_target(bucket, prefix)
 
     # --- compute range ---
     if start_date and end_date:
@@ -1275,6 +1316,8 @@ async def publish_station_daily_parquet(
     bucket_name = gcs_bucket or DEFAULT_GCS_BUCKET
     hourly_pfx = hourly_prefix or DEFAULT_HOURLY_PREFIX
     daily_pfx = daily_prefix or DEFAULT_DAILY_PREFIX
+    _check_target(bucket_name, hourly_pfx)
+    _check_target(bucket_name, daily_pfx)
 
     # Determine date range
     dates_to_process = []

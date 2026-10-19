@@ -67,17 +67,13 @@ MAX_CONCURRENT = 10  # limit concurrent HTTP requests
 
 def read_token() -> str:
     """Read the API token from the .env.local file."""
-    if not ENV_FILE.exists():
-        print(f"ERROR: {ENV_FILE} not found", file=sys.stderr)
+    # Operator credential from the shell only (never from a NEXT_PUBLIC_* browser variable):
+    #   export TASKS_API_SECRET="$(gcloud secrets versions access latest --secret TASKS_API_SECRET)"
+    token = os.environ.get("TASKS_API_SECRET", "")
+    if not token:
+        print("ERROR: TASKS_API_SECRET is not set in the environment", file=sys.stderr)
         sys.exit(1)
-
-    for line in ENV_FILE.read_text().splitlines():
-        line = line.strip()
-        if line.startswith("NEXT_PUBLIC_TASKS_API_SECRET="):
-            return line.split("=", 1)[1]
-
-    print("ERROR: NEXT_PUBLIC_TASKS_API_SECRET not found in .env.local", file=sys.stderr)
-    sys.exit(1)
+    return token
 
 
 # ---------------------------------------------------------------------------

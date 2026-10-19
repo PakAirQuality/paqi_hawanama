@@ -192,11 +192,27 @@ export interface PredictionsResponse {
   count: number
 }
 
+export interface TileDateDetail {
+  date: string
+  models: Array<'backbone' | 'support_aware'>
+  /** true once the Pakistan calendar day has ended and daily aggregation can exist */
+  complete: boolean
+}
+
 export interface TileDatesResponse {
   dates: string[]
   count: number
+  /** per-date availability; older API builds omit it */
+  details?: TileDateDetail[]
+  today_pkt?: string
   tile_url_template: string
   tilejson_url_template: string
+}
+
+export interface MatchedBias {
+  bias: number
+  mae: number
+  n: number
 }
 
 export type TabType = 'overview' | 'features' | 'executions' | 'results' | 'model-history' | 'daily-status'

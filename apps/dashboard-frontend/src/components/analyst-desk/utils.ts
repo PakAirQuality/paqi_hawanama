@@ -1,30 +1,23 @@
 // Utilities for the Analyst Desk
 
-// ── Risk band colors (consistent with AQI color standards) ──────────────
+// ── Health band colours and labels: derived from the one classification in lib/aqi ──
+// Keys are the canonical US EPA 2024 categories; legacy keys ("severe") are kept as
+// aliases so older stored forecasts still render.
 
-export const BAND_COLORS: Record<string, string> = {
-  good:             '#6ecc39',
-  moderate:         '#f0c20c',
-  unhealthy:        '#ef7855',
-  very_unhealthy:   '#a070b5',
-  severe:           '#991b1b',
+import { AQI_BANDS, UNKNOWN_BAND } from '@/lib/aqi'
+
+function withAliases<T>(pick: (b: typeof AQI_BANDS[number]) => T): Record<string, T> {
+  const out: Record<string, T> = {}
+  for (const b of AQI_BANDS) out[b.key] = pick(b)
+  out.severe = out.hazardous
+  out.usg = out.unhealthy_sensitive
+  out.unknown = pick(UNKNOWN_BAND as typeof AQI_BANDS[number])
+  return out
 }
 
-export const BAND_BG_COLORS: Record<string, string> = {
-  good:             'bg-green-100 text-green-800',
-  moderate:         'bg-yellow-100 text-yellow-800',
-  unhealthy:        'bg-orange-100 text-orange-800',
-  very_unhealthy:   'bg-purple-100 text-purple-800',
-  severe:           'bg-red-100 text-red-900',
-}
-
-export const BAND_LABELS: Record<string, string> = {
-  good:             'Good',
-  moderate:         'Moderate',
-  unhealthy:        'Unhealthy',
-  very_unhealthy:   'Very Unhealthy',
-  severe:           'Severe',
-}
+export const BAND_COLORS: Record<string, string> = withAliases(b => b.color)
+export const BAND_BG_COLORS: Record<string, string> = withAliases(b => b.badge)
+export const BAND_LABELS: Record<string, string> = withAliases(b => b.label)
 
 // ── Priority colors ─────────────────────────────────────────────────────
 

@@ -1,0 +1,29 @@
+cff-version: 1.2.0
+message: "If you use Hawanama data or code, please cite it as below."
+title: "Hawanama: real-time air quality data for Pakistan and South Asia"
+type: software
+authors:
+  - name: "Pakistan Air Quality Initiative"
+    alias: PAQI
+    website: "https://pakairquality.com"
+  - family-names: Ahmad
+    given-names: Rehan
+    affiliation: "Pakistan Air Quality Initiative"
+  - family-names: Omar
+    given-names: Abid
+    affiliation: "Pakistan Air Quality Initiative"
+repository-code: "https://github.com/PakAirQuality/paqi_hawanama"
+url: "https://hawanama.org"
+license: MIT
+keywords:
+  - air quality
+  - PM2.5
+  - AQI
+  - Pakistan
+  - South Asia
+  - air pollution
+  - open data
+abstract: >-
+  Hawanama collects hourly PM2.5 and US AQI readings from more than 1,200 monitoring stations
+  across Pakistan, India, Bangladesh, Nepal and Sri Lanka, stores them in TimescaleDB and serves
+  them through an open API, CSV exports and a public map at hawanama.org. Data is CC BY 4.0.

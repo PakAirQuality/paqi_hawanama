@@ -6,3 +6,10 @@
 !apps/api/start.sh
 !apps/api/alembic.ini
 !apps/api/Dockerfile
+# Never bake credentials into the image, whatever directory they sit in.
+**/.env
+**/.env.*
+**/*.pem
+**/*.key
+**/*credentials*.json
+**/*service-account*.json

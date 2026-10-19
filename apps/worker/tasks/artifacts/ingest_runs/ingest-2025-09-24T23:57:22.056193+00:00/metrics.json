@@ -1,0 +1,10 @@
+{
+  "run_id": "ingest-2025-09-24T23:57:22.056193+00:00",
+  "started_utc": "2025-09-24T23:57:22.056193+00:00",
+  "success_count": 187,
+  "fail_count": 3,
+  "rate_limit_per_min": 90,
+  "concurrency": 6,
+  "allow_city_fallback": false,
+  "allow_state_alias": true
+}

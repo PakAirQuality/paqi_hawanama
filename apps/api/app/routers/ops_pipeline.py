@@ -17,7 +17,12 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
+import re
+
+from starlette.concurrency import run_in_threadpool
+
 from app.core.config import settings
+from app.core.filecache import BlobMissing, BoundedBlobCache
 from app.core.security import verify_tasks_token
 from ._tile_utils import (
     TURBO_CMAP,
@@ -79,7 +84,7 @@ def _gcs_read_json(bucket_name: str, blob_path: str) -> Dict[str, Any]:
         logger.error(f"GCS read failed: gs://{bucket_name}/{blob_path}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"GCS read failed: {blob_path}: {str(e)}"
+            detail="Storage read failed"
         )
 
 
@@ -118,7 +123,7 @@ def _gcs_list_run_dates(limit: int = 30) -> List[str]:
         logger.error(f"Failed to list run dates from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list run dates: {str(e)}"
+            detail="Failed to list run dates"
         )
 
 
@@ -178,9 +183,7 @@ def _get_derived_bucket() -> str:
     summary="Get pipeline summary",
     description="Returns current model pointer, predictions pointer, and latest run report."
 )
-async def get_pipeline_summary(
-    _: bool = Depends(verify_tasks_token)
-) -> Dict[str, Any]:
+async def get_pipeline_summary() -> Dict[str, Any]:
     """
     Get pipeline summary including:
     - Model pointer (current operational model)
@@ -268,9 +271,7 @@ def _find_model_results_file(waterline: str) -> Optional[str]:
     summary="Get model training details",
     description="Returns model training results including hyperparameters, CV metrics, and feature importance."
 )
-async def get_model_details(
-    _: bool = Depends(verify_tasks_token)
-) -> Dict[str, Any]:
+async def get_model_details() -> Dict[str, Any]:
     """
     Get detailed model training results for the current operational model.
 
@@ -415,7 +416,7 @@ def _gcs_list_model_history(limit: int = 30) -> List[str]:
         logger.error(f"Failed to list model history from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list model history: {str(e)}"
+            detail="Failed to list model history"
         )
 
 
@@ -426,7 +427,6 @@ def _gcs_list_model_history(limit: int = 30) -> List[str]:
 )
 async def list_model_history(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of entries to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available model training history entries (most recent last)."""
     dates = _gcs_list_model_history(limit=limit)
@@ -440,7 +440,6 @@ async def list_model_history(
 )
 async def get_model_history_entry(
     reference_date: str,
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
     Get model training results for a specific reference date.
@@ -491,7 +490,6 @@ async def get_model_history_entry(
 )
 async def list_pipeline_runs(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of run dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available pipeline run dates (most recent last)."""
     dates = _gcs_list_run_dates(limit=limit)
@@ -505,7 +503,6 @@ async def list_pipeline_runs(
 )
 async def get_run_report(
     run_date: str,
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """
     Get the run report for a specific date.
@@ -548,7 +545,7 @@ def _gcs_list_prediction_dates(limit: int = 30) -> List[str]:
         logger.error(f"Failed to list prediction dates from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list prediction dates: {str(e)}"
+            detail="Failed to list prediction dates"
         )
 
 
@@ -559,7 +556,6 @@ def _gcs_list_prediction_dates(limit: int = 30) -> List[str]:
 )
 async def list_predictions(
     limit: int = Query(30, ge=1, le=365, description="Maximum number of dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available prediction dates (most recent last)."""
     dates = _gcs_list_prediction_dates(limit=limit)
@@ -573,22 +569,35 @@ async def list_predictions(
 )
 async def get_prediction_data(
     pred_date: str,
-    _: bool = Depends(verify_tasks_token)
+    model: str = Query("backbone", description="Model variant for `stats`: 'backbone' or 'support_aware'"),
 ) -> Dict[str, Any]:
     """
     Get prediction data for a specific date.
 
     Returns JSON with grid metadata, statistics, and PM2.5 values
-    optimized for frontend map rendering.
+    optimized for frontend map rendering. `stats` describes the requested model's
+    grid (an area average over the model domain, not a station or population mean).
 
     Args:
         pred_date: Date in YYYY-MM-DD format
     """
+    _check_pred_date(pred_date)
+    if model not in ("backbone", "support_aware"):
+        raise HTTPException(status_code=400, detail="unknown model variant")
     outputs_bucket = _get_outputs_bucket()
 
     # Try JSON format first (new format with grid data)
     try:
-        return _gcs_read_json(outputs_bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
+        data = _gcs_read_json(outputs_bucket, f"predictions/date={pred_date}/pm25_{pred_date}.json")
+        data["model"] = model
+        data["stats_basis"] = "modelled_area_average"
+        if model == "support_aware":
+            from starlette.concurrency import run_in_threadpool as _rtp
+            sa_stats = await _rtp(_compute_tif_stats, outputs_bucket, f"predictions/support_aware/date={pred_date}/pm25_{pred_date}.tif")
+            if sa_stats is None:
+                raise HTTPException(status_code=404, detail="No support_aware prediction for that date")
+            data["stats"] = {**(data.get("stats") or {}), **sa_stats}
+        return data
     except HTTPException as e:
         if e.status_code != 404:
             raise
@@ -710,54 +719,53 @@ def _download_cog_to_temp(bucket_name: str, blob_path: str) -> str:
         client = _gcs_client()
         blob = client.bucket(bucket_name).blob(blob_path)
         if not blob.exists(client):
-            raise HTTPException(
-                status_code=404,
-                detail=f"COG not found: gs://{bucket_name}/{blob_path}"
-            )
+            raise BlobMissing(blob_path)
 
         # Create temp file
         tmp = tempfile.NamedTemporaryFile(suffix=".tif", delete=False)
         blob.download_to_filename(tmp.name)
         return tmp.name
-    except HTTPException:
+    except (HTTPException, BlobMissing):
         raise
     except Exception as e:
-        logger.error(f"Failed to download COG: gs://{bucket_name}/{blob_path}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to download COG: {str(e)}"
-        )
+        logger.error("Failed to download COG gs://%s/%s: %s", bucket_name, blob_path, type(e).__name__, exc_info=True)
+        raise HTTPException(status_code=502, detail="Raster data temporarily unavailable")
 
 
-# In-process cache for COG temp files. Keyed by "bucket/blob_path".
-# Avoids re-downloading the same COG on every tile request within a container lifetime.
-_COG_FILE_CACHE: Dict[str, str] = {}
-_COG_FILE_CACHE_LOCK = threading.Lock()
-_COG_ABSENT: set = set()  # blob paths known to not exist — skips repeated GCS checks
+# Bounded on-disk cache for COGs (Cloud Run /tmp is memory): at most 32 files, LRU
+# evicted and deleted, and a bounded "known missing" set. Keys are validated before
+# they reach here (see _check_pred_date / _check_model) so clients cannot grow it with
+# arbitrary strings. Always call from a worker thread.
+_COG_CACHE = BoundedBlobCache("cogs", max_files=32, max_absent=2000)
+
+_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_MODEL_RE = re.compile(r"^(backbone|support_aware|population|urban/[a-z0-9_]{1,32})$")
+
+
+def _check_pred_date(value: str) -> str:
+    """400 unless ``value`` is a YYYY-MM-DD date (it becomes part of a storage path)."""
+    if not _DATE_RE.match(value or ""):
+        raise HTTPException(status_code=400, detail="date must be YYYY-MM-DD")
+    try:
+        from datetime import date as _date
+        _date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="date must be a valid YYYY-MM-DD date")
+    return value
+
+
+def _check_model(value: str) -> str:
+    if not _MODEL_RE.match(value or ""):
+        raise HTTPException(status_code=400, detail="unknown model variant")
+    return value
 
 
 def _get_or_download_cog(bucket_name: str, blob_path: str) -> str:
-    """Return cached temp file path for COG, downloading once per process if needed.
-    Raises HTTPException(404) for missing blobs and caches that result too."""
-    cache_key = f"{bucket_name}/{blob_path}"
-    if cache_key in _COG_ABSENT:
-        raise HTTPException(status_code=404, detail=f"COG not found: gs://{cache_key}")
-    if cache_key in _COG_FILE_CACHE:
-        return _COG_FILE_CACHE[cache_key]
-    with _COG_FILE_CACHE_LOCK:
-        if cache_key in _COG_ABSENT:
-            raise HTTPException(status_code=404, detail=f"COG not found: gs://{cache_key}")
-        if cache_key in _COG_FILE_CACHE:
-            return _COG_FILE_CACHE[cache_key]
-        try:
-            path = _download_cog_to_temp(bucket_name, blob_path)
-            _COG_FILE_CACHE[cache_key] = path
-            logger.info(f"COG cached: gs://{bucket_name}/{blob_path} → {path}")
-            return path
-        except HTTPException as e:
-            if e.status_code == 404:
-                _COG_ABSENT.add(cache_key)
-            raise
+    """Return a local path for the COG, downloading at most once while it stays cached.
+    Raises HTTPException(404) for missing blobs (cached, bounded)."""
+    return _COG_CACHE.get_or_download(
+        f"{bucket_name}/{blob_path}", lambda: _download_cog_to_temp(bucket_name, blob_path)
+    )
 
 
 @router.get(
@@ -792,6 +800,8 @@ async def get_prediction_tile(
     from fastapi.responses import Response
     from starlette.concurrency import run_in_threadpool
 
+    _check_pred_date(pred_date)
+    _check_model(model)
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
@@ -982,10 +992,11 @@ async def get_prediction_tilejson(
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
-    # Download COG to temp file
+    _check_pred_date(pred_date)
+    _check_model(model)
     prefix = "predictions/support_aware" if model == "support_aware" else "predictions"
     blob_path = f"{prefix}/date={pred_date}/pm25_{pred_date}.tif"
-    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, outputs_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -1026,7 +1037,7 @@ async def get_prediction_tilejson(
         logger.error(f"TileJSON error for {pred_date}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"TileJSON generation failed: {error_msg}"
+            detail="TileJSON generation failed"
         )
     finally:
         try:
@@ -1064,7 +1075,7 @@ def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
         logger.error(f"Failed to list COG dates from gs://{bucket_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list COG dates: {str(e)}"
+            detail="Failed to list COG dates"
         )
 
 
@@ -1076,9 +1087,12 @@ def _gcs_list_cog_dates(limit: int = 365) -> List[str]:
 async def list_cog_dates(
     limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
     model: str = Query("backbone", description="Model variant: 'backbone' or 'support_aware'"),
-) -> Dict[str, Any]:
+) -> Any:
     """List available COG prediction dates for tile serving."""
+    from fastapi.responses import JSONResponse
+
     backbone_dates = set(_gcs_list_cog_dates(limit=limit))
+    sa_dates: set = set()
 
     # Always include support_aware dates so the timeline shows all available dates
     # regardless of which model toggle is active
@@ -1101,12 +1115,33 @@ async def list_cog_dates(
         all_dates = sorted(backbone_dates)
 
     dates = all_dates[-limit:]
-    return {
-        "dates": dates,
-        "count": len(dates),
-        "tile_url_template": "/api/v1/ops/pipeline/tiles/{date}/{z}/{x}/{y}.png",
-        "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson"
-    }
+    # A date is "complete" once the station daily aggregation for it can exist, i.e. the
+    # Pakistan calendar day has ended (the aggregation runs at 04:00 UTC). Clients must use
+    # this flag rather than comparing against the browser's UTC date.
+    from datetime import datetime as _dt
+    from zoneinfo import ZoneInfo
+    today_pkt = _dt.now(ZoneInfo("Asia/Karachi")).strftime("%Y-%m-%d")
+    details = [
+        {
+            "date": d,
+            "models": [m for m, present in (("backbone", d in backbone_dates), ("support_aware", d in sa_dates)) if present],
+            "complete": d < today_pkt,
+        }
+        for d in dates
+    ]
+    return JSONResponse(
+        content={
+            "dates": dates,
+            "count": len(dates),
+            "details": details,
+            "today_pkt": today_pkt,
+            "tile_url_template": "/api/v1/ops/pipeline/tiles/{date}/{z}/{x}/{y}.png",
+            "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson",
+        },
+        headers={
+            "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+        },
+    )
 
 
 @router.get(
@@ -1126,21 +1161,19 @@ async def get_urban_grid_json(
     if city_key not in valid_cities:
         raise HTTPException(status_code=404, detail=f"Unknown city: {city_key}")
 
+    _check_pred_date(pred_date)
     bucket_name = _get_outputs_bucket()
     blob_path = f"predictions/urban/date={pred_date}/{city_key}.json"
 
-    try:
+    def _load() -> dict:
         client = _gcs_client()
         blob = client.bucket(bucket_name).blob(blob_path)
         if not blob.exists(client):
-            raise HTTPException(status_code=404, detail=f"No urban data for {city_key} on {pred_date}")
+            raise HTTPException(status_code=404, detail="No urban data for that city and date")
+        return _json.loads(blob.download_as_bytes())
 
-        tmp = tempfile.NamedTemporaryFile(suffix=".json", delete=False)
-        blob.download_to_filename(tmp.name)
-        with open(tmp.name) as f:
-            data = _json.load(f)
-        import os
-        os.unlink(tmp.name)
+    try:
+        data = await run_in_threadpool(_load)
 
         # Return grid info + values + population
         return {
@@ -1156,8 +1189,8 @@ async def get_urban_grid_json(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Failed to load urban grid for {city_key}/{pred_date}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error("Failed to load urban grid for %s/%s: %s", city_key, pred_date, type(e).__name__, exc_info=True)
+        raise HTTPException(status_code=502, detail="Urban grid temporarily unavailable")
 
 
 @router.get(
@@ -1171,8 +1204,9 @@ async def get_point_value(
     lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
     smoothed: bool = Query(False, description="Use Gaussian-smoothed predictions"),
     model: str = Query("backbone", description="Model variant: 'backbone', 'support_aware', or 'urban/{city}'"),
-    _: bool = Depends(verify_tasks_token),
-) -> Dict[str, Any]:
+) -> Any:
+    # Public — reads from the same GCS COGs as the unauthenticated tile-serving
+    # endpoints; the public site's history-mode hover tooltip needs this.
     """
     Query PM2.5 prediction value at a specific coordinate.
 
@@ -1186,10 +1220,12 @@ async def get_point_value(
     import os
     import math
 
+    _check_pred_date(pred_date)
+    _check_model(model)
     Reader, _ = _require_rio_tiler()
     outputs_bucket = _get_outputs_bucket()
 
-    # Download COG to temp file
+    # Resolve the COG (cached, bounded; downloaded off the event loop)
     if model.startswith("urban/"):
         city_key = model.split("/", 1)[1]
         suffix = "_smoothed" if smoothed else ""
@@ -1200,7 +1236,7 @@ async def get_point_value(
     else:
         suffix = "_gaussian_smoothed" if smoothed else ""
         blob_path = f"predictions/date={pred_date}/pm25_{pred_date}{suffix}.tif"
-    tmp_path = _download_cog_to_temp(outputs_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, outputs_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -1213,17 +1249,24 @@ async def get_point_value(
             if value is not None and (value < -9000 or not math.isfinite(value)):
                 value = None
 
-            return {
-                "date": pred_date,
-                "lat": lat,
-                "lon": lon,
-                "pm25": round(float(value), 2) if value is not None else None,
-                "unit": "µg/m³",
-                "colorscale": {
-                    "vmin": PM25_VMIN,
-                    "vmax": PM25_VMAX,
-                }
-            }
+            from fastapi.responses import JSONResponse
+            return JSONResponse(
+                content={
+                    "date": pred_date,
+                    "lat": lat,
+                    "lon": lon,
+                    "pm25": round(float(value), 2) if value is not None else None,
+                    "unit": "µg/m³",
+                    "colorscale": {
+                        "vmin": PM25_VMIN,
+                        "vmax": PM25_VMAX,
+                    },
+                },
+                headers={
+                    # The COG is immutable per (date, smoothed, model); cache aggressively.
+                    "Cache-Control": "public, max-age=86400, s-maxage=604800, immutable",
+                },
+            )
 
     except HTTPException:
         raise
@@ -1237,7 +1280,7 @@ async def get_point_value(
         logger.error(f"Point query error for {pred_date} at ({lat}, {lon}): {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Point query failed: {error_msg}"
+            detail="Point query failed"
         )
     finally:
         try:
@@ -1255,9 +1298,7 @@ async def get_point_value(
     summary="List available features",
     description="Returns list of features with metadata (stage, unit, vmin, vmax, colormap)."
 )
-async def list_features(
-    _: bool = Depends(verify_tasks_token)
-) -> Dict[str, Any]:
+async def list_features() -> Dict[str, Any]:
     """List all available features with their metadata."""
     features = [
         {
@@ -1301,7 +1342,7 @@ def _gcs_list_feature_cog_dates(feature: str, limit: int = 365) -> List[str]:
         logger.error(f"Failed to list feature COG dates for {feature}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list feature COG dates: {str(e)}"
+            detail="Failed to list feature COG dates"
         )
 
 
@@ -1313,7 +1354,6 @@ def _gcs_list_feature_cog_dates(feature: str, limit: int = 365) -> List[str]:
 async def list_feature_cog_dates(
     feature: str = Query(..., description="Feature name (e.g. t2m, optical_depth_047)"),
     limit: int = Query(365, ge=1, le=1000, description="Maximum number of dates to return"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """List available COG dates for a specific feature."""
     if feature not in FEATURE_CONFIG:
@@ -1338,7 +1378,6 @@ async def get_feature_tile(
     z: int,
     x: int,
     y: int,
-    _: bool = Depends(verify_tasks_token)
 ):
     """Serve XYZ tiles from a feature COG."""
     from fastapi.responses import Response
@@ -1352,8 +1391,9 @@ async def get_feature_tile(
     features_bucket = _get_features_bucket()
 
     # Path in features bucket: cog/{feature}/date={date}/{feature}.tif
+    _check_pred_date(feat_date)
     blob_path = f"cog/{feature}/date={feat_date}/{feature}.tif"
-    tmp_path = _download_cog_to_temp(features_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, features_bucket, blob_path)
 
     try:
         import numpy as np
@@ -1373,7 +1413,7 @@ async def get_feature_tile(
                 content=png_bytes,
                 media_type="image/png",
                 headers={
-                    "Cache-Control": "public, max-age=86400",
+                    "Cache-Control": "public, max-age=86400, s-maxage=604800, immutable",
                     "X-Tile-Date": feat_date,
                     "X-Feature": feature,
                 }
@@ -1440,7 +1480,7 @@ async def get_feature_tile(
             return Response(
                 content=buf.getvalue(),
                 media_type="image/png",
-                headers={"Cache-Control": "public, max-age=86400"}
+                headers={"Cache-Control": "public, max-age=86400, s-maxage=604800, immutable"}
             )
         except:
             raise HTTPException(status_code=500, detail="Tile generation failed")
@@ -1461,7 +1501,6 @@ async def get_feature_point_value(
     feat_date: str,
     lat: float = Query(..., ge=20.0, le=40.0, description="Latitude"),
     lon: float = Query(..., ge=60.0, le=80.0, description="Longitude"),
-    _: bool = Depends(verify_tasks_token)
 ) -> Dict[str, Any]:
     """Query feature value at a specific coordinate."""
     import os
@@ -1475,8 +1514,9 @@ async def get_feature_point_value(
     features_bucket = _get_features_bucket()
 
     # Path in features bucket: cog/{feature}/date={date}/{feature}.tif
+    _check_pred_date(feat_date)
     blob_path = f"cog/{feature}/date={feat_date}/{feature}.tif"
-    tmp_path = _download_cog_to_temp(features_bucket, blob_path)
+    tmp_path = await run_in_threadpool(_get_or_download_cog, features_bucket, blob_path)
 
     try:
         with Reader(tmp_path) as src:
@@ -1507,7 +1547,7 @@ async def get_feature_point_value(
         if "outside" in error_msg.lower() or "bounds" in error_msg.lower():
             raise HTTPException(status_code=400, detail=f"Coordinates ({lat}, {lon}) outside bounds")
         logger.error(f"Feature point query error for {feature}/{feat_date} at ({lat}, {lon}): {e}")
-        raise HTTPException(status_code=500, detail=f"Point query failed: {error_msg}")
+        raise HTTPException(status_code=500, detail="Point query failed")
     finally:
         try:
             os.unlink(tmp_path)
@@ -1605,7 +1645,7 @@ async def run_pipeline_job(
         logger.error(f"Failed to trigger Cloud Run job {which}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to trigger job: {str(e)}"
+            detail="Failed to trigger job"
         )
 
 
@@ -1656,7 +1696,7 @@ async def get_job_executions(
         logger.error(f"Failed to list executions for {which}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to list executions: {str(e)}"
+            detail="Failed to list executions"
         )
 
 
@@ -1696,7 +1736,7 @@ async def get_execution_details(
         logger.error(f"Failed to get execution {execution_name}: {e}")
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to get execution: {str(e)}"
+            detail="Failed to get execution"
         )
 
 
@@ -1748,7 +1788,9 @@ async def get_station_daily_observations(
             data["count"] = len(data["stations"])
             return JSONResponse(
                 content=data,
-                headers={"Cache-Control": "public, max-age=86400"},
+                headers={
+                    "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
+                },
             )
 
         # ── Slow fallback: parse parquets ──
@@ -1813,11 +1855,16 @@ async def get_station_daily_observations(
                     "complete": bool(row.get("pm25_ugm3_complete", 0)),
                 })
 
-            return {
-                "date": obs_date,
-                "stations": stations,
-                "count": len(stations),
-            }
+            return JSONResponse(
+                content={
+                    "date": obs_date,
+                    "stations": stations,
+                    "count": len(stations),
+                },
+                headers={
+                    "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
+                },
+            )
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
 
@@ -1825,7 +1872,7 @@ async def get_station_daily_observations(
         raise
     except Exception as e:
         logger.error(f"Failed to load station daily for {obs_date}: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail="Internal error")
 
 
 # =============================================================================
@@ -1842,10 +1889,10 @@ You are an air quality analyst writing the daily operational brief for Pakistan 
 
 ### Station Observations
 - {station_count} stations reporting
-- National mean PM2.5: {obs_mean} µg/m³
+- Reporting-station mean PM2.5 (unweighted mean of station daily means): {obs_mean} µg/m³
 - National max PM2.5: {obs_max} µg/m³
 - Band breakdown: {band_breakdown}
-- Stations exceeding unhealthy thresholds (>75 µg/m³): {unhealthy_count} ({unhealthy_pct}%)
+- Stations in the US AQI Unhealthy band or worse (PM2.5 above 55.4 µg/m³): {unhealthy_count} ({unhealthy_pct}%)
 
 ### Most Polluted Cities (by daily mean)
 {worst_cities}
@@ -1945,15 +1992,56 @@ def _load_forecasts_text_safe(blob_path: str) -> Optional[str]:
 
 
 def _get_band(pm25: float) -> str:
-    if pm25 <= 35:
-        return "good"
-    if pm25 <= 75:
-        return "moderate"
-    if pm25 <= 150:
-        return "unhealthy"
-    if pm25 <= 250:
-        return "very_unhealthy"
-    return "severe"
+    """US EPA 2024 PM2.5 category key (app/services/aqi/pm25.py)."""
+    from app.services.aqi.pm25 import band_key
+    return band_key(pm25)
+
+
+def _sample_cog_at_points(bucket_name: str, blob_path: str, points: List[tuple]) -> List[Optional[float]]:
+    """Prediction values at (lon, lat) points from a COG; None where nodata/outside/missing.
+
+    Blocking (download + raster reads); used by brief generation (scheduler) only.
+    """
+    try:
+        tmp_path = _get_or_download_cog(bucket_name, blob_path)
+    except HTTPException:
+        return [None] * len(points)
+    try:
+        import math as _math
+        import rasterio
+        out: List[Optional[float]] = []
+        with rasterio.open(tmp_path) as ds:
+            nodata = ds.nodata
+            for v in ds.sample(points, indexes=1):
+                val = float(v[0])
+                if (nodata is not None and val == nodata) or not _math.isfinite(val) or val < -9000:
+                    out.append(None)
+                else:
+                    out.append(val)
+        return out
+    except Exception as e:
+        logger.warning("Point sampling failed for %s: %s", blob_path, type(e).__name__)
+        return [None] * len(points)
+
+
+def _matched_bias(stations: List[Dict], predicted: List[Optional[float]]) -> Optional[Dict[str, float]]:
+    """Mean (prediction − observation) over stations where both exist: a like-for-like
+    validation statistic, unlike grid-mean minus station-mean."""
+    pairs = [(p, s["pm25"]) for p, s in zip(predicted, stations) if p is not None and s.get("pm25") is not None]
+    if not pairs:
+        return None
+    diffs = [p - o for p, o in pairs]
+    return {
+        "bias": round(sum(diffs) / len(diffs), 1),
+        "mae": round(sum(abs(d) for d in diffs) / len(diffs), 1),
+        "n": len(pairs),
+    }
+
+
+def _fmt_bias(m: Optional[Dict[str, float]]) -> str:
+    if not m:
+        return "unavailable (no matched stations)"
+    return f"{'+' if m['bias'] > 0 else ''}{m['bias']} µg/m³ matched at {m['n']} stations (MAE {m['mae']})"
 
 
 def _build_brief_context(
@@ -1961,8 +2049,10 @@ def _build_brief_context(
     pred_stats: Optional[Dict],
     enhanced_stats: Optional[Dict],
     fires_csv: Optional[str],
+    matched: Optional[Dict[str, Optional[Dict[str, float]]]] = None,
 ) -> Dict[str, str]:
     """Build template variables from raw data sources."""
+    matched = matched or {}
 
     # ── Station observations ──
     valid = [s for s in stations if s.get("pm25") is not None]
@@ -1971,11 +2061,14 @@ def _build_brief_context(
         values = [s["pm25"] for s in valid]
         obs_mean = round(sum(values) / len(values), 1)
         obs_max = round(max(values), 1)
-        bands = {"good": 0, "moderate": 0, "unhealthy": 0, "very_unhealthy": 0, "severe": 0}
+        bands = {"good": 0, "moderate": 0, "unhealthy_sensitive": 0, "unhealthy": 0, "very_unhealthy": 0, "hazardous": 0, "unknown": 0}
         for v in values:
             bands[_get_band(v)] += 1
-        band_breakdown = ", ".join(f"{cnt} {band.replace('_', ' ')}" for band, cnt in bands.items() if cnt)
-        unhealthy_count = bands["unhealthy"] + bands["very_unhealthy"] + bands["severe"]
+        _band_names = {"unhealthy_sensitive": "unhealthy for sensitive groups"}
+        band_breakdown = ", ".join(
+            f"{cnt} {_band_names.get(band, band.replace('_', ' '))}" for band, cnt in bands.items() if cnt and band != "unknown"
+        )
+        unhealthy_count = bands["unhealthy"] + bands["very_unhealthy"] + bands["hazardous"]
         unhealthy_pct = round(unhealthy_count / station_count * 100)
 
         # Worst cities
@@ -2003,11 +2096,9 @@ def _build_brief_context(
         n_valid = pred_stats.get("n_valid", 0)
         n_total = pred_stats.get("n_total", 0)
         coverage = f"{round(n_valid / n_total * 100)}%" if n_total else "unavailable"
-        if isinstance(obs_mean, (int, float)):
-            bias_val = round(pred_stats["mean"] - obs_mean, 1)
-            bias = f"{'+' if bias_val > 0 else ''}{bias_val} µg/m³"
-        else:
-            bias = "unavailable (no observations)"
+        # Bias is the matched-station statistic (prediction sampled at each reporting
+        # station minus its observation), never grid mean minus station mean.
+        bias = _fmt_bias(matched.get("backbone"))
     else:
         pred_mean = coverage = bias = "unavailable"
         data_track = "unavailable"
@@ -2015,11 +2106,7 @@ def _build_brief_context(
     # ── Enhanced (support_aware) model stats ──
     if enhanced_stats and enhanced_stats.get("mean") is not None:
         enhanced_mean = f"{round(enhanced_stats['mean'], 1)} µg/m³"
-        if isinstance(obs_mean, (int, float)):
-            e_bias_val = round(enhanced_stats["mean"] - obs_mean, 1)
-            enhanced_bias = f"{'+' if e_bias_val > 0 else ''}{e_bias_val} µg/m³"
-        else:
-            enhanced_bias = "unavailable (no observations)"
+        enhanced_bias = _fmt_bias(matched.get("support_aware"))
     else:
         enhanced_mean = enhanced_bias = "unavailable"
 
@@ -2213,15 +2300,40 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
         if fires_csv and fires_csv.strip():
             break
 
+    # ── Matched-station bias for both models (prediction sampled at station points) ──
+    valid_stations = [s for s in stations if s.get("pm25") is not None and s.get("lat") is not None and s.get("lon") is not None]
+    matched: Dict[str, Optional[Dict[str, float]]] = {"backbone": None, "support_aware": None}
+    if valid_stations:
+        points = [(float(s["lon"]), float(s["lat"])) for s in valid_stations]
+        from starlette.concurrency import run_in_threadpool as _rtp
+        for model_key, blob in (
+            ("backbone", f"predictions/date={date}/pm25_{date}.tif"),
+            ("support_aware", f"predictions/support_aware/date={date}/pm25_{date}.tif"),
+        ):
+            preds = await _rtp(_sample_cog_at_points, outputs_bucket, blob, points)
+            matched[model_key] = _matched_bias(valid_stations, preds)
+
     # ── Generate ──
-    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv)
+    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv, matched)
     narrative = await _generate_brief_llm(date, context)
 
+    obs_mean_val = float(context["obs_mean"]) if context["obs_mean"] != "unavailable" else None
     result = {
         "date": date,
         "narrative": narrative,
         "station_count": int(context["station_count"]),
-        "obs_mean": float(context["obs_mean"]) if context["obs_mean"] != "unavailable" else None,
+        # Unweighted mean across the stations that reported that day (daily means of
+        # hourly PM2.5, Pakistan only). Not an area or population average.
+        "obs_mean": obs_mean_val,
+        "reporting_station_mean": obs_mean_val,
+        "mean_basis": "reporting_station_mean",
+        "period": {"date": date, "tz": "Asia/Karachi", "aggregation": "daily mean of hourly PM2.5 per station"},
+        "band_scale": "us_epa_2024",
+        "grid_mean": {
+            "backbone": round(float(pred_stats["mean"]), 1) if pred_stats and pred_stats.get("mean") is not None else None,
+            "support_aware": round(float(enhanced_stats["mean"]), 1) if enhanced_stats and enhanced_stats.get("mean") is not None else None,
+        },
+        "matched_bias": matched,
         "data_sources": {
             "stations": len(stations) > 0,
             "predictions": pred_stats is not None,
@@ -2229,18 +2341,39 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
         },
     }
 
-    # ── Cache to GCS ──
+    # ── Cache to GCS (only if we have station data) ──
     cache_path = f"briefs/ops_{date}.json"
-    try:
-        client = _gcs_client()
-        blob = client.bucket(outputs_bucket).blob(cache_path)
-        blob.upload_from_string(
-            json.dumps(result, ensure_ascii=False),
-            content_type="application/json",
+    if result["station_count"] == 0:
+        logger.warning(
+            f"Brief for {date} has no station observations — not caching "
+            f"(station daily aggregation likely not yet complete for this date)"
         )
-        logger.info(f"Cached brief for {date} at gs://{outputs_bucket}/{cache_path}")
-    except Exception as e:
-        logger.warning(f"Failed to cache brief for {date}: {e}")
+    else:
+        try:
+            client = _gcs_client()
+            blob = client.bucket(outputs_bucket).blob(cache_path)
+            blob.upload_from_string(
+                json.dumps(result, ensure_ascii=False),
+                content_type="application/json",
+            )
+            logger.info(f"Cached brief for {date} at gs://{outputs_bucket}/{cache_path}")
+            # Warm the public CDN edge cache so the first human visitor is a HIT.
+            # This GET goes Cloud Run → Fastly → GCS, seeding the s-maxage=86400 response.
+            try:
+                import httpx
+                brief_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/briefs/{date}"
+                stations_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/stations/daily/{date}?country=Pakistan&min_hours=6"
+                async with httpx.AsyncClient(timeout=20.0) as warm_client:
+                    brief_resp = await warm_client.get(brief_url)
+                    stations_resp = await warm_client.get(stations_url)
+                logger.info(
+                    f"Warmed CDN for {date} "
+                    f"(brief={brief_resp.status_code}, stations={stations_resp.status_code})"
+                )
+            except Exception as warm_err:
+                logger.warning(f"Failed to warm CDN for {date}: {warm_err}")
+        except Exception as e:
+            logger.warning(f"Failed to cache brief for {date}: {e}")
 
     return result
 
@@ -2263,6 +2396,13 @@ async def generate_briefs_batch(
 
     all_dates = _gcs_list_cog_dates(limit=days_back + 10)
     target_dates = all_dates[-days_back:]
+
+    # Never generate briefs for today's UTC date — station daily aggregation
+    # runs at 04:00 UTC and produces yesterday's data; today's stations.json
+    # won't exist yet, resulting in a stale "no stations reporting" brief.
+    from datetime import datetime, timezone
+    today_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    target_dates = [d for d in target_dates if d < today_utc]
 
     generated: List[str] = []
     skipped: List[str] = []

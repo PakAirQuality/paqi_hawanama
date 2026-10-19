@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_database
-from app.core.security import verify_tasks_token
 from app.services import analytics
 
 logger = logging.getLogger(__name__)
@@ -30,7 +29,6 @@ async def hotspots_daily(
     top_k: int = Query(5, ge=1, le=50, description="Number of results."),
     country: Optional[str] = Query(None, description="Country name filter (e.g. Pakistan, India)."),
     db: AsyncSession = Depends(get_database),
-    _auth=Depends(verify_tasks_token),
 ):
     return await analytics.get_hotspots_daily(db, date, geography, metric, top_k, country)
 
@@ -48,7 +46,6 @@ async def city_detail(
         description="Comma-separated sections: stations, trend, forecast.",
     ),
     db: AsyncSession = Depends(get_database),
-    _auth=Depends(verify_tasks_token),
 ):
     include_list = [s.strip() for s in include.split(",")] if include else ["stations", "trend"]
     return await analytics.get_city_detail(db, city_name, date, include_list)
@@ -63,7 +60,6 @@ async def station_detail(
     station_id: str,
     date: Optional[str] = Query(None, description="Date (YYYY-MM-DD). Defaults to today."),
     db: AsyncSession = Depends(get_database),
-    _auth=Depends(verify_tasks_token),
 ):
     return await analytics.get_city_detail(db, sensor_id=station_id, date=date)
 
@@ -79,7 +75,6 @@ async def compare_dates(
     geography: str = Query("national", description="'national' or a city name."),
     country: Optional[str] = Query(None, description="Country name filter (e.g. Pakistan, India)."),
     db: AsyncSession = Depends(get_database),
-    _auth=Depends(verify_tasks_token),
 ):
     return await analytics.get_compare_dates(db, date1, date2, geography, country)
 
@@ -93,7 +88,6 @@ async def explain_drivers(
     target: str = Query(..., description="City or station name to investigate."),
     date: Optional[str] = Query(None, description="Forecast date (YYYY-MM-DD). Defaults to latest."),
     db: AsyncSession = Depends(get_database),
-    _auth=Depends(verify_tasks_token),
 ):
     return await analytics.get_explain_drivers(db, target, date)
 
@@ -108,7 +102,6 @@ async def incident_summary(
     severity: str = Query("all", description="Filter: all, critical, or warning."),
     country: Optional[str] = Query(None, description="Country name filter (e.g. Pakistan, India)."),
     db: AsyncSession = Depends(get_database),
-    _auth=Depends(verify_tasks_token),
 ):
     return await analytics.get_incident_summary(db, date, severity, country)
 
@@ -121,6 +114,5 @@ async def incident_summary(
 async def forecast_audit(
     date: Optional[str] = Query(None, description="End date (YYYY-MM-DD). Defaults to latest."),
     n_days: int = Query(1, ge=1, le=90, description="Number of days to audit."),
-    _auth=Depends(verify_tasks_token),
 ):
     return await analytics.get_forecast_audit(date, n_days)

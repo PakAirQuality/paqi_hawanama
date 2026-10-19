@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { pktHour, pktHourLabel, formatPktDateTime } from '@/lib/dateLabel'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { CitySearch } from '@/components/ui/CitySearch'
@@ -39,9 +40,11 @@ const CityAQIBox: React.FC<{ value: number }> = ({ value }) => {
 
 interface CityClientProps {
   citySlug: string
+  /** Build-time city facts so the heading is in the HTML before any fetch. */
+  city?: { name: string; state: string | null; country: string | null }
 }
 
-export default function CityClient({ citySlug }: CityClientProps) {
+export default function CityClient({ citySlug, city }: CityClientProps) {
   const [chartMetric, setChartMetric] = useState<'aqi' | 'pm25'>('aqi')
   const [isMobile, setIsMobile] = useState(false)
 
@@ -96,7 +99,11 @@ export default function CityClient({ citySlug }: CityClientProps) {
           </div>
         </header>
         <div className="container mx-auto px-4 py-8">
-          <div className="text-center">Loading city data...</div>
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground">{city?.name ?? citySlug} air quality</h1>
+          {city && (
+            <p className="text-sm text-muted-foreground">{city.state}{city.country ? `, ${city.country}` : ''}</p>
+          )}
+          <div className="text-center mt-8 text-muted-foreground">Loading city data...</div>
         </div>
       </div>
     )
@@ -116,6 +123,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
           </div>
         </header>
         <div className="container mx-auto px-4 py-8">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground mb-6">{city?.name ?? citySlug} air quality</h1>
           <div className="text-center text-red-500">City not found or error loading data</div>
           <div className="text-center mt-4">
             <Link href="/" className="text-blue-500 hover:underline">← Back to Map</Link>
@@ -166,13 +174,13 @@ export default function CityClient({ citySlug }: CityClientProps) {
   }, index: number) => {
     // Use local time for display
     const pkDate = new Date(reading.timestamp_pk || reading.timestamp)
-    const hour = pkDate.getHours()
+    const hour = pktHour(pkDate)
     const aqiValue = reading.avg_aqi
     const pm25Value = reading.avg_pm25
     
     return {
       hour: hour,
-      timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+      timeLabel: pktHourLabel(pkDate),
       aqi: aqiValue !== null && aqiValue !== undefined ? Math.round(aqiValue) : null,
       pm25: pm25Value !== null && pm25Value !== undefined ? Math.round(pm25Value) : null,
       color: getAQIColorByValue(aqiValue || 0),
@@ -198,7 +206,9 @@ export default function CityClient({ citySlug }: CityClientProps) {
           <div className="flex items-center justify-between gap-4">
             <div className="flex items-center space-x-3 min-w-0">
               <img 
-                src="/logo-cropped.png" 
+                src="/logo-cropped-96.v1.png"
+                width={96}
+                height={105} 
                 alt="Hawanama Logo" 
                 className="w-8 h-8 sm:w-12 sm:h-12 object-contain flex-shrink-0"
               />
@@ -500,7 +510,7 @@ export default function CityClient({ citySlug }: CityClientProps) {
                   
                   {/* Last updated */}
                   <div className="text-center text-xs text-gray-400 mt-3 pt-3 border-t border-black/10">
-                    Last updated: {new Date(cityWeatherData.timestamp).toLocaleDateString()}, {new Date(cityWeatherData.timestamp).toLocaleTimeString()}
+                    Last updated: {formatPktDateTime(cityWeatherData.timestamp)}
                   </div>
                 </div>
               </div>

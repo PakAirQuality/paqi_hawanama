@@ -1,94 +1,151 @@
+// Build-time data for static routes and SEO metadata.
+//
+// Writes, under src/static/:
+//   citySlugs.json  - unique city slugs (generateStaticParams for /city/[slug])
+//   stationIds.json - station hash ids (generateStaticParams for /station/[id]);
+//                     the union of the live map list and the previously committed list,
+//                     so existing station URLs never disappear
+//   cities.json     - slug, name, state, country, station_count, lat, lon (centroid of its stations)
+//   stations.json   - id, name, city, state, country, lat, lon
+//
+// Runs as `prebuild`. If the API cannot be reached the committed files are kept and the
+// build continues (exit 0), so an API outage never breaks a deploy.
+
 import fs from 'fs/promises'
 import path from 'path'
 
-// Configuration - update with your API endpoints
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-152782825429.asia-south1.run.app'
+const STATIC_DIR = path.join(process.cwd(), 'src', 'static')
 
-async function fetchCitySlugs() {
+async function getJson(url) {
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000) })
+  if (!res.ok) throw new Error(`HTTP ${res.status} for ${url}`)
+  return res.json()
+}
+
+async function readExisting(file) {
   try {
-    console.log('Fetching city slugs from API...')
-    const response = await fetch(`${API_BASE}/api/v1/cities`)
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-    
-    const data = await response.json()
-    
-    // Extract city slugs from the API response
-    // The API returns cities in data.cities array
-    const cities = data.cities || []
-    const slugs = cities.map(city => city.slug).filter(Boolean)
-    
-    console.log(`Found ${slugs.length} city slugs`)
-    return slugs
-  } catch (error) {
-    console.error('Error fetching city slugs:', error)
-    throw error
+    return JSON.parse(await fs.readFile(path.join(STATIC_DIR, file), 'utf8'))
+  } catch {
+    return null
   }
 }
 
-async function fetchStationIds() {
-  try {
-    console.log('Fetching station IDs from API...')
-    const response = await fetch(`${API_BASE}/api/v1/dashboard/stations`)
-    
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-    
-    const data = await response.json()
-    
-    // Extract hash-based station IDs from the API response
-    // Backend now returns hash station_id as the primary ID field
-    const stations = data.stations || []
-    const ids = stations.map(station => station.id).filter(Boolean)
-    
-    console.log(`Found ${ids.length} station IDs (hash-based)`)
-    return ids
-  } catch (error) {
-    console.error('Error fetching station IDs:', error)
-    throw error
-  }
+function round(n) {
+  return typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 1e5) / 1e5 : null
 }
 
-async function generateStaticParams() {
+async function main() {
+  await fs.mkdir(STATIC_DIR, { recursive: true })
+  const existingIds = (await readExisting('stationIds.json')) || []
+
+  let citiesRaw, stationsRaw
   try {
-    console.log('Starting static parameter generation...')
-    
-    // Create src/static directory if it doesn't exist
-    const staticDir = path.join(process.cwd(), 'src', 'static')
-    await fs.mkdir(staticDir, { recursive: true })
-    
-    // Fetch data from APIs
-    const [citySlugs, stationIds] = await Promise.all([
-      fetchCitySlugs(),
-      fetchStationIds()
+    ;[citiesRaw, stationsRaw] = await Promise.all([
+      getJson(`${API_BASE}/api/v1/cities`),
+      getJson(`${API_BASE}/api/v1/dashboard/stations`),
     ])
-    
-    // Write city slugs to JSON file
-    const citySlugPath = path.join(staticDir, 'citySlugs.json')
-    await fs.writeFile(citySlugPath, JSON.stringify(citySlugs, null, 2))
-    console.log(`✅ Written ${citySlugs.length} city slugs to ${citySlugPath}`)
-    
-    // Write station IDs to JSON file
-    const stationIdPath = path.join(staticDir, 'stationIds.json')
-    await fs.writeFile(stationIdPath, JSON.stringify(stationIds, null, 2))
-    console.log(`✅ Written ${stationIds.length} station IDs to ${stationIdPath}`)
-    
-    console.log('✅ Static parameter generation completed successfully!')
-    
-    // Log summary
-    console.log('\n📊 Summary:')
-    console.log(`- City pages to be generated: ${citySlugs.length}`)
-    console.log(`- Station pages to be generated: ${stationIds.length}`)
-    console.log(`- Total static pages: ${citySlugs.length + stationIds.length + 1}`) // +1 for homepage
-    
-  } catch (error) {
-    console.error('❌ Error generating static parameters:', error)
+  } catch (err) {
+    const haveFiles = (await readExisting('cities.json')) && (await readExisting('stations.json'))
+    console.warn(`⚠️  generate-static-params: API unavailable (${err.message}).`)
+    if (haveFiles) {
+      console.warn('   Keeping the committed src/static/*.json files.')
+      return
+    }
+    console.error('   No committed static data to fall back on.')
     process.exit(1)
   }
+
+  const cityList = citiesRaw.cities || citiesRaw || []
+  const stationList = stationsRaw.stations || stationsRaw || []
+  if (cityList.length < 50 || stationList.length < 100) {
+    console.warn(`⚠️  Suspiciously small API response (cities=${cityList.length}, stations=${stationList.length}); keeping committed files.`)
+    return
+  }
+
+  // Stations first, so city centroids can be derived from them.
+  const stations = []
+  const seenStation = new Set()
+  for (const s of stationList) {
+    if (!s.id || seenStation.has(s.id)) continue
+    seenStation.add(s.id)
+    stations.push({
+      id: s.id,
+      name: s.name || `Station ${s.id}`,
+      city: s.city || null,
+      lat: round(s.latitude),
+      lon: round(s.longitude),
+    })
+  }
+
+  const byCityName = new Map()
+  for (const s of stations) {
+    if (!s.city || s.lat == null || s.lon == null) continue
+    const acc = byCityName.get(s.city) || { lat: 0, lon: 0, n: 0 }
+    acc.lat += s.lat
+    acc.lon += s.lon
+    acc.n += 1
+    byCityName.set(s.city, acc)
+  }
+
+  const cities = []
+  const seenSlug = new Set()
+  let duplicates = 0
+  for (const c of cityList) {
+    if (!c.slug || !c.name) continue
+    if (seenSlug.has(c.slug)) {
+      duplicates += 1
+      continue
+    }
+    seenSlug.add(c.slug)
+    const cen = byCityName.get(c.name)
+    cities.push({
+      slug: c.slug,
+      name: c.name,
+      state: c.state || null,
+      country: c.country || null,
+      station_count: c.station_count ?? 0,
+      lat: cen ? round(cen.lat / cen.n) : null,
+      lon: cen ? round(cen.lon / cen.n) : null,
+    })
+  }
+  cities.sort((a, b) => (a.country || '').localeCompare(b.country || '') || (a.state || '').localeCompare(b.state || '') || a.name.localeCompare(b.name))
+
+  // Attach state/country to stations through the city name (first match wins).
+  const cityByName = new Map()
+  for (const c of cities) if (!cityByName.has(c.name)) cityByName.set(c.name, c)
+  for (const s of stations) {
+    const c = s.city ? cityByName.get(s.city) : null
+    s.state = c?.state ?? null
+    s.country = c?.country ?? null
+    s.city_slug = c?.slug ?? null
+  }
+  stations.sort((a, b) => a.name.localeCompare(b.name))
+
+  // Keep metadata for stations that are not in this hour's live feed (they may have dropped
+  // out temporarily); only brand-new ids are appended, and nothing is ever removed here.
+  const existingStations = (await readExisting('stations.json')) || []
+  const freshIds = new Set(stations.map((s) => s.id))
+  for (const s of existingStations) {
+    if (!freshIds.has(s.id)) stations.push(s)
+  }
+  stations.sort((a, b) => a.name.localeCompare(b.name))
+  const stationIds = Array.from(new Set([...stations.map((s) => s.id), ...existingIds])).sort()
+  const citySlugs = cities.map((c) => c.slug)
+
+  const write = async (file, data) => {
+    await fs.writeFile(path.join(STATIC_DIR, file), JSON.stringify(data, null, 2) + '\n')
+    console.log(`✅ ${file}: ${Array.isArray(data) ? data.length : 'ok'}`)
+  }
+  await write('citySlugs.json', citySlugs)
+  await write('stationIds.json', stationIds)
+  await write('cities.json', cities)
+  await write('stations.json', stations)
+
+  console.log(`ℹ️  ${duplicates} duplicate city slug(s) skipped; ${stationIds.length - stations.length} station id(s) kept from the previous list.`)
 }
 
-// Run the script
-generateStaticParams()
+main().catch((err) => {
+  console.error('❌ generate-static-params failed:', err)
+  process.exit(1)
+})

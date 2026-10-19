@@ -6,18 +6,22 @@ Wind: reads gridded u/v wind from Open-Meteo AWS Open Data (ECMWF IFS 0.25°),
 SatPM25: serves pre-processed V5GL04 HybridPM25 COG as XYZ raster tiles.
 """
 
+import asyncio
 import io
 import json
 import logging
 import os
 import struct
+import threading
 import time
 import zlib
+
+from starlette.concurrency import run_in_threadpool
 from datetime import datetime, timezone
 
 import fsspec
 import numpy as np
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse, Response
 from omfiles import OmFileReader
 
@@ -104,16 +108,15 @@ def _encode_png(width: int, height: int, r_data: bytes, g_data: bytes) -> bytes:
     ihdr_data = struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)
     ihdr = _make_chunk(b"IHDR", ihdr_data)
 
-    raw_rows = bytearray()
-    for y in range(height):
-        raw_rows.append(0)
-        for x in range(width):
-            idx = y * width + x
-            raw_rows.append(r_data[idx])
-            raw_rows.append(g_data[idx])
-            raw_rows.append(128)
+    # Vectorised scanlines: [filter byte 0][R G 128][R G 128]... per row. The previous
+    # per-pixel Python loop took seconds for the 421x221 grid on the request thread.
+    r = np.frombuffer(r_data, dtype=np.uint8).reshape(height, width)
+    g = np.frombuffer(g_data, dtype=np.uint8).reshape(height, width)
+    b = np.full((height, width), 128, dtype=np.uint8)
+    rgb = np.dstack([r, g, b]).reshape(height, width * 3)
+    raw_rows = np.concatenate([np.zeros((height, 1), dtype=np.uint8), rgb], axis=1).tobytes()
 
-    compressed = zlib.compress(bytes(raw_rows))
+    compressed = zlib.compress(raw_rows)
     idat = _make_chunk(b"IDAT", compressed)
     iend = _make_chunk(b"IEND", b"")
 
@@ -163,23 +166,53 @@ def _refresh_cache() -> None:
           f"PNG={len(png_bytes)} bytes")
 
 
-def _ensure_cache() -> None:
-    """Ensure the cache is populated and fresh."""
+_refresh_lock = asyncio.Lock()
+
+
+async def _refresh_cache_async() -> None:
+    """Run the S3 read + encode off the event loop; one refresh at a time, callers queue."""
+    async with _refresh_lock:
+        age = time.time() - _cache["generated_at"]
+        if _cache["png_bytes"] is not None and age <= _CACHE_TTL:
+            return  # a previous holder of the lock already refreshed
+        await asyncio.to_thread(_refresh_cache)
+
+
+async def _ensure_cache() -> None:
+    """
+    Ensure the cache is populated. Stale-while-revalidate: a stale cache is served
+    immediately and refreshed in the background; only a cold instance waits (queued
+    behind the warm-up or another request's refresh), and the work runs on a worker
+    thread, not on the event loop, so other requests keep flowing.
+    """
     age = time.time() - _cache["generated_at"]
-    if _cache["png_bytes"] is None or age > _CACHE_TTL:
-        try:
-            _refresh_cache()
-        except Exception as e:
-            if _cache["png_bytes"] is not None:
-                print(f"[wind] Refresh failed, serving stale: {e}")
-            else:
-                raise
+    if _cache["png_bytes"] is None:
+        await _refresh_cache_async()          # cold: wait for the (shared) refresh
+        if _cache["png_bytes"] is None:
+            raise HTTPException(status_code=503, detail="wind texture unavailable")
+    elif age > _CACHE_TTL and not _refresh_lock.locked():
+        asyncio.create_task(_refresh_in_background())
+
+
+async def _refresh_in_background() -> None:
+    try:
+        await _refresh_cache_async()
+    except Exception as e:  # keep serving the stale texture
+        print(f"[wind] Background refresh failed, serving stale: {e}")
+
+
+async def warm_wind_cache() -> None:
+    """Startup warm-up so the first visitor never pays for the S3 read + encode."""
+    try:
+        await _refresh_cache_async()
+    except Exception as e:
+        print(f"[wind] Warm-up failed (will retry on first request): {e}")
 
 
 @router.get("/wind/texture")
 async def get_wind_texture():
     """Return wind data as a PNG texture (R=normalized u, G=normalized v)."""
-    _ensure_cache()
+    await _ensure_cache()
     return Response(
         content=_cache["png_bytes"],
         media_type="image/png",
@@ -193,7 +226,7 @@ async def get_wind_texture():
 @router.get("/wind/metadata")
 async def get_wind_metadata():
     """Return wind grid metadata (bounds, dimensions, u/v min/max)."""
-    _ensure_cache()
+    await _ensure_cache()
     return JSONResponse(
         content=_cache["metadata"],
         headers={
@@ -253,27 +286,45 @@ def _download_cog_from_gcs(cog_filename: str) -> str:
     return local_path
 
 
+_sat_lock = threading.Lock()
+_sat_missing: dict = {}          # cog_filename -> None, bounded below
+_SAT_MAX_MISSING = 500
+
+
 def _get_sat_reader(cog_filename: str):
-    """Get or create a rio-tiler Reader for the given COG file."""
+    """Get or create a rio-tiler Reader for the given COG file.
+
+    Blocking (GCS download on first use): call via ``run_in_threadpool``. One lock
+    serialises downloads so concurrent first requests do not race on the same file,
+    and missing files are remembered (bounded) so each miss costs one GCS check.
+    """
     from rio_tiler.io import Reader
 
-    if cog_filename in _sat_readers:
-        return _sat_readers[cog_filename]
-
-    local_path = _download_cog_from_gcs(cog_filename)
-    reader = Reader(local_path)
-
-    # Evict oldest if at capacity
-    if len(_sat_readers) >= _SAT_MAX_READERS:
-        oldest_key = next(iter(_sat_readers))
-        old_reader = _sat_readers.pop(oldest_key)
+    with _sat_lock:
+        if cog_filename in _sat_readers:
+            return _sat_readers[cog_filename]
+        if cog_filename in _sat_missing:
+            raise FileNotFoundError(cog_filename)
         try:
-            old_reader.close()
-        except Exception:
-            pass
+            local_path = _download_cog_from_gcs(cog_filename)
+        except FileNotFoundError:
+            _sat_missing[cog_filename] = None
+            while len(_sat_missing) > _SAT_MAX_MISSING:
+                _sat_missing.pop(next(iter(_sat_missing)))
+            raise
+        reader = Reader(local_path)
 
-    _sat_readers[cog_filename] = reader
-    return reader
+        # Evict oldest if at capacity
+        if len(_sat_readers) >= _SAT_MAX_READERS:
+            oldest_key = next(iter(_sat_readers))
+            old_reader = _sat_readers.pop(oldest_key)
+            try:
+                old_reader.close()
+            except Exception:
+                pass
+
+        _sat_readers[cog_filename] = reader
+        return reader
 
 
 def _render_satpm25_tile(reader, x: int, y: int, z: int) -> bytes:
@@ -391,11 +442,11 @@ async def get_satpm25_monthly_tile(year: int, month: int, z: int, x: int, y: int
     cog_filename = f"satpm25_{year}{month:02d}.tif"
 
     try:
-        reader = _get_sat_reader(cog_filename)
+        reader = await run_in_threadpool(_get_sat_reader, cog_filename)
     except FileNotFoundError:
         return Response(content="COG not found", status_code=404)
 
-    png_bytes = _render_satpm25_tile(reader, x, y, z)
+    png_bytes = await run_in_threadpool(_render_satpm25_tile, reader, x, y, z)
     if png_bytes is None:
         return Response(content=b"", status_code=204)
 
@@ -417,11 +468,11 @@ async def get_satpm25_tile(z: int, x: int, y: int, year: int = 2022):
     cog_filename = f"satpm25_{year}.tif"
 
     try:
-        reader = _get_sat_reader(cog_filename)
+        reader = await run_in_threadpool(_get_sat_reader, cog_filename)
     except FileNotFoundError:
         return Response(content="COG not found", status_code=404)
 
-    png_bytes = _render_satpm25_tile(reader, x, y, z)
+    png_bytes = await run_in_threadpool(_render_satpm25_tile, reader, x, y, z)
     if png_bytes is None:
         return Response(content=b"", status_code=204)
 

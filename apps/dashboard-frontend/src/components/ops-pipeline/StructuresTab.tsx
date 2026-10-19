@@ -1,8 +1,10 @@
 'use client'
 
 import { useState, useMemo, useRef, useEffect } from 'react'
+import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, ChevronLeft, Search, MapPin } from 'lucide-react'
+import { SatelliteImage } from '@/components/shared/SatelliteImage'
 
 // ── Category icons (Google Material Symbols, weight 300, filled) ──
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -66,6 +68,7 @@ interface StationItem {
   lat: number
   lon: number
   station_id?: string
+  network?: string
 }
 
 interface KilnItem {
@@ -106,26 +109,19 @@ export interface StructuresTabProps {
   industryCategories: IndustryCategory[]
   selectedDate: string | null
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
+  initialView?: 'stations' | 'sources'
 }
 
+// Health classification: one implementation for the whole dashboard (lib/aqi)
 function pm25ToBandColor(pm25: number): string {
-  if (pm25 <= 35) return '#6ecc39'
-  if (pm25 <= 75) return '#f0c20c'
-  if (pm25 <= 150) return '#f18017'
-  if (pm25 <= 250) return '#a070b5'
-  return '#ef4444'
+  return pm25Color(pm25)
 }
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
 
-// ── PM2.5 bar color (matches public app AQI palette) ──
+// ── PM2.5 bar color (same categories as the markers) ──
 function pm25BarColor(v: number): string {
-  if (v <= 12) return 'rgba(110,204,57,1)'
-  if (v <= 35) return 'rgba(240,194,12,1)'
-  if (v <= 55) return 'rgba(241,128,23,1)'
-  if (v <= 150) return 'rgba(239,120,85,1)'
-  if (v <= 250) return '#a070b5'
-  return '#991b1b'
+  return pm25Color(v)
 }
 
 // ── Canvas bar chart for 24h PM2.5 ──
@@ -217,112 +213,7 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
 }
 
 // ── Esri satellite image for station location ──
-function SatelliteImage({ lat, lon, name, markerColor }: { lat: number; lon: number; name: string; markerColor?: string }) {
-  const [showModal, setShowModal] = useState(false)
-  const mColor = markerColor || '#f18017'
-
-  const thumbUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${lon - 0.003},${lat - 0.002},${lon + 0.003},${lat + 0.002}&bboxSR=4326&size=370,204&imageSR=4326&format=png&f=image`
-  const largeUrl = `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/export?bbox=${lon - 0.008},${lat - 0.006},${lon + 0.008},${lat + 0.006}&bboxSR=4326&size=900,640&imageSR=4326&format=png&f=image`
-
-  // Map-style marker: colored circle with glow
-  const MarkerPin = ({ size = 14 }: { size?: number }) => (
-    <div
-      className="rounded-full"
-      style={{
-        width: size,
-        height: size,
-        background: mColor,
-        border: `2px solid rgba(255,255,255,0.9)`,
-        boxShadow: `0 0 0 3px ${mColor}40, 0 0 12px ${mColor}50`,
-      }}
-    />
-  )
-
-  return (
-    <>
-      <div
-        className="relative overflow-hidden rounded-xl cursor-zoom-in group"
-        onClick={() => setShowModal(true)}
-      >
-        <img
-          src={thumbUrl}
-          alt={`Satellite view of ${name}`}
-          className="w-full h-auto object-cover transition-transform duration-300 group-hover:scale-[1.03]"
-          style={{ minHeight: 120 }}
-          loading="eager"
-        />
-        {/* Top-left label */}
-        <div className="absolute top-1.5 left-1.5">
-          <span className="text-[10px] font-medium text-white/90 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded">
-            Station location
-          </span>
-        </div>
-        {/* Top-right maximize icon */}
-        <div className="absolute top-1.5 right-1.5">
-          <span className="flex items-center justify-center w-6 h-6 bg-black/40 backdrop-blur-sm rounded text-white/90 group-hover:bg-black/60 transition-colors">
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="15 3 21 3 21 9" />
-              <polyline points="9 21 3 21 3 15" />
-              <line x1="21" y1="3" x2="14" y2="10" />
-              <line x1="3" y1="21" x2="10" y2="14" />
-            </svg>
-          </span>
-        </div>
-        {/* Center marker — map style */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2">
-          <MarkerPin size={14} />
-        </div>
-        {/* Bottom attribution */}
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-2">
-          <div className="text-[9px] text-white/60 font-medium">Esri World Imagery — Click to expand</div>
-        </div>
-      </div>
-
-      {/* Lightbox modal */}
-      {showModal && (
-        <div
-          className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/85"
-          onClick={() => setShowModal(false)}
-        >
-          <div
-            className="relative max-w-[92vw] max-h-[88vh] rounded-xl overflow-hidden shadow-2xl"
-            onClick={e => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-2.5 bg-gradient-to-b from-black/70 to-transparent">
-              <div>
-                <div className="text-sm font-semibold text-white">{name}</div>
-                <div className="text-[10px] text-white/60">{lat.toFixed(5)}, {lon.toFixed(5)}</div>
-              </div>
-              <button
-                onClick={() => setShowModal(false)}
-                className="w-8 h-8 flex items-center justify-center rounded-full bg-white/10 hover:bg-white/20 transition-colors"
-              >
-                <svg className="w-4 h-4 text-white" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
-                </svg>
-              </button>
-            </div>
-            {/* Large image */}
-            <img
-              src={largeUrl}
-              alt={`Satellite view of ${name}`}
-              className="block max-w-full max-h-[88vh] object-contain"
-            />
-            {/* Center marker — map style */}
-            <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 pointer-events-none">
-              <MarkerPin size={18} />
-            </div>
-            {/* Attribution */}
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-4 py-2">
-              <div className="text-[10px] text-white/50">Esri World Imagery</div>
-            </div>
-          </div>
-        </div>
-      )}
-    </>
-  )
-}
+// SatelliteImage imported from @/components/shared/SatelliteImage
 
 type View =
   | { type: 'categories' }
@@ -331,12 +222,16 @@ type View =
   | { type: 'kilns' }
   | { type: 'kiln-detail'; kiln: KilnItem }
   | { type: 'industry'; categoryKey: string }
+  | { type: 'industry-detail'; item: IndustryItem; categoryKey: string }
 
-export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo }: StructuresTabProps) {
-  const [view, setView] = useState<View>({ type: 'categories' })
+export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView }: StructuresTabProps) {
+  const [view, setView] = useState<View>(initialView === 'stations' ? { type: 'stations' } : initialView === 'sources' ? { type: 'categories' } : { type: 'categories' })
   const [search, setSearch] = useState('')
-  const [sortBy, setSortBy] = useState<'pm25' | 'name' | 'city'>('pm25')
+  const [sortBy, setSortBy] = useState<'pm25' | 'name' | 'city' | 'network'>('pm25')
   const [kilnSort, setKilnSort] = useState<'province' | 'district' | 'id'>('province')
+  const [kilnLimit, setKilnLimit] = useState(200)
+  const [industrySort, setIndustrySort] = useState<'province' | 'district' | 'type' | 'name'>('province')
+  const [industryLimit, setIndustryLimit] = useState(200)
 
   // ── Derived data ──
   const kilnsByProvince = useMemo(() => {
@@ -354,10 +249,16 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     const majorProvinces = ['Punjab', 'Sindh', 'Khyber-Pakhtunkhwa', 'Balochistan', 'Islamabad', 'Azad Kashmir']
     const provRank = (s: string) => { const idx = majorProvinces.indexOf(s); return idx >= 0 ? idx : 999 }
     if (kilnSort === 'province') list.sort((a, b) => provRank(a.state) - provRank(b.state) || a.state.localeCompare(b.state) || a.id.localeCompare(b.id))
-    else if (kilnSort === 'district') list.sort((a, b) => (a.district || 'zzz').localeCompare(b.district || 'zzz') || a.id.localeCompare(b.id))
+    else if (kilnSort === 'district') {
+      const majorDistricts = ['Lahore', 'Kasur', 'Sheikhupura', 'Faisalabad', 'Multan', 'Rawalpindi', 'Gujranwala', 'Sargodha']
+      const distRank = (d: string) => { const idx = majorDistricts.indexOf(d); return idx >= 0 ? idx : 999 }
+      list.sort((a, b) => distRank(a.district || '') - distRank(b.district || '') || (a.district || 'zzz').localeCompare(b.district || 'zzz') || a.id.localeCompare(b.id))
+    }
     else list.sort((a, b) => a.id.localeCompare(b.id))
     return list
   }, [kilns, kilnSort])
+
+  const networkGroup = (n?: string) => n === 'Punjab EPA' ? 'Punjab AQMS' : 'Low-cost Sensors'
 
   const sortedStations = useMemo(() => {
     const list = [...stations]
@@ -367,6 +268,14 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
       const majorCities = ['Lahore', 'Karachi', 'Islamabad', 'Rawalpindi', 'Faisalabad', 'Peshawar', 'Multan', 'Quetta']
       const cityRank = (c: string) => { const idx = majorCities.indexOf(c); return idx >= 0 ? idx : 999 }
       list.sort((a, b) => cityRank(a.city) - cityRank(b.city) || a.city.localeCompare(b.city) || b.pm25 - a.pm25)
+    } else if (sortBy === 'network') {
+      // Punjab AQMS first, then low-cost
+      list.sort((a, b) => {
+        const ga = networkGroup(a.network)
+        const gb = networkGroup(b.network)
+        if (ga !== gb) return ga === 'Punjab AQMS' ? -1 : 1
+        return (a.network || '').localeCompare(b.network || '') || b.pm25 - a.pm25
+      })
     }
     return list
   }, [stations, sortBy])
@@ -387,76 +296,60 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   const BackButton = ({ label, onClick }: { label: string; onClick: () => void }) => (
     <button
       onClick={onClick}
-      className="flex items-center gap-1.5 px-3 py-2 text-[11px] font-medium text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors w-full border-b border-slate-100"
+      className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
     >
-      <ChevronLeft size={14} /> {label}
+      <ChevronLeft size={14} strokeWidth={2} /> {label}
     </button>
   )
 
   // ── Categories view (home) ──
   if (view.type === 'categories') {
-    return (
-      <div className="flex flex-col h-full">
-        <div className="px-4 py-3 border-b border-slate-100">
-          <h3 className="text-xs font-semibold text-slate-800 uppercase tracking-wide">
-            Sources
-          </h3>
-          <p className="text-[10px] text-slate-400 mt-0.5">Browse stations, kilns & industry</p>
+    const CategoryRow = ({ onClick, color, icon, label, sub }: { onClick: () => void; color: string; icon: React.ReactNode; label: string; sub: string }) => (
+      <button
+        onClick={onClick}
+        className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl border border-slate-100 bg-white hover:border-slate-200 hover:shadow-sm transition-all text-left group"
+      >
+        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+          style={{ background: color + '14', color }}>
+          {icon}
         </div>
-        <div className="flex-1 overflow-y-auto scrollbar-hide p-2 space-y-1">
-          {/* Stations */}
-          <button
-            onClick={() => setView({ type: 'stations' })}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-50 transition-colors text-left group"
-          >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: CATEGORY_COLORS.stations + '12', color: CATEGORY_COLORS.stations }}>
-              {CATEGORY_ICONS.stations}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-slate-700">Monitoring Stations</div>
-              <div className="text-[10px] text-slate-400">{stations.length} stations reporting today</div>
-            </div>
-            <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500" />
-          </button>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13px] font-semibold text-[#1e293b]">{label}</div>
+          <div className="text-[11px] text-[#94a3b8] mt-0.5">{sub}</div>
+        </div>
+        <ChevronRight size={15} className="text-slate-200 group-hover:text-slate-400 transition-colors" />
+      </button>
+    )
 
-          {/* Brick Kilns */}
-          <button
+    return (
+      <div className="flex flex-col h-full bg-[#fafbfc]">
+        <div className="px-5 pt-5 pb-3">
+          <h3 className="text-[13px] font-semibold text-[#1e293b] tracking-[-0.01em]">
+            Emission Sources
+          </h3>
+          <p className="text-[11px] text-[#94a3b8] mt-0.5">Browse kilns & industry</p>
+        </div>
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-4 space-y-2">
+          <CategoryRow
             onClick={() => setView({ type: 'kilns' })}
-            className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-50 transition-colors text-left group"
-          >
-            <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-              style={{ background: CATEGORY_COLORS.kilns + '12', color: CATEGORY_COLORS.kilns }}>
-              {CATEGORY_ICONS.kilns}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-slate-700">Brick Kilns</div>
-              <div className="text-[10px] text-slate-400">{kilns.length.toLocaleString()} geolocated kilns</div>
-            </div>
-            <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500" />
-          </button>
-
-          {/* Industry categories */}
+            color={CATEGORY_COLORS.kilns}
+            icon={CATEGORY_ICONS.kilns}
+            label="Brick Kilns"
+            sub={`${kilns.length.toLocaleString()} geolocated kilns`}
+          />
           {industryCategories.map(cat => (
-            <button
+            <CategoryRow
               key={cat.key}
               onClick={() => setView({ type: 'industry', categoryKey: cat.key })}
-              className="w-full flex items-center gap-3 px-3 py-3 rounded-lg hover:bg-slate-50 transition-colors text-left group"
-            >
-              <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                style={{ background: (CATEGORY_COLORS[cat.key] || cat.color) + '12', color: CATEGORY_COLORS[cat.key] || cat.color }}>
-                {CATEGORY_ICONS[cat.key] || (
-                  <svg className="w-[18px] h-[18px]" viewBox="0 -960 960 960" fill="currentColor">
-                    <path d="M480-480q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47ZM160-160v-112q0-34 17.5-62.5T224-378q62-31 126-46.5T480-440q66 0 130 15.5T736-378q29 15 46.5 43.5T800-272v112H160Z" />
-                  </svg>
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-slate-700">{cat.label}</div>
-                <div className="text-[10px] text-slate-400">{cat.items.length} sites</div>
-              </div>
-              <ChevronRight size={14} className="text-slate-300 group-hover:text-slate-500" />
-            </button>
+              color={CATEGORY_COLORS[cat.key] || cat.color}
+              icon={CATEGORY_ICONS[cat.key] || (
+                <svg className="w-[18px] h-[18px]" viewBox="0 -960 960 960" fill="currentColor">
+                  <path d="M480-480q-66 0-113-47t-47-113q0-66 47-113t113-47q66 0 113 47t47 113q0 66-47 113t-113 47ZM160-160v-112q0-34 17.5-62.5T224-378q62-31 126-46.5T480-440q66 0 130 15.5T736-378q29 15 46.5 43.5T800-272v112H160Z" />
+                </svg>
+              )}
+              label={cat.label}
+              sub={`${cat.items.length} sites`}
+            />
           ))}
         </div>
       </div>
@@ -467,34 +360,47 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   if (view.type === 'stations') {
     const filtered = filterBySearch(sortedStations)
     return (
-      <div className="flex flex-col h-full">
-        <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch(''); setSortBy('pm25') }} />
-        <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 flex-1 min-w-0">
-            <Search size={13} className="text-slate-400 shrink-0" />
+      <div className="flex flex-col h-full bg-[#fafbfc]">
+        {initialView !== 'stations' && (
+          <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch(''); setSortBy('pm25') }} />
+        )}
+        {initialView === 'stations' && (
+          <div className="px-5 pt-5 pb-1">
+            <h3 className="text-[13px] font-semibold text-[#1e293b] tracking-[-0.01em]">Monitoring Stations</h3>
+            <p className="text-[11px] text-[#94a3b8] mt-0.5">{stations.length} stations reporting</p>
+          </div>
+        )}
+        {/* Search + sort */}
+        <div className="px-4 pb-3 flex items-center gap-2">
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200/80 flex-1 min-w-0">
+            <Search size={14} className="text-slate-300 shrink-0" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search stations..."
-              className="flex-1 text-xs bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+              className="flex-1 text-[12px] bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
             />
           </div>
           <select
             value={sortBy}
-            onChange={e => setSortBy(e.target.value as 'pm25' | 'name' | 'city')}
-            className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none shrink-0"
+            onChange={e => setSortBy(e.target.value as 'pm25' | 'name' | 'city' | 'network')}
+            className="text-[11px] text-slate-500 bg-white border border-slate-200/80 rounded-xl px-2.5 py-2 outline-none shrink-0"
           >
-            <option value="pm25">AQI level</option>
+            <option value="pm25">PM2.5 (highest first)</option>
             <option value="city">City</option>
+            <option value="network">Network</option>
             <option value="name">A → Z</option>
           </select>
         </div>
-        <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-50">
+        <div className="px-5 pb-2 text-[10px] font-medium text-[#94a3b8]">
           {filtered.length} stations
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           {filtered.map((s, i) => {
             const showCityHeader = sortBy === 'city' && (i === 0 || filtered[i - 1].city !== s.city)
+            const showNetworkHeader = sortBy === 'network' && (i === 0 || networkGroup(filtered[i - 1].network) !== networkGroup(s.network))
+            const netGroup = networkGroup(s.network)
+            const netCount = sortBy === 'network' && showNetworkHeader ? filtered.filter(x => networkGroup(x.network) === netGroup).length : 0
             return (
               <div key={`${s.name}-${i}`}>
                 {showCityHeader && (
@@ -502,21 +408,39 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                     {s.city}
                   </div>
                 )}
+                {showNetworkHeader && (
+                  <div className="px-3 pt-3 pb-1.5 bg-slate-50/80 sticky top-0 border-b border-slate-100">
+                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{netGroup}</div>
+                    <div className="text-[9.5px] text-slate-400 mt-0.5">{netCount} stations</div>
+                  </div>
+                )}
                 <button
                   onClick={() => {
                     onFlyTo(s.lon, s.lat, 14)
                     setView({ type: 'station-detail', station: s })
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 transition-colors text-left border-b border-slate-50"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-100/80"
                 >
-                  <div className="w-2 h-2 rounded-full shrink-0" style={{ background: pm25ToBandColor(s.pm25) }} />
+                  {/* AQI badge */}
+                  <div
+                    className="shrink-0 flex items-center justify-center rounded-full"
+                    style={{
+                      width: 32,
+                      height: 32,
+                      background: pm25ToBandColor(s.pm25),
+                      border: '2px solid rgba(255,255,255,0.9)',
+                      boxShadow: `0 0 0 1px ${pm25ToBandColor(s.pm25)}30, 0 1px 3px rgba(0,0,0,0.1)`,
+                    }}
+                  >
+                    <span className="text-[11px] font-bold text-white leading-none">{Math.round(s.pm25)}</span>
+                  </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-medium text-slate-700 truncate">{s.name}</div>
-                    {sortBy !== 'city' && <div className="text-[10px] text-slate-400 truncate">{s.city}</div>}
+                    <div className="text-[12px] font-semibold text-slate-800 truncate">{s.name}</div>
+                    {sortBy !== 'city' && <div className="text-[10.5px] text-slate-400 truncate">{s.city}</div>}
                   </div>
-                  <div className="text-[11px] font-semibold tabular-nums shrink-0" style={{ color: pm25ToBandColor(s.pm25) }}>
-                    {Math.round(s.pm25)}
-                  </div>
+                  <svg className="w-4 h-4 text-slate-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
                 </button>
               </div>
             )
@@ -549,14 +473,14 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             <Search size={13} className="text-slate-400 shrink-0" />
             <input
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setKilnLimit(200) }}
               placeholder="Search kilns..."
               className="flex-1 text-xs bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
             />
           </div>
           <select
             value={kilnSort}
-            onChange={e => setKilnSort(e.target.value as 'province' | 'district' | 'id')}
+            onChange={e => { setKilnSort(e.target.value as 'province' | 'district' | 'id'); setKilnLimit(200) }}
             className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none shrink-0"
           >
             <option value="province">Province</option>
@@ -568,7 +492,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
           {searched.length.toLocaleString()} kilns
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          {searched.slice(0, 300).map((k, i) => {
+          {searched.slice(0, kilnLimit).map((k, i) => {
             const prev = i > 0 ? searched[i - 1] : null
             const showHeader = kilnSort === 'province'
               ? (i === 0 || prev?.state !== k.state)
@@ -576,11 +500,23 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                 ? (i === 0 || prev?.district !== k.district)
                 : false
             const headerLabel = kilnSort === 'province' ? k.state : kilnSort === 'district' ? (k.district || 'Unknown') : ''
+            // Compute group stats for subheading
+            let groupStats = ''
+            if (showHeader && (kilnSort === 'province' || kilnSort === 'district')) {
+              const groupKey = kilnSort === 'province' ? 'state' : 'district'
+              const groupVal = kilnSort === 'province' ? k.state : (k.district || 'Unknown')
+              const group = searched.filter(x => (kilnSort === 'province' ? x.state : (x.district || 'Unknown')) === groupVal)
+              const fuelCounts: Record<string, number> = {}
+              for (const item of group) { fuelCounts[item.fuel] = (fuelCounts[item.fuel] || 0) + 1 }
+              const parts = Object.entries(fuelCounts).sort((a, b) => b[1] - a[1]).map(([f, c]) => `${c} ${f}`)
+              groupStats = `${group.length} kilns · ${parts.join(' · ')}`
+            }
             return (
               <div key={k.id}>
                 {showHeader && (
-                  <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wide bg-slate-50/80 sticky top-0">
-                    {headerLabel}
+                  <div className="px-3 pt-3 pb-1.5 bg-slate-50/80 sticky top-0 border-b border-slate-100">
+                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{headerLabel}</div>
+                    {groupStats && <div className="text-[9.5px] text-slate-400 mt-0.5">{groupStats}</div>}
                   </div>
                 )}
                 <button
@@ -588,22 +524,35 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                     onFlyTo(k.lon, k.lat, 16)
                     setView({ type: 'kiln-detail', kiln: k })
                   }}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 transition-colors text-left border-b border-slate-50"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-100/80"
                 >
-                  <div className="w-2 h-2 rounded-full shrink-0 bg-amber-500" />
-                  <div className="flex-1 min-w-0">
-                    <div className="text-[11px] font-medium text-slate-700">{k.id}</div>
-                    {kilnSort === 'id' && <div className="text-[10px] text-slate-400">{k.district || k.state}</div>}
+                  {/* Chimney badge */}
+                  <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-amber-600 shadow-sm">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="18" viewBox="0 0 24 28">
+                      <rect x="8" y="6" width="8" height="16" rx="1" fill="white" opacity="0.9"/>
+                      <rect x="6.5" y="4" width="11" height="3" rx="1" fill="white"/>
+                      <rect x="5" y="22" width="14" height="4" rx="1" fill="white" opacity="0.7"/>
+                      <circle cx="12" cy="2.5" r="2" fill="white" opacity="0.5"/>
+                      <circle cx="15" cy="1.5" r="1.5" fill="white" opacity="0.35"/>
+                      <circle cx="9.5" cy="1" r="1.2" fill="white" opacity="0.25"/>
+                    </svg>
                   </div>
-                  <div className="text-[10px] text-slate-400 shrink-0">{k.fuel}</div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800">{k.id}</div>
+                    <div className="text-[10.5px] text-slate-400 capitalize">{k.fuel}</div>
+                  </div>
+                  <div className="text-[11px] text-slate-400 shrink-0 capitalize">{k.fuel}</div>
                 </button>
               </div>
             )
           })}
-          {searched.length > 300 && (
-            <div className="px-3 py-2 text-[10px] text-slate-400 text-center">
-              Showing 300 of {searched.length.toLocaleString()}
-            </div>
+          {searched.length > kilnLimit && (
+            <button
+              onClick={() => setKilnLimit(prev => prev + 200)}
+              className="w-full px-3 py-3 text-[11px] font-medium text-amber-600 hover:bg-amber-50 transition-colors text-center border-t border-slate-100"
+            >
+              Load more ({(searched.length - kilnLimit).toLocaleString()} remaining)
+            </button>
           )}
         </div>
       </div>
@@ -637,7 +586,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
 
           {/* Satellite image */}
           <div className="px-4 pb-3">
-            <SatelliteImage lat={k.lat} lon={k.lon} name={k.id} markerColor="#d97706" />
+            <SatelliteImage lat={k.lat} lon={k.lon} name={k.id} zoom="close" label="Kiln location" markerType="chimney" />
           </div>
 
           {/* Details card */}
@@ -664,42 +613,252 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   if (view.type === 'industry') {
     const cat = industryCategories.find(c => c.key === view.categoryKey)
     if (!cat) return null
-    const filtered = filterBySearch(cat.items)
+
+    // Effective sort — fall back to 'name' if current sort field doesn't exist
+    const effectiveSort = (!hasProvince && industrySort === 'province') || (!hasDistrict && industrySort === 'district') || (!hasType && industrySort === 'type') ? 'name' : industrySort
+
+    // Sort items
+    const sortedItems = (() => {
+      const list = [...cat.items]
+      const majorProvinces = ['Punjab', 'Sindh', 'Khyber Pakhtunkhwa', 'Balochistan', 'Islamabad']
+      const provRank = (s: string) => { const idx = majorProvinces.indexOf(s); return idx >= 0 ? idx : 999 }
+      if (effectiveSort === 'province') list.sort((a, b) => provRank(a.province || '') - provRank(b.province || '') || (a.province || 'zzz').localeCompare(b.province || 'zzz') || (a.name || '').localeCompare(b.name || ''))
+      else if (effectiveSort === 'district') list.sort((a, b) => (a.district || 'zzz').localeCompare(b.district || 'zzz') || (a.name || '').localeCompare(b.name || ''))
+      else if (effectiveSort === 'type') list.sort((a, b) => (a.type || 'zzz').localeCompare(b.type || 'zzz') || (a.name || '').localeCompare(b.name || ''))
+      else list.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      return list
+    })()
+
+    const filtered = filterBySearch(sortedItems)
+
+    // Category-specific SVG icons (white on colored background)
+    const INDUSTRY_ROW_ICONS: Record<string, React.ReactNode> = {
+      power_plants: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>
+        </svg>
+      ),
+      cement_plants: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 20h20"/><path d="M5 20V8l4-4v16"/><path d="M9 20V4l5 4v12"/><path d="M14 20V8l5 4v8"/>
+        </svg>
+      ),
+      steel_sites: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/>
+        </svg>
+      ),
+      sugar_mills: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/>
+        </svg>
+      ),
+      industrial_sites: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/>
+        </svg>
+      ),
+    }
+
+    const rowIcon = INDUSTRY_ROW_ICONS[cat.key] || INDUSTRY_ROW_ICONS.industrial_sites
+    const catColor = CATEGORY_COLORS[cat.key] || cat.color
+
+    // Check which group fields are available for this category
+    const hasProvince = cat.items.some(x => x.province)
+    const hasDistrict = cat.items.some(x => x.district)
+    const hasType = cat.items.some(x => x.type)
+
+    // Subtitle for each item
+    const itemSub = (item: IndustryItem) => {
+      if (item.fuel) return item.fuel
+      if (item.capacity_mw) return `${item.capacity_mw} MW`
+      if (item.capacity_mtpa) return `${item.capacity_mtpa} Mt/yr`
+      return item.type || ''
+    }
+
+    // Right-side tag
+    const itemTag = (item: IndustryItem) => {
+      if (item.fuel) return item.fuel
+      if (item.capacity_mw) return `${item.capacity_mw} MW`
+      if (item.capacity_mtpa) return `${item.capacity_mtpa} Mt/yr`
+      return ''
+    }
+
     return (
       <div className="flex flex-col h-full">
-        <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch('') }} />
-        <div className="px-3 py-2 border-b border-slate-100" style={{ borderLeft: `3px solid ${cat.color}` }}>
-          <div className="text-xs font-semibold text-slate-700">{cat.label}</div>
-          <div className="text-[10px] text-slate-400">{cat.items.length} sites</div>
-        </div>
-        <div className="px-3 py-2 border-b border-slate-100">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+        <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch(''); setIndustrySort('province') }} />
+        <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
+          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 flex-1 min-w-0">
             <Search size={13} className="text-slate-400 shrink-0" />
             <input
               value={search}
-              onChange={e => setSearch(e.target.value)}
+              onChange={e => { setSearch(e.target.value); setIndustryLimit(200) }}
               placeholder={`Search ${cat.label.toLowerCase()}...`}
               className="flex-1 text-xs bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
             />
           </div>
+          <select
+            value={(!hasProvince && industrySort === 'province') || (!hasDistrict && industrySort === 'district') || (!hasType && industrySort === 'type') ? 'name' : industrySort}
+            onChange={e => { setIndustrySort(e.target.value as 'province' | 'district' | 'type' | 'name'); setIndustryLimit(200) }}
+            className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none shrink-0"
+          >
+            {hasProvince && <option value="province">Province</option>}
+            {hasDistrict && <option value="district">District</option>}
+            {hasType && <option value="type">Type</option>}
+            <option value="name">A &rarr; Z</option>
+          </select>
+        </div>
+        <div className="px-3 py-1 text-[10px] border-b border-slate-50" style={{ color: catColor }}>
+          {filtered.length.toLocaleString()} {cat.label.toLowerCase()}
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
-          {filtered.map((item, i) => (
-            <button
-              key={`${item.name}-${i}`}
-              onClick={() => onFlyTo(item.lon, item.lat, 14)}
-              className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 transition-colors text-left border-b border-slate-50"
-            >
-              <div className="w-2 h-2 rounded-full shrink-0" style={{ background: cat.color }} />
-              <div className="flex-1 min-w-0">
-                <div className="text-[11px] font-medium text-slate-700 truncate">{item.name || 'Unnamed'}</div>
-                <div className="text-[10px] text-slate-400 truncate">
-                  {[item.fuel, item.capacity_mw ? `${item.capacity_mw} MW` : null, item.capacity_mtpa ? `${item.capacity_mtpa} Mt/yr` : null, item.province || item.district].filter(Boolean).join(' · ')}
-                </div>
+          {filtered.slice(0, industryLimit).map((item, i) => {
+            const prev = i > 0 ? filtered[i - 1] : null
+            const showHeader = effectiveSort === 'province'
+              ? (i === 0 || prev?.province !== item.province)
+              : effectiveSort === 'district'
+                ? (i === 0 || prev?.district !== item.district)
+                : effectiveSort === 'type'
+                  ? (i === 0 || prev?.type !== item.type)
+                  : false
+            const headerLabel = effectiveSort === 'province'
+              ? (item.province || 'Unknown')
+              : effectiveSort === 'district'
+                ? (item.district || 'Unknown')
+                : effectiveSort === 'type'
+                  ? (item.type || 'Unknown')
+                  : ''
+            let groupStats = ''
+            if (showHeader && effectiveSort !== 'name') {
+              const groupField = effectiveSort as 'province' | 'district' | 'type'
+              const groupVal = (item[groupField] || 'Unknown')
+              const group = filtered.filter(x => (x[groupField] || 'Unknown') === groupVal)
+              groupStats = `${group.length} sites`
+            }
+            return (
+              <div key={`${item.name}-${i}`}>
+                {showHeader && (
+                  <div className="px-3 pt-3 pb-1.5 bg-slate-50/80 sticky top-0 border-b border-slate-100">
+                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{headerLabel}</div>
+                    {groupStats && <div className="text-[9.5px] text-slate-400 mt-0.5">{groupStats}</div>}
+                  </div>
+                )}
+                <button
+                  onClick={() => {
+                    onFlyTo(item.lon, item.lat, 14)
+                    setView({ type: 'industry-detail', item, categoryKey: cat.key })
+                  }}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-100/80"
+                >
+                  <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg shadow-sm" style={{ background: catColor }}>
+                    {rowIcon}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[12px] font-semibold text-slate-800 truncate">{item.name || 'Unnamed'}</div>
+                    <div className="text-[10.5px] text-slate-400 truncate">{itemSub(item)}</div>
+                  </div>
+                  {itemTag(item) && <div className="text-[11px] text-slate-400 shrink-0">{itemTag(item)}</div>}
+                </button>
               </div>
-              <MapPin size={12} className="text-slate-300 shrink-0" />
+            )
+          })}
+          {filtered.length > industryLimit && (
+            <button
+              onClick={() => setIndustryLimit(prev => prev + 200)}
+              className="w-full px-3 py-3 text-[11px] font-medium hover:bg-slate-50 transition-colors text-center border-t border-slate-100"
+              style={{ color: catColor }}
+            >
+              Load more ({(filtered.length - industryLimit).toLocaleString()} remaining)
             </button>
-          ))}
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Industry detail ──
+  if (view.type === 'industry-detail') {
+    const cat = industryCategories.find(c => c.key === view.categoryKey)
+    const item = view.item
+    const catLabel = cat?.label || view.categoryKey
+    const catColor = cat?.color || CATEGORY_COLORS[view.categoryKey] || '#64748b'
+
+    // Category-specific badge labels
+    const BADGE_LABELS: Record<string, string> = {
+      power_plants: 'Power Plant',
+      cement_plants: 'Cement Plant',
+      steel_sites: 'Steel Site',
+      sugar_mills: 'Sugar Mill',
+      mines_quarries: 'Mine / Quarry',
+      industrial_sites: 'Industrial Site',
+    }
+
+    return (
+      <div className="flex flex-col h-full bg-[#fafbfc]">
+        <button
+          onClick={() => setView({ type: 'industry', categoryKey: view.categoryKey })}
+          className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
+        >
+          <ChevronLeft size={14} strokeWidth={2} /> {catLabel}
+        </button>
+        <div className="flex-1 overflow-y-auto scrollbar-hide">
+          {/* Header */}
+          <div className="px-5 pb-4">
+            <h2 className="text-[20px] font-semibold text-[#1e293b] leading-snug tracking-[-0.01em]">
+              {item.name || 'Unnamed Site'}
+            </h2>
+            <p className="text-[12px] text-[#94a3b8] mt-1 leading-relaxed">
+              {[item.province, item.district].filter(Boolean).join(', ')}
+              {item.fuel ? <> &middot; {item.fuel}</> : ''}
+            </p>
+            <span
+              className="inline-flex items-center mt-2.5 text-[10px] font-semibold uppercase tracking-wide px-2.5 py-[3px] rounded-full"
+              style={{ background: `${catColor}15`, color: catColor }}
+            >
+              {BADGE_LABELS[view.categoryKey] || catLabel}
+            </span>
+          </div>
+
+          {/* Satellite image */}
+          <div className="px-4 pb-3">
+            <SatelliteImage
+              lat={item.lat}
+              lon={item.lon}
+              name={item.name || 'Site'}
+              markerColor={catColor}
+              zoom="close"
+              label={BADGE_LABELS[view.categoryKey] || catLabel}
+            />
+          </div>
+
+          {/* Details card */}
+          <div className="px-4 pb-4">
+            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div className="px-4 py-2.5 border-b border-slate-100">
+                <span className="text-[12px] font-bold text-slate-700">Site Details</span>
+              </div>
+              <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-2.5 text-[11px]">
+                {item.province && <div><div className="text-slate-400 text-[10px]">Province</div><div className="text-slate-700 font-medium">{item.province}</div></div>}
+                {item.district && <div><div className="text-slate-400 text-[10px]">District</div><div className="text-slate-700 font-medium">{item.district}</div></div>}
+                {item.fuel && <div><div className="text-slate-400 text-[10px]">Fuel Type</div><div className="text-slate-700 font-medium">{item.fuel}</div></div>}
+                {item.capacity_mw != null && <div><div className="text-slate-400 text-[10px]">Capacity</div><div className="text-slate-700 font-medium">{item.capacity_mw} MW</div></div>}
+                {item.capacity_mtpa != null && <div><div className="text-slate-400 text-[10px]">Capacity</div><div className="text-slate-700 font-medium">{item.capacity_mtpa} Mt/yr</div></div>}
+                <div><div className="text-slate-400 text-[10px]">Coordinates</div><div className="text-slate-700 font-medium">{item.lat.toFixed(4)}, {item.lon.toFixed(4)}</div></div>
+                {item.type && <div><div className="text-slate-400 text-[10px]">Type</div><div className="text-slate-700 font-medium">{item.type}</div></div>}
+              </div>
+            </div>
+          </div>
+
+          {/* Fly-to button */}
+          <div className="px-4 pb-4">
+            <button
+              onClick={() => onFlyTo(item.lon, item.lat, 16)}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-[12px] font-medium text-white transition-colors"
+              style={{ background: catColor }}
+            >
+              <MapPin size={13} /> View on Map
+            </button>
+          </div>
         </div>
       </div>
     )
@@ -722,7 +881,8 @@ function StationDetailView({ station, selectedDate, onBack, onFlyTo }: StationDe
     queryKey: ['station-hourly', station.station_id, selectedDate],
     queryFn: async () => {
       if (!station.station_id) return null
-      const res = await fetch(`${API_BASE}/api/v1/dashboard/stations/${station.station_id}/history/pm25?hours=24`)
+      const dateParam = selectedDate ? `&date=${selectedDate}` : ''
+      const res = await fetch(`${API_BASE}/api/v1/dashboard/stations/${station.station_id}/history/pm25?hours=24${dateParam}&all_providers=true`)
       if (!res.ok) return null
       return res.json() as Promise<{ timestamp_pk: string; pm25: number | null }[]>
     },
@@ -766,14 +926,10 @@ function StationDetailView({ station, selectedDate, onBack, onFlyTo }: StationDe
     return { text: 'Offline', bg: '#fef2f2', color: '#dc2626' }
   })()
 
-  // AQI band label — uses same palette as pm25ToBandColor
+  // Health category (US EPA 2024 PM2.5 breakpoints, lib/aqi)
   const aqiBand = (() => {
-    const v = station.pm25
-    if (v <= 35) return { label: 'Good', color: '#6ecc39', bg: 'rgba(110,204,57,0.12)' }
-    if (v <= 75) return { label: 'Moderate', color: '#d4a017', bg: 'rgba(240,194,12,0.12)' }
-    if (v <= 150) return { label: 'Unhealthy', color: '#e07916', bg: 'rgba(241,128,23,0.12)' }
-    if (v <= 250) return { label: 'V. Unhealthy', color: '#a070b5', bg: 'rgba(160,112,181,0.12)' }
-    return { label: 'Hazardous', color: '#c0392b', bg: 'rgba(192,57,43,0.12)' }
+    const b = classifyPm25(station.pm25)
+    return { label: b.shortLabel, color: b.color, bg: b.color + '1f' }
   })()
 
   const stats24h = useMemo(() => {
@@ -838,7 +994,7 @@ function StationDetailView({ station, selectedDate, onBack, onFlyTo }: StationDe
 
         {/* ── Satellite image ── */}
         <div className="px-4 pb-3">
-          <SatelliteImage lat={station.lat} lon={station.lon} name={station.name} markerColor={pm25ToBandColor(station.pm25)} />
+          <SatelliteImage lat={station.lat} lon={station.lon} name={station.name} markerColor={pm25ToBandColor(station.pm25)} markerType="aqi" aqiValue={station.pm25} />
         </div>
 
         {/* ── Stats cards ── */}
@@ -983,7 +1139,7 @@ function StationInsight({ station, stats, rolling7d, selectedDate }: { station: 
   }
 
   const accentColor = pm25ToBandColor(stats.mean)
-  const conditionLabel = stats.mean > 150 ? 'severe' : stats.mean > 55 ? 'unhealthy' : stats.mean > 35 ? 'moderate' : 'good'
+  const conditionLabel = classifyPm25(stats.mean).label.toLowerCase()
 
   // Build station-specific narrative
   const lines: string[] = []

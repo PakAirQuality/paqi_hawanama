@@ -109,41 +109,27 @@ async def get_units() -> Dict[str, Any]:
 
 @router.get("/aqi-categories")
 async def get_aqi_categories() -> Dict[str, Any]:
-    """Get AQI category definitions"""
-    return {
-        "us_epa": {
-            "good": {
-                "range": [0, 50],
-                "color": "#00E400",
-                "description": "Air quality is considered satisfactory"
-            },
-            "moderate": {
-                "range": [51, 100], 
-                "color": "#FFFF00",
-                "description": "Air quality is acceptable for most people"
-            },
-            "unhealthy_for_sensitive_groups": {
-                "range": [101, 150],
-                "color": "#FF7E00", 
-                "description": "Sensitive individuals may experience health effects"
-            },
-            "unhealthy": {
-                "range": [151, 200],
-                "color": "#FF0000",
-                "description": "Everyone may begin to experience health effects"
-            },
-            "very_unhealthy": {
-                "range": [201, 300],
-                "color": "#8F3F97",
-                "description": "Health warnings of emergency conditions"
-            },
-            "hazardous": {
-                "range": [301, 500],
-                "color": "#7E0023",
-                "description": "Health alert: everyone may experience serious health effects"
-            }
+    """The one PM2.5 / US AQI category table every client renders from.
+
+    `categories` is the canonical list (key, label, pm25_max, aqi range, colours);
+    `us_epa` keeps the older object shape the public site's client still parses,
+    generated from the same table so colours and ranges cannot drift.
+    """
+    from app.services.aqi.pm25 import categories_payload
+
+    payload = categories_payload()
+    legacy_keys = {"unhealthy_sensitive": "unhealthy_for_sensitive_groups"}
+    payload["us_epa"] = {
+        legacy_keys.get(b["key"], b["key"]): {
+            "range": [b["aqi_min"], b["aqi_max"]],
+            "pm25_max": b["pm25_max"],
+            "color": b["color"],
+            "text_color": b["text_color"],
+            "description": b["description"],
         }
+        for b in payload["categories"]
     }
+    return payload
 
 @router.get("/countries")
 async def get_countries(
@@ -216,9 +202,17 @@ async def get_provinces(
 @router.get("/cities")
 async def get_cities(
     province_name: Optional[str] = None,
+    country_name: Optional[str] = None,
+    province: Optional[str] = None,
+    country: Optional[str] = None,
     db: AsyncSession = Depends(get_database)
 ) -> List[str]:
-    """Get scrollable list of cities with station data. If no province_name provided, shows all cities for selection."""
+    """Get scrollable list of cities with station data. If no province_name provided, shows all cities for selection.
+    `province`/`country` are accepted as aliases (the dashboard used them and was silently unfiltered).
+    The province filter applies to the station's own state as well as the city's, so a city
+    row attached to the wrong state cannot leak into another province's list."""
+    province_name = province_name or province
+    country_name = country_name or country
     try:
         # Get cities that have active stations
         query = """
@@ -230,10 +224,13 @@ async def get_cities(
         WHERE c.active = true AND s.active = true AND co.active = true AND st.active = true
         """
         params = {}
-        
+
         if province_name:
-            query += " AND LOWER(s.name) = LOWER(:province_name)"
+            query += " AND LOWER(s.name) = LOWER(:province_name) AND st.state_id = s.id"
             params["province_name"] = province_name
+        if country_name:
+            query += " AND LOWER(co.name) = LOWER(:country_name)"
+            params["country_name"] = country_name
         # If no province_name provided, show all cities for scrollable selection
             
         query += " ORDER BY co.name, s.name, c.name"
@@ -260,9 +257,14 @@ async def get_cities(
 async def get_stations(
     province_name: Optional[str] = None,
     city_name: Optional[str] = None,
+    province: Optional[str] = None,
+    city: Optional[str] = None,
     db: AsyncSession = Depends(get_database)
 ) -> List[Dict[str, str]]:
-    """Get scrollable list of stations with station_id and station_name. If no filters provided, shows all stations for selection."""
+    """Get scrollable list of stations with station_id and station_name. If no filters provided, shows all stations for selection.
+    `city`/`province` are accepted as aliases of `city_name`/`province_name` (runbooks used them and were silently ignored)."""
+    province_name = province_name or province
+    city_name = city_name or city
     try:
         # Get stations with their metadata - same pattern as cities/{city}/current endpoint
         query = """
@@ -277,13 +279,14 @@ async def get_stations(
         INNER JOIN states s ON st.state_id = s.id
         INNER JOIN countries co ON c.country_id = co.id
         WHERE st.active = true AND c.active = true AND s.active = true AND co.active = true
+          AND COALESCE(st.metadata_json->'registry'->>'status', 'active') <> 'test'
         """
         params = {}
-        
+
         if province_name:
             query += " AND LOWER(s.name) = LOWER(:province_name)"
             params["province_name"] = province_name
-            
+
         if city_name:
             query += " AND LOWER(c.name) = LOWER(:city_name)"
             params["city_name"] = city_name

@@ -1,25 +1,12 @@
 rules_version = '2';
 
+// No browser client reads or writes this bucket (the dashboard is public and read-only
+// against the Hawanama API). Pipeline artifacts are managed server-side with the Admin
+// SDK, which is not subject to these rules.
 service firebase.storage {
   match /b/{bucket}/o {
-
-    // Helper function to check if user has a valid @pakairquality.com domain
-    function isInternalUser() {
-      return request.auth != null
-        && request.auth.token.email_verified == true
-        && request.auth.token.email.matches('.*@pakairquality\\.com');
-    }
-
-    // Default rule: Only allow access to verified @pakairquality.com users
     match /{allPaths=**} {
-      allow read, write: if isInternalUser();
+      allow read, write: if false;
     }
-
-    // Example: Specific folder for uploads with size limits
-    // match /uploads/{userId}/{fileName} {
-    //   allow read, write: if isInternalUser() 
-    //     && request.auth.uid == userId 
-    //     && resource.size < 50 * 1024 * 1024; // 50MB limit
-    // }
   }
 }

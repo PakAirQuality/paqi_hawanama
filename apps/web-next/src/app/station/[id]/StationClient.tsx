@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button'
 import { useStationCurrent, useStationHistory, useStationPM25History, useAQICategories } from '@/hooks/useStation'
 import { formatPollutant, getWindDirection } from '@/lib/aqi'
 import { getAQICategory } from '@/lib/aqi'
+import { pktHour, pktHourLabel } from '@/lib/dateLabel'
 import { getAQIColorByValue } from '@/components/map/config/aqiStyles'
 import {
   BarChart,
@@ -23,9 +24,11 @@ import {
 
 interface StationClientProps {
   stationId: string
+  /** Build-time station facts so the heading is in the HTML before any fetch. */
+  station?: { name: string; city: string | null }
 }
 
-export default function StationClient({ stationId }: StationClientProps) {
+export default function StationClient({ stationId, station }: StationClientProps) {
   const [chartMetric, setChartMetric] = useState<'aqi' | 'pm25'>('pm25')
   const [isMobile, setIsMobile] = useState(false)
 
@@ -48,8 +51,9 @@ export default function StationClient({ stationId }: StationClientProps) {
     return (
       <div className="min-h-screen bg-background">
         <div className="container mx-auto px-4 py-6">
-          <div className="animate-pulse space-y-4">
-            <div className="h-8 bg-gray-200 rounded w-1/4"></div>
+          <h1 className="text-2xl font-bold text-foreground">{station?.name ?? `Station ${stationId}`}</h1>
+          {station?.city && <p className="text-sm text-muted-foreground">{station.city}</p>}
+          <div className="animate-pulse space-y-4 mt-6">
             <div className="h-64 bg-gray-200 rounded"></div>
           </div>
         </div>
@@ -126,7 +130,9 @@ export default function StationClient({ stationId }: StationClientProps) {
           <div className="flex items-center justify-between">
             <div className="flex items-center space-x-3">
               <img 
-                src="/logo-cropped.png" 
+                src="/logo-cropped-96.v1.png"
+                width={96}
+                height={105} 
                 alt="Hawanama Logo" 
                 className="w-12 h-12 object-contain"
               />
@@ -152,7 +158,7 @@ export default function StationClient({ stationId }: StationClientProps) {
         <div className="container mx-auto px-4 py-4">
           <div>
             <h1 className="text-2xl font-bold text-foreground">
-              {current?.name || `Station ${stationId}`}
+              {current?.name || station?.name || `Station ${stationId}`}
             </h1>
             <p className="text-sm text-muted-foreground">Station Details & Historical Data</p>
           </div>
@@ -315,8 +321,8 @@ export default function StationClient({ stationId }: StationClientProps) {
                       return {
                         timestamp_pk: item.timestamp_pk || item.timestamp,
                         timestamp_utc: item.timestamp_utc || item.timestamp,
-                        hour: pkDate.getHours(),
-                        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+                        hour: pktHour(pkDate),
+                        timeLabel: pktHourLabel(pkDate),
                         aqi: item.aqi_us,
                         pm25: null as number | null
                       }
@@ -327,8 +333,8 @@ export default function StationClient({ stationId }: StationClientProps) {
                       return {
                         timestamp_pk: item.timestamp_pk || item.timestamp,
                         timestamp_utc: item.timestamp_utc || item.timestamp,
-                        hour: pkDate.getHours(),
-                        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+                        hour: pktHour(pkDate),
+                        timeLabel: pktHourLabel(pkDate),
                         aqi: null as number | null,
                         pm25: item.pm25
                       }

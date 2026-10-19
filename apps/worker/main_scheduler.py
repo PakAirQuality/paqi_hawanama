@@ -17,15 +17,16 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 
-from tasks.station_discovery import StationDiscoveryTask
-from tasks.data_ingestion import DataIngestionTask
-from tasks.city_ingest import CityIngestionTask
+# The worker is a thin shim over the canonical ingestion package in apps/api.
+# It needs the same environment (.env with POSTGRES_* and IQAIR_API_KEY) as the API.
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "api"))
+from app.ingestion.tasks import StationDiscoveryTask, DataIngestionTask, CityIngestionTask  # noqa: E402
 
-# -------- logging --------
-logging.basicConfig(
-    level=getattr(logging, os.getenv("LOG_LEVEL", "INFO").upper(), logging.INFO),
-    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-)
+# -------- logging (same redacting setup as the API) --------
+from app.core.config import settings  # noqa: E402
+from app.ingestion.http import configure_logging  # noqa: E402
+configure_logging(settings.LOG_LEVEL, secrets=(settings.IQAIR_API_KEY, settings.OPENAQ_API_KEY))
 logger = logging.getLogger(__name__)
 
 
@@ -63,22 +64,22 @@ class AirQualityScheduler:
 
     async def job_discover(self):
         logger.info("🚦 Station discovery: start")
-        summary = await self.discovery.discover_all_stations_comprehensive()
-        logger.info("✅ Station discovery: done | %s", summary)
+        summary = await self.discovery.discover_all_stations_comprehensive(trigger="cli")
+        logger.info("✅ Station discovery: done | %s", summary.to_dict())
         return summary
 
     async def job_ingest_station(self):
         await self._ensure_manifests(need_station=True, need_city=False)
         logger.info("🚦 Station ingestion: start")
-        summary = await self.station_ingest.fetch_station_readings()
-        logger.info("✅ Station ingestion: done | %s", summary)
+        summary = await self.station_ingest.fetch_station_readings(trigger="cli")
+        logger.info("✅ Station ingestion: done | %s", summary.to_dict())
         return summary
 
     async def job_ingest_city(self):
         await self._ensure_manifests(need_station=False, need_city=True)
         logger.info("🚦 City ingestion: start")
-        summary = await self.city_ingest.fetch_city_readings_hourly()
-        logger.info("✅ City ingestion: done | %s", summary)
+        summary = await self.city_ingest.fetch_city_readings_hourly(trigger="cli")
+        logger.info("✅ City ingestion: done | %s", summary.to_dict())
         return summary
 
     # -------------------- manifest guard --------------------

@@ -1,3 +1,0 @@
-"""
-Worker services module.
-"""

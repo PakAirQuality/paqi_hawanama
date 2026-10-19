@@ -1,0 +1,21 @@
+{
+  "status": "success",
+  "states_processed": 6,
+  "cities_processed": 37,
+  "stations_discovered": 190,
+  "stations_created": 0,
+  "stations_updated": 190,
+  "completion_time_utc": "2025-09-24T23:36:08.531965+00:00",
+  "states_skipped": [
+    {
+      "state": "Azad Kashmir",
+      "reason": "aliases_exhausted"
+    },
+    {
+      "state": "FATA",
+      "reason": "aliases_exhausted"
+    }
+  ],
+  "cities_skipped": [],
+  "run_id": "discovery-2025-09-24T23:34:13.523458+00:00"
+}

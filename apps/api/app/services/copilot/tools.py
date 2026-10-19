@@ -18,8 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 def _effective_date(ctx: RunContext[CopilotSession]) -> str:
-    """Return the session date or resolve latest."""
-    return ctx.deps.current_date or _resolve_latest_date()
+    """Return the active historical date, session date, or latest."""
+    return ctx.deps.active_historical_date or ctx.deps.current_date or _resolve_latest_date()
 
 
 async def _get_db():
@@ -37,6 +37,7 @@ def _update_session(
     focused_station_id: str | None = None,
     comparison_date: str | None = None,
     entities: list[str] | None = None,
+    historical_date: str | None = None,
 ) -> None:
     """Write tool-call context into the session for follow-up resolution."""
     sess = ctx.deps
@@ -51,6 +52,8 @@ def _update_session(
         sess.comparison_date = comparison_date
     if entities is not None:
         sess.last_entities = entities
+    if historical_date is not None:
+        sess.active_historical_date = historical_date
 
 
 # ── Tool 1: aq_hotspots_daily ─────────────────────────────────────────────
@@ -87,7 +90,8 @@ async def aq_hotspots_daily(
 
     hotspots = result.get("data", {}).get("hotspots", [])
     entities = [h["name"] for h in hotspots if h.get("name")][:5]
-    _update_session(ctx, tool="aq_hotspots_daily", focus_type="national", entities=entities)
+    _update_session(ctx, tool="aq_hotspots_daily", focus_type="national", entities=entities,
+                    historical_date=date)
     return result
 
 
@@ -126,7 +130,8 @@ async def aq_city_detail(
 
     city = result.get("data", {}).get("city")
     ft = "station" if sensor_id else "city"
-    _update_session(ctx, tool="aq_city_detail", focus_type=ft, focused_city=city, entities=[city] if city else [])
+    _update_session(ctx, tool="aq_city_detail", focus_type=ft, focused_city=city,
+                    entities=[city] if city else [], historical_date=date)
     return result
 
 
@@ -191,7 +196,8 @@ async def aq_explain_drivers(
         await db.close()
 
     resolved = result.get("data", {}).get("target", city_or_station)
-    _update_session(ctx, tool="aq_explain_drivers", focus_type="city", focused_city=resolved, entities=[resolved])
+    _update_session(ctx, tool="aq_explain_drivers", focus_type="city", focused_city=resolved,
+                    entities=[resolved], historical_date=date)
     return result
 
 
@@ -225,7 +231,7 @@ async def aq_incident_summary(
 
     incidents = result.get("data", {}).get("incidents", [])
     entities = list(dict.fromkeys(i["city"] for i in incidents if i.get("city")))[:5]
-    _update_session(ctx, tool="aq_incident_summary", entities=entities)
+    _update_session(ctx, tool="aq_incident_summary", entities=entities, historical_date=date)
     return result
 
 
@@ -360,14 +366,17 @@ async def aq_station_focus(
 async def aq_station_history(
     ctx: RunContext[CopilotSession],
     hours: int = 24,
+    date: Optional[str] = None,
 ) -> dict:
-    """Show recent PM2.5 readings and nearby station comparison for the focused station.
+    """Show PM2.5 readings and nearby station comparison for the focused station.
 
     Uses the station set by a previous aq_station_focus call. If no station is
     focused, asks the user to mention one first.
 
     Args:
         hours: Number of hours of history to return (default 24).
+        date: Date anchor (YYYY-MM-DD). Window ends at 23:59:59 on this date.
+              If omitted, uses the session's active historical date or current time.
     """
     from app.services.analytics import get_station_history, get_station_neighbours
 
@@ -375,16 +384,17 @@ async def aq_station_history(
     if not station_id:
         return {"date": _effective_date(ctx), "data": {"message": "Please mention a station first (e.g. @StationName)."}, "followups": []}
 
-    dt = _effective_date(ctx)
+    anchor = date or ctx.deps.active_historical_date
+    dt = anchor or _effective_date(ctx)
 
     db = await _get_db()
     try:
-        history = await get_station_history(db, station_id, hours)
+        history = await get_station_history(db, station_id, hours, anchor_date=anchor)
         neighbours = await get_station_neighbours(db, station_id)
     finally:
         await db.close()
 
-    _update_session(ctx, tool="aq_station_history")
+    _update_session(ctx, tool="aq_station_history", historical_date=anchor)
 
     data: dict = {}
     if history:
@@ -403,6 +413,7 @@ async def aq_station_history(
         "station_id": station_id,
         "station_name": history.get("station_name", "") if history else "",
         "hours": hours,
+        **({"anchor_date": anchor} if anchor else {}),
     }) + "}}"
 
     return {
@@ -812,4 +823,146 @@ async def aq_impact_brief(
             f"Why is {matched_city} so polluted?",
             "Which schools are most affected?",
         ],
+    }
+
+
+# ── Tool 14: aq_historical_snapshot ──────────────────────────────────────
+
+
+async def aq_historical_snapshot(
+    ctx: RunContext[CopilotSession],
+    date: str,
+    city: Optional[str] = None,
+    country: Optional[str] = None,
+) -> dict:
+    """Get a national overview of air quality for any past date from the observations archive.
+
+    Best for broad "what was the national picture on date X" questions. Returns actual
+    station PM2.5 observations, top polluted cities, band breakdown, and 7-day context.
+    For ranked hotspots on a past date use aq_hotspots_daily(date=...).
+    For city station detail use aq_city_detail(date=...).
+
+    Args:
+        date: Date to query (YYYY-MM-DD). Must be a specific past date.
+        city: Optional city name to get station-level detail for that city on that date.
+        country: Country filter (e.g. "Pakistan"). Defaults to all.
+    """
+    from app.services.analytics import get_historical_snapshot
+
+    db = await _get_db()
+    try:
+        result = await get_historical_snapshot(db, date, city, country)
+    finally:
+        await db.close()
+
+    top_cities = result.get("data", {}).get("top_cities", [])
+    entities = [c["city"] for c in top_cities if c.get("city")][:5]
+    _update_session(
+        ctx, tool="aq_historical_snapshot",
+        focus_type="city" if city else "national",
+        focused_city=city,
+        entities=entities,
+        historical_date=date,
+    )
+    return result
+
+
+# ── Tool 15: aq_fire_activity ────────────────────────────────────────────
+
+
+async def aq_fire_activity(
+    ctx: RunContext[CopilotSession],
+    date: str,
+    city: Optional[str] = None,
+) -> dict:
+    """Get FIRMS satellite fire detection data for any date.
+
+    Returns fire counts, FRP statistics, high-confidence detections,
+    and city-level fire clusters from archived VIIRS satellite data.
+
+    Args:
+        date: Date to query (YYYY-MM-DD).
+        city: Optional city name — filters fires within ~50km of city.
+    """
+    from app.services.analytics import get_fire_activity
+
+    db = await _get_db()
+    try:
+        result = await get_fire_activity(date, city, db=db)
+    finally:
+        await db.close()
+
+    _update_session(
+        ctx, tool="aq_fire_activity",
+        focus_type="city" if city else "national",
+        focused_city=city,
+        historical_date=date,
+    )
+    return result
+
+
+# ── Tool 16: aq_trajectory ───────────────────────────────────────────────
+
+
+async def aq_trajectory(
+    ctx: RunContext[CopilotSession],
+    city: str,
+    date: Optional[str] = None,
+) -> dict:
+    """Analyse where the air mass came from for a city on a specific date.
+
+    Checks for cached HYSPLIT back-trajectory data first. If unavailable,
+    falls back to a wind-based corridor estimate using surface observations
+    and checks for upwind fire detections.
+
+    Args:
+        city: City name (required). Fuzzy matched.
+        date: Date (YYYY-MM-DD). Defaults to today.
+    """
+    from app.services.trajectory import get_trajectory_for_copilot
+
+    dt = date or _effective_date(ctx)
+    db = await _get_db()
+    try:
+        result = await get_trajectory_for_copilot(db, city, dt)
+    finally:
+        await db.close()
+
+    _update_session(
+        ctx, tool="aq_trajectory",
+        focus_type="city",
+        focused_city=city,
+        entities=[city],
+        historical_date=date,
+    )
+
+    status = result.get("status", "unavailable")
+    followups = []
+    if status == "wind_estimated":
+        followups.append(f"What was the air quality in {city} on {dt}?")
+        followups.append(f"How many fires were there on {dt}?")
+    elif status == "ok":
+        followups.append(f"What's driving pollution in {city}?")
+    else:
+        followups.append(f"Tell me about {city}")
+
+    return {
+        "date": dt,
+        "data": result,
+        "basis": {
+            "description": (
+                "HYSPLIT 72h back-trajectory" if status == "ok"
+                else "Wind-based corridor estimate from surface station observations"
+            ),
+            "sources": (
+                ["hysplit_trajectory"] if status == "ok"
+                else ["station_wind_observations", "firms_viirs_archive"]
+            ),
+            "limitations": (
+                [] if status == "ok"
+                else ["Surface winds may not reflect upper-level transport",
+                      "Wind estimate is directional only, not a full trajectory"]
+            ),
+        },
+        "followups": followups,
     }

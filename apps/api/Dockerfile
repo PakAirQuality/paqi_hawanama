@@ -21,21 +21,18 @@ ENV GDAL_CONFIG=/usr/bin/gdal-config
 COPY apps/api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy API application code
+# Copy API application code. The ingestion tasks live in app/ingestion; there is
+# no longer a worker overlay copied over this package.
 COPY apps/api/ /app/
 
-# Copy worker into the API package namespace expected by your imports
-COPY apps/worker/tasks /app/app/tasks
-COPY apps/worker/services /app/app/worker_services
-COPY apps/worker/config /app/app/worker_config
-COPY apps/worker/manifest_utils.py /app/app/manifest_utils.py
-
-# Make sure these are Python packages
-RUN touch /app/app/tasks/__init__.py \
-         /app/app/worker_services/__init__.py \
-         /app/app/worker_config/__init__.py
-
-# Worker modules now have dual-path imports for compatibility
+# Record which revision this image was built from and refuse to build if any
+# legacy overlay path has crept back in (file-system check only; Settings are
+# not constructible at build time).
+ARG GIT_SHA=unknown
+ENV HAWANAMA_GIT_SHA=$GIT_SHA
+RUN python -c "from app.ingestion.provenance import assert_canonical; assert_canonical(import_modules=False); print('PROVENANCE_OK')"
+# Parquet manifests must be readable in this image (pyarrow must import against the pinned numpy).
+RUN python -c "import pyarrow, pandas, numpy; print('PARQUET_OK', pyarrow.__version__, numpy.__version__)"
 
 # Copy alembic configuration (migrations handled via SQLAlchemy)
 COPY apps/api/alembic.ini /app/alembic.ini

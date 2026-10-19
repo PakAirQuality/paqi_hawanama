@@ -293,7 +293,8 @@ async def get_city(
         WHERE r.scope_type = 'city'
             AND LOWER(r.scope_key) = LOWER(:scope_key)
             AND r.ts_utc > NOW() - INTERVAL '6 HOUR'
-        ORDER BY r.ts_utc DESC
+        -- newest AQI-bearing hour first (IQAir city weather runs an hour ahead of pollution)
+        ORDER BY (r.aqi_us IS NOT NULL) DESC, r.ts_utc DESC
         LIMIT 1
         """
         

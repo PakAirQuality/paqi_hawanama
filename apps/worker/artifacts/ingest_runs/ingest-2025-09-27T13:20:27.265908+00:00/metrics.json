@@ -1,0 +1,14 @@
+{
+  "run_id": "ingest-2025-09-27T13:20:27.265908+00:00",
+  "started_utc": "2025-09-27T13:20:27.265908+00:00",
+  "success_count": 0,
+  "fail_count": 192,
+  "rate_limit_per_min": 90,
+  "concurrency": 6,
+  "allow_city_fallback": false,
+  "allow_state_alias": true,
+  "db_station_fallback": false,
+  "country": "Pakistan",
+  "provider_code": "airvisual",
+  "backfill_hours": 48
+}

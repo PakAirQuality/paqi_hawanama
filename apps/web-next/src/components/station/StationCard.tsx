@@ -7,6 +7,7 @@ import { useStationCurrent, useStationHistory, useStationPM25History, useAQICate
 import { formatPollutant, getWindDirection } from '@/lib/aqi'
 import { getAQICategory } from '@/lib/aqi'
 import { getAQIColorByValue, getAQICategoryLabel } from '@/components/map/config/aqiStyles'
+import { formatDateLabel, pktHour, pktHourLabel } from '@/lib/dateLabel'
 import {
   BarChart,
   Bar,
@@ -70,7 +71,7 @@ const MiniAQIBadge: React.FC<{ value: number }> = ({ value }) => {
 }
 
 export function StationCard() {
-  const { isOpen, stationId, close } = useStationSidebar()
+  const { isOpen, stationId, viewDate, viewSnapshot, close } = useStationSidebar()
   const abortQueries = useAbortOnStationChange(stationId)
   const [chartMetric, setChartMetric] = React.useState<'aqi' | 'pm25'>('pm25')
   const [isMobile, setIsMobile] = useState(false)
@@ -79,15 +80,18 @@ export function StationCard() {
     const checkIsMobile = () => {
       setIsMobile(window.innerWidth <= 768)
     }
-    
+
     checkIsMobile()
     window.addEventListener('resize', checkIsMobile)
     return () => window.removeEventListener('resize', checkIsMobile)
   }, [])
-  
-  const { data: current, isLoading: currentLoading } = useStationCurrent(stationId)
-  const { data: history, isLoading: historyLoading } = useStationHistory(stationId)
-  const { data: pm25History, isLoading: pm25HistoryLoading } = useStationPM25History(stationId)
+
+  // In historical (estimated) mode we skip the live "current" fetch entirely.
+  // The header is rendered from the daily snapshot the user clicked, matching the
+  // internal dashboard pattern (apps/dashboard-frontend StructuresTab).
+  const { data: current, isLoading: currentLoading } = useStationCurrent(viewDate ? null : stationId)
+  const { data: history, isLoading: historyLoading } = useStationHistory(stationId, viewDate ?? undefined)
+  const { data: pm25History, isLoading: pm25HistoryLoading } = useStationPM25History(stationId, viewDate ?? undefined)
   const { data: categories } = useAQICategories()
 
   // Prepare combined chart data using local time and handling null values
@@ -97,8 +101,8 @@ export function StationCard() {
       return {
         timestamp_pk: item.timestamp_pk,
         timestamp_utc: item.timestamp_utc,
-        hour: pkDate.getHours(),
-        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+        hour: pktHour(pkDate),
+        timeLabel: pktHourLabel(pkDate),
         aqi: item.aqi_us,
         pm25: null as number | null
       }
@@ -109,8 +113,8 @@ export function StationCard() {
       return {
         timestamp_pk: item.timestamp_pk,
         timestamp_utc: item.timestamp_utc,
-        hour: pkDate.getHours(),
-        timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+        hour: pktHour(pkDate),
+        timeLabel: pktHourLabel(pkDate),
         aqi: null as number | null,
         pm25: item.pm25
       }
@@ -153,8 +157,7 @@ export function StationCard() {
       .sort((a, b) => new Date(a.timestamp_pk).getTime() - new Date(b.timestamp_pk).getTime())
     
     // Get current local time hour to determine rightmost position
-    const currentPKTime = new Date().toLocaleString('en-US', { timeZone: 'Asia/Karachi' })
-    const currentHour = new Date(currentPKTime).getHours()
+    const currentHour = pktHour(new Date())
     
     return sortedData.map((item, index) => ({
       ...item,
@@ -196,7 +199,30 @@ export function StationCard() {
   // Get current data
   const category = current && categories ? getAQICategory(current.aqi_us, categories) : null
   const currentAQI = current?.aqi_us || 0
-  const currentHour = new Date().getHours()
+
+  // Historical mode: estimated viewer is looking at a past date. We render from
+  // the snapshot the user clicked (daily-mean PM2.5 + name + city) and synthesize
+  // the AQI band locally — no dependency on useStationCurrent or the categories API.
+  // Mirrors apps/dashboard-frontend StructuresTab.tsx:937-944.
+  const isHistorical = viewDate !== null && viewSnapshot !== null
+
+  function pm25Band(pm25: number): { label: string; color: string } {
+    if (pm25 <= 35)  return { label: 'Good',           color: '#6ecc39' }
+    if (pm25 <= 75)  return { label: 'Moderate',       color: '#f0c20c' }
+    if (pm25 <= 150) return { label: 'Unhealthy',      color: '#f18017' }
+    if (pm25 <= 250) return { label: 'Very Unhealthy', color: '#a070b5' }
+    return              { label: 'Hazardous',      color: '#c0392b' }
+  }
+
+  const histBand = isHistorical ? pm25Band(viewSnapshot!.pm25) : null
+  const displayPm25 = isHistorical ? viewSnapshot!.pm25 : current?.main_value ?? null
+  const displayColor = isHistorical ? histBand!.color : getAQIColorByValue(currentAQI || 0)
+  const displayBandLabel = isHistorical
+    ? histBand!.label
+    : (category ? getAQICategoryLabel(currentAQI, category.label) : '—')
+  const displayName = isHistorical ? (viewSnapshot!.name ?? '') : (current?.name ?? '')
+  const displayDateLabel = isHistorical && viewDate ? formatDateLabel(viewDate) : null
+  const currentHour = pktHour(new Date())
 
   // Debug logging for data inconsistency tracking
   if (process.env.NODE_ENV === 'development' && current && stationId) {
@@ -222,28 +248,34 @@ export function StationCard() {
         ${isOpen ? 'translate-x-0' : '-translate-x-full'}
       `}>
         <div className="bg-white rounded-2xl shadow-xl p-3 max-h-[calc(100vh-2rem)] overflow-y-auto">
-          {currentLoading ? (
+          {currentLoading && !isHistorical ? (
             <div className="animate-pulse space-y-4">
               <div className="h-8 bg-gray-200 rounded w-3/4" />
               <div className="h-32 bg-gray-200 rounded-2xl" />
               <div className="h-20 bg-gray-200 rounded-2xl" />
               <div className="h-40 bg-gray-200 rounded-2xl" />
             </div>
-          ) : current && categories && category ? (
+          ) : (isHistorical || (current && categories && category)) ? (
             <>
               {/* Header: Station Name and Close Button */}
               <div className="flex items-start justify-between mb-1">
                 <div className="flex-1 pr-2">
                   <div className="text-lg font-bold text-gray-900 leading-tight">
-                    {current.name}
+                    {displayName || ' '}
                   </div>
                   <div className="text-xs text-gray-400 mt-0.5">
-                    Last updated: {new Date(current.last_update).toLocaleTimeString('en-US', {
-                      timeZone: 'Asia/Karachi',
-                      hour12: false,
-                      hour: '2-digit',
-                      minute: '2-digit'
-                    })} PKT
+                    {isHistorical
+                      ? `${displayDateLabel} · Station reading`
+                      : current && (
+                          <>
+                            Last updated: {new Date(current.last_update).toLocaleTimeString('en-US', {
+                              timeZone: 'Asia/Karachi',
+                              hour12: false,
+                              hour: '2-digit',
+                              minute: '2-digit'
+                            })} PKT
+                          </>
+                        )}
                   </div>
                 </div>
                 <button
@@ -256,52 +288,61 @@ export function StationCard() {
               </div>
 
               {/* Compact AQI Card */}
-              <div 
+              <div
                 className="rounded-lg p-3 mt-2"
-                style={{ backgroundColor: getAQIColorByValue(currentAQI || 0) }}
+                style={{ backgroundColor: displayColor }}
               >
-                {/* Upper section: US AQI | Category */}
+                {/* Upper section: PM2.5 | Category */}
                 <div className="grid grid-cols-2 gap-4 items-center mb-3">
-                  
+
                   {/* PM2.5 Number */}
                   <div className="text-center">
-                    <div className="text-xs text-gray-700 mb-1">PM2.5</div>
+                    <div className="text-xs text-gray-700 mb-1">
+                      {isHistorical ? 'Daily mean PM2.5' : 'PM2.5'}
+                    </div>
                     <div className="text-3xl font-bold leading-none text-gray-900">
-                      {current.main_value || '--'}
+                      {displayPm25 != null ? (typeof displayPm25 === 'number' ? displayPm25.toFixed(1) : displayPm25) : '--'}
                       <span className="text-xs font-normal text-gray-600 ml-1">µg/m³</span>
                     </div>
                   </div>
-                  
+
                   {/* Category and AQI */}
                   <div className="text-center">
                     <div className="text-sm font-semibold text-gray-800">
-                      {getAQICategoryLabel(currentAQI, category.label)}
+                      {displayBandLabel}
                     </div>
                     <div className="text-xs text-gray-700 mt-1">
-                      US AQI {currentAQI || '--'}
+                      {isHistorical ? '24-hour average measured at this station' : `US AQI ${currentAQI || '--'}`}
                     </div>
                   </div>
                 </div>
-                
-                {/* Compact Weather Bar */}
-                <div className="mt-3 bg-white rounded-md px-3 py-2 flex items-center justify-between text-sm text-gray-800">
-                  <div className="flex items-center space-x-1">
-                    <Thermometer className="w-4 h-4" />
-                    <span>{current.temp_c}°C</span>
+
+                {/* Compact Weather Bar — live mode only (we don't have historical weather) */}
+                {!isHistorical && current && (
+                  <div className="mt-3 bg-white rounded-md px-3 py-2 flex items-center justify-between text-sm text-gray-800">
+                    <div className="flex items-center space-x-1">
+                      <Thermometer className="w-4 h-4" />
+                      <span>{current.temp_c}°C</span>
+                    </div>
+                    <div className="flex items-center space-x-1">
+                      <Droplets className="w-4 h-4" />
+                      <span>{current.humidity}%</span>
+                    </div>
+                    <div className="flex items-center space-x-1">
+                      <Wind className="w-4 h-4" />
+                      <span>{current.wind_speed_kmh?.toFixed(1)} km/h</span>
+                    </div>
                   </div>
-                  <div className="flex items-center space-x-1">
-                    <Droplets className="w-4 h-4" />
-                    <span>{current.humidity}%</span>
-                  </div>
-                  <div className="flex items-center space-x-1">
-                    <Wind className="w-4 h-4" />
-                    <span>{current.wind_speed_kmh?.toFixed(1)} km/h</span>
-                  </div>
-                </div>
+                )}
               </div>
 
 
               {/* 24h Trend Bar Chart with Toggle */}
+              {isHistorical && !historyLoading && !pm25HistoryLoading && chartData.length === 0 && (
+                <div className="bg-white border border-gray-100 rounded-xl p-3 mt-2 text-xs text-gray-500 text-center">
+                  No hourly data was recorded at {displayName || 'this station'} on {displayDateLabel}.
+                </div>
+              )}
               {!(historyLoading && pm25HistoryLoading) && chartData.length > 0 && (
                   <div className="bg-white border border-gray-100 rounded-xl p-2">
                   <div className="flex items-center justify-between mb-2">

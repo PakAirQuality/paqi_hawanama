@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { bandKey, normalizeBand } from '@/lib/aqi'
+import { useSelection } from '@/lib/selection'
 import { useQuery } from '@tanstack/react-query'
 import {
   fetchForecast,
@@ -18,6 +20,7 @@ import { ContextPanel } from '@/components/analyst-desk/ContextPanel'
 import type { CopilotAction, StationMention } from '@/components/analyst-desk/types'
 
 export default function AnalystDeskPage() {
+  const selection = useSelection()
   const [selectedDate, setSelectedDate] = useState('')
   const [selectedHorizon, setSelectedHorizon] = useState(0)
   const [stationMention, setStationMention] = useState<StationMention | null>(null)
@@ -63,6 +66,14 @@ export default function AnalystDeskPage() {
       setSelectedDate(availableDates.dates[0])
     }
   }, [availableDates, selectedDate])
+
+  // Mirror into the shared selection (header badge, chat context)
+  useEffect(() => {
+    if (selectedDate) selection.setDate(selectedDate, selectedDate === availableDates?.dates?.[0])
+  }, [selectedDate, availableDates]) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    selection.setLayer('fires', showFires); selection.setLayer('population', showPopulation)
+  }, [showFires, showPopulation]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const { data: currentStations } = useQuery({
     queryKey: ['analyst-current-stations'],
@@ -140,16 +151,15 @@ export default function AnalystDeskPage() {
         .filter(s => s.pm25 != null)
         .map(s => {
           const pm25 = s.pm25!
-          const band = pm25 <= 35 ? 'good' : pm25 <= 75 ? 'moderate' : pm25 <= 150 ? 'unhealthy' : pm25 <= 250 ? 'very_unhealthy' : 'severe'
-          return { pm25, band, city: s.city || '' }
+          return { pm25, band: bandKey(pm25), city: s.city || '' }
         })
     }
     return (forecast?.forecasts ?? [])
       .filter(f => f.lead_days === selectedHorizon)
       .map(f => {
         const pm25 = f.pm25_forecast
-        const rawBand = f.risk_band
-        const band = (rawBand && rawBand !== 'unknown') ? rawBand : (pm25 == null ? 'moderate' : pm25 <= 35 ? 'good' : pm25 <= 75 ? 'moderate' : pm25 <= 150 ? 'unhealthy' : pm25 <= 250 ? 'very_unhealthy' : 'severe')
+        // Classify from the value itself so stored legacy bands can never disagree with the markers
+        const band = pm25 == null ? normalizeBand(f.risk_band) : bandKey(pm25)
         return { pm25, band, city: f.city_name || '' }
       })
   }, [forecast, currentStations, selectedHorizon])
@@ -163,6 +173,7 @@ export default function AnalystDeskPage() {
         activeTab={railTab}
         onTabChange={setRailTab}
         isStreaming={isStreaming}
+        tabs={['chat', 'analytics', 'layers']}
       />
 
       {/* Sliding panel */}
@@ -256,6 +267,7 @@ export default function AnalystDeskPage() {
           forecasts={forecast?.forecasts ?? []}
           firesGeoJSON={firesGeoJSON ?? null}
           selectedHorizon={selectedHorizon}
+          selectedDate={selectedDate || null}
         />
       </div>
     </div>

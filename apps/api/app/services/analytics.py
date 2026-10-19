@@ -5,6 +5,7 @@ the copilot tools.  Observation-first for "current conditions" queries;
 forecast-first for "alert/driver" queries.
 """
 
+from app.utils.timefmt import iso_z
 import logging
 from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -25,33 +26,8 @@ from app.routers.analyst_desk import (
 
 logger = logging.getLogger(__name__)
 
-# ── Risk band thresholds (µg/m³) ─────────────────────────────────────────
-
-_PM25_BANDS = [
-    (35, "good"),
-    (75, "moderate"),
-    (150, "unhealthy"),
-    (250, "very_unhealthy"),
-]
-
-
-def _classify_band(pm25: float | None) -> str:
-    if pm25 is None:
-        return "unknown"
-    for threshold, band in _PM25_BANDS:
-        if pm25 <= threshold:
-            return band
-    return "severe"
-
-
-_BAND_ORDER = {
-    "severe": 5,
-    "very_unhealthy": 4,
-    "unhealthy": 3,
-    "moderate": 2,
-    "good": 1,
-    "unknown": 0,
-}
+# ── Health bands: US EPA 2024 PM2.5 categories, one implementation for the repo ──
+from app.services.aqi.pm25 import BAND_ORDER as _BAND_ORDER, band_key as _classify_band  # noqa: E402
 
 _WATCHLIST_SEVERITY = {
     "ramp_alerts": "critical",
@@ -398,9 +374,13 @@ def _build_national_summary(
 
     return {
         "n_stations": len(vals),
+        # Unweighted mean over the stations that reported: a monitoring-network figure,
+        # not an area or population average. Label it that way downstream.
         "mean_pm25": _safe_round(sum(vals) / len(vals)) if vals else None,
+        "mean_basis": "reporting_station_mean",
         "max_pm25": _safe_round(max(vals)) if vals else None,
         "band_counts": band_counts,
+        "band_scale": "us_epa_2024",
         "source": "observations",
     }
 
@@ -1770,11 +1750,23 @@ async def get_station_history(
     db: AsyncSession,
     station_id: str,
     hours: int = 24,
+    anchor_date: str | None = None,
 ) -> dict | None:
-    """Get recent PM2.5 readings for a station.
+    """Get PM2.5 readings for a station over a window ending at anchor_date (or now).
 
     Returns {station_name, city, hours, readings, stats} or None.
+    anchor_date: YYYY-MM-DD — if provided, window ends at 23:59:59 on that date.
     """
+    if anchor_date:
+        try:
+            target = date_cls.fromisoformat(anchor_date)
+            window_end = datetime(target.year, target.month, target.day, 23, 59, 59, tzinfo=timezone.utc)
+        except ValueError:
+            window_end = datetime.now(timezone.utc)
+    else:
+        window_end = datetime.now(timezone.utc)
+    window_start = window_end - timedelta(hours=hours)
+
     query = text("""
         SELECT s.name AS station_name, c.name AS city_name,
                r.pm25, r.ts_utc
@@ -1783,13 +1775,15 @@ async def get_station_history(
         LEFT JOIN cities c ON s.city_id = c.id
         WHERE r.scope_key = :station_id
           AND r.scope_type = 'station'
-          AND r.ts_utc >= NOW() - MAKE_INTERVAL(hours => :hours)
+          AND r.ts_utc >= :window_start
+          AND r.ts_utc <= :window_end
           AND r.pm25 IS NOT NULL
         ORDER BY r.ts_utc ASC
     """)
     rows = (await db.execute(query, {
         "station_id": station_id,
-        "hours": hours,
+        "window_start": window_start,
+        "window_end": window_end,
     })).mappings().all()
 
     if not rows:
@@ -1921,8 +1915,8 @@ async def get_data_coverage(
         "entity": target_name,
         "geography": geography,
         "detail_level": detail_level,
-        "earliest_ts_utc": earliest.isoformat() + "Z",
-        "latest_ts_utc": latest.isoformat() + "Z",
+        "earliest_ts_utc": iso_z(earliest),
+        "latest_ts_utc": iso_z(latest),
         "coverage_days": round(total_hours / 24, 1),
         "n_observations": agg.n_obs,
         "n_stations_total": n_stations,
@@ -1965,8 +1959,8 @@ async def get_data_coverage(
         {
             "station_name": r.station_name,
             "station_id": r.station_id,
-            "earliest_ts_utc": r.earliest_ts.isoformat() + "Z",
-            "latest_ts_utc": r.latest_ts.isoformat() + "Z",
+            "earliest_ts_utc": iso_z(r.earliest_ts),
+            "latest_ts_utc": iso_z(r.latest_ts),
             "n_readings": r.n_readings,
             "coverage_days": round(
                 (r.latest_ts - r.earliest_ts).total_seconds() / 86400, 1
@@ -2052,3 +2046,347 @@ async def get_station_neighbours(
         }
         for r in rows
     ]
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Tool 14: aq_historical_snapshot — historical observation analysis
+# ═════════════════════════════════════════════════════════════════════════
+
+
+async def get_historical_snapshot(
+    db: AsyncSession,
+    date: str,
+    city: str | None = None,
+    country: str | None = None,
+) -> dict:
+    """Observed PM2.5 snapshot for a specific historical date.
+
+    National scope: top 10 cities by avg PM2.5, national stats, band breakdown.
+    City scope: station-level detail + hourly trend for that city on that date.
+    """
+    country = country or "Pakistan"
+    country_filter = _country_clause()
+
+    target = date_cls.fromisoformat(date)
+    window_start = datetime(target.year, target.month, target.day, 0, 0, 0, tzinfo=timezone.utc)
+    window_end = datetime(target.year, target.month, target.day, 23, 59, 59, tzinfo=timezone.utc)
+
+    params: dict = {"window_start": window_start, "window_end": window_end, "country": country}
+
+    # ── National summary ──
+    nat_result = await db.execute(text(f"""
+        WITH latest AS (
+            SELECT DISTINCT ON (s.station_id)
+                s.station_id, r.pm25, r.aqi_us
+            FROM readings r
+            JOIN stations s ON r.scope_key = s.station_id
+            LEFT JOIN countries co ON s.country_id = co.id
+            WHERE r.scope_type = 'station'
+              AND r.ts_utc >= :window_start AND r.ts_utc <= :window_end
+              AND r.pm25 IS NOT NULL AND s.active = true
+              {country_filter}
+            ORDER BY s.station_id, r.ts_utc DESC
+        )
+        SELECT
+            COUNT(*) AS n_stations,
+            ROUND(AVG(pm25)::numeric, 1) AS mean_pm25,
+            ROUND(MAX(pm25)::numeric, 1) AS max_pm25,
+            -- US EPA 2024 PM2.5 breakpoints on the truncated (0.1 µg/m³) concentration;
+            -- keep in step with app/services/aqi/pm25.py BANDS.
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 <= 9.0 THEN 1 END) AS good,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 9.0 AND trunc(pm25 * 10) / 10 <= 35.4 THEN 1 END) AS moderate,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 35.4 AND trunc(pm25 * 10) / 10 <= 55.4 THEN 1 END) AS usg,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 55.4 AND trunc(pm25 * 10) / 10 <= 125.4 THEN 1 END) AS unhealthy,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 125.4 AND trunc(pm25 * 10) / 10 <= 225.4 THEN 1 END) AS very_unhealthy,
+            COUNT(CASE WHEN trunc(pm25 * 10) / 10 > 225.4 THEN 1 END) AS hazardous
+        FROM latest
+    """), params)
+    nat = nat_result.mappings().first()
+
+    national_summary = {
+        "n_stations": int(nat["n_stations"]) if nat else 0,
+        "mean_pm25": float(nat["mean_pm25"]) if nat and nat["mean_pm25"] else None,
+        "max_pm25": float(nat["max_pm25"]) if nat and nat["max_pm25"] else None,
+        "mean_basis": "reporting_station_mean",
+        "band_scale": "us_epa_2024",
+        "bands": {
+            "good": int(nat["good"]) if nat else 0,
+            "moderate": int(nat["moderate"]) if nat else 0,
+            "unhealthy_sensitive": int(nat["usg"]) if nat else 0,
+            "unhealthy": int(nat["unhealthy"]) if nat else 0,
+            "very_unhealthy": int(nat["very_unhealthy"]) if nat else 0,
+            "hazardous": int(nat["hazardous"]) if nat else 0,
+        },
+    }
+
+    # ── Top cities ──
+    city_result = await db.execute(text(f"""
+        WITH latest AS (
+            SELECT DISTINCT ON (s.station_id)
+                s.station_id, c.name AS city_name, r.pm25
+            FROM readings r
+            JOIN stations s ON r.scope_key = s.station_id
+            LEFT JOIN cities c ON s.city_id = c.id
+            LEFT JOIN countries co ON s.country_id = co.id
+            WHERE r.scope_type = 'station'
+              AND r.ts_utc >= :window_start AND r.ts_utc <= :window_end
+              AND r.pm25 IS NOT NULL AND s.active = true
+              {country_filter}
+            ORDER BY s.station_id, r.ts_utc DESC
+        )
+        SELECT city_name, ROUND(AVG(pm25)::numeric, 1) AS avg_pm25,
+               ROUND(MAX(pm25)::numeric, 1) AS max_pm25, COUNT(*) AS n_stations
+        FROM latest
+        WHERE city_name IS NOT NULL
+        GROUP BY city_name
+        ORDER BY avg_pm25 DESC
+        LIMIT 10
+    """), params)
+    top_cities = [
+        {
+            "city": r["city_name"],
+            "avg_pm25": float(r["avg_pm25"]),
+            "max_pm25": float(r["max_pm25"]),
+            "n_stations": int(r["n_stations"]),
+        }
+        for r in city_result.mappings().all()
+    ]
+
+    # ── 7-day context ──
+    ctx_start = datetime(target.year, target.month, target.day, 0, 0, 0, tzinfo=timezone.utc) - timedelta(days=3)
+    ctx_end = datetime(target.year, target.month, target.day, 23, 59, 59, tzinfo=timezone.utc) + timedelta(days=3)
+    ctx_result = await db.execute(text(f"""
+        SELECT DATE(r.ts_utc) AS day, ROUND(AVG(r.pm25)::numeric, 1) AS avg_pm25
+        FROM readings r
+        JOIN stations s ON r.scope_key = s.station_id
+        LEFT JOIN countries co ON s.country_id = co.id
+        WHERE r.scope_type = 'station'
+          AND r.ts_utc >= :ctx_start AND r.ts_utc <= :ctx_end
+          AND r.pm25 IS NOT NULL AND s.active = true
+          {country_filter}
+        GROUP BY DATE(r.ts_utc)
+        ORDER BY day
+    """), {**params, "ctx_start": ctx_start, "ctx_end": ctx_end})
+    weekly_context = [
+        {"date": str(r["day"]), "avg_pm25": float(r["avg_pm25"])}
+        for r in ctx_result.mappings().all()
+    ]
+
+    # ── City detail (if city specified) ──
+    city_detail = None
+    if city:
+        cd_result = await db.execute(text(f"""
+            WITH latest AS (
+                SELECT DISTINCT ON (s.station_id)
+                    s.station_id, s.name AS station_name, r.pm25, r.ts_utc
+                FROM readings r
+                JOIN stations s ON r.scope_key = s.station_id
+                LEFT JOIN cities c ON s.city_id = c.id
+                LEFT JOIN countries co ON s.country_id = co.id
+                WHERE r.scope_type = 'station'
+                  AND r.ts_utc >= :window_start AND r.ts_utc <= :window_end
+                  AND r.pm25 IS NOT NULL AND s.active = true
+                  AND LOWER(c.name) = LOWER(:city)
+                  {country_filter}
+                ORDER BY s.station_id, r.ts_utc DESC
+            )
+            SELECT * FROM latest ORDER BY pm25 DESC
+        """), {**params, "city": city})
+        stations = [
+            {
+                "station_id": r["station_id"],
+                "name": r["station_name"],
+                "pm25": _safe_round(r["pm25"]),
+                "timestamp": r["ts_utc"].isoformat() if r["ts_utc"] else None,
+            }
+            for r in cd_result.mappings().all()
+        ]
+        # Hourly trend for the city
+        hourly_result = await db.execute(text(f"""
+            SELECT date_trunc('hour', r.ts_utc) AS hour,
+                   ROUND(AVG(r.pm25)::numeric, 1) AS avg_pm25
+            FROM readings r
+            JOIN stations s ON r.scope_key = s.station_id
+            LEFT JOIN cities c ON s.city_id = c.id
+            LEFT JOIN countries co ON s.country_id = co.id
+            WHERE r.scope_type = 'station'
+              AND r.ts_utc >= :window_start AND r.ts_utc <= :window_end
+              AND r.pm25 IS NOT NULL AND s.active = true
+              AND LOWER(c.name) = LOWER(:city)
+              {country_filter}
+            GROUP BY date_trunc('hour', r.ts_utc)
+            ORDER BY hour
+        """), {**params, "city": city})
+        hourly_trend = [
+            {"hour": r["hour"].isoformat(), "avg_pm25": float(r["avg_pm25"])}
+            for r in hourly_result.mappings().all()
+        ]
+        city_detail = {
+            "city": city,
+            "stations": stations,
+            "hourly_trend": hourly_trend,
+            "avg_pm25": _safe_round(sum(s["pm25"] for s in stations if s["pm25"]) / max(len(stations), 1)),
+            "n_stations": len(stations),
+        }
+
+    data = {
+        "date": date,
+        "scope": city or "national",
+        "national_summary": national_summary,
+        "top_cities": top_cities,
+        "weekly_context": weekly_context,
+    }
+    if city_detail:
+        data["city_detail"] = city_detail
+
+    followups = []
+    if top_cities:
+        followups.append(f"Tell me more about {top_cities[0]['city']} on {date}")
+    followups.append(f"How many fires were there on {date}?")
+    followups.append(f"Where did the air come from on {date}?")
+
+    return _make_envelope(
+        date, data,
+        followups=followups,
+        provenance="observations_db",
+        tool="aq_historical_snapshot",
+        target=city or "national",
+        basis={
+            "description": f"Station observations for {date} (00:00–23:59 UTC)",
+            "sources": ["station_observations"],
+            "observation_window": "24h",
+            "date_queried": date,
+        },
+    )
+
+
+# ═════════════════════════════════════════════════════════════════════════
+# Tool 15: aq_fire_activity — historical fire detections
+# ═════════════════════════════════════════════════════════════════════════
+
+
+async def get_fire_activity(
+    date: str,
+    city: str | None = None,
+    db: AsyncSession | None = None,
+    radius_km: float = 50.0,
+) -> dict:
+    """FIRMS fire detection summary for a specific date, filtered to Pakistan.
+
+    Reads from archived GCS CSVs. If city specified, filters to radius_km.
+    """
+    from app.services.geo_utils import (
+        load_firms_csv_from_gcs,
+        parse_firms_csv_pakistan,
+        resolve_city_centroid,
+        haversine_km,
+    )
+
+    csv_text, actual_date = load_firms_csv_from_gcs(date)
+    if not csv_text:
+        return _make_envelope(
+            date,
+            {
+                "date_requested": date,
+                "date_used": actual_date,
+                "total_fires": 0,
+                "high_confidence": 0,
+                "message": "No FIRMS fire data available for this date range.",
+            },
+            tool="aq_fire_activity",
+            target=city or "national",
+            basis={"description": "No FIRMS data in archive", "sources": []},
+        )
+
+    fires = parse_firms_csv_pakistan(csv_text)
+
+    # Filter by city proximity if requested
+    city_centroid = None
+    if city and db:
+        city_centroid = await resolve_city_centroid(db, city)
+        if city_centroid:
+            clat, clon = city_centroid
+            fires = [
+                f for f in fires
+                if haversine_km(clat, clon, f["latitude"], f["longitude"]) <= radius_km
+            ]
+
+    # Compute summary stats
+    total = len(fires)
+    high_conf = sum(
+        1 for f in fires if f["confidence"].lower() in ("h", "high")
+    )
+    frp_values = [f["frp"] for f in fires if f["frp"] > 0]
+    frp_stats = {
+        "mean": _safe_round(sum(frp_values) / max(len(frp_values), 1)),
+        "max": _safe_round(max(frp_values)) if frp_values else 0,
+        "total": _safe_round(sum(frp_values)),
+    }
+
+    # Cluster fires by nearest city (for national view)
+    city_clusters = []
+    if not city and db:
+        # Get known city centroids
+        city_rows = await db.execute(text("""
+            SELECT c.name, AVG(s.lat) AS lat, AVG(s.lon) AS lon
+            FROM stations s
+            JOIN cities c ON s.city_id = c.id
+            LEFT JOIN countries co ON s.country_id = co.id
+            WHERE s.active = true AND LOWER(co.name) = 'pakistan'
+              AND s.lat IS NOT NULL AND s.lon IS NOT NULL
+            GROUP BY c.name
+        """))
+        known_cities = [
+            {"name": r["name"], "lat": float(r["lat"]), "lon": float(r["lon"])}
+            for r in city_rows.mappings().all()
+        ]
+        # Assign fires to nearest city within 50km
+        cluster_counts: dict[str, int] = {}
+        for f in fires:
+            best_city, best_dist = None, 50.0
+            for kc in known_cities:
+                d = haversine_km(kc["lat"], kc["lon"], f["latitude"], f["longitude"])
+                if d < best_dist:
+                    best_city, best_dist = kc["name"], d
+            if best_city:
+                cluster_counts[best_city] = cluster_counts.get(best_city, 0) + 1
+        city_clusters = sorted(
+            [{"city": k, "fire_count": v} for k, v in cluster_counts.items()],
+            key=lambda x: x["fire_count"],
+            reverse=True,
+        )[:10]
+
+    data = {
+        "date_requested": date,
+        "date_used": actual_date,
+        "scope": city or "national",
+        "total_fires": total,
+        "high_confidence": high_conf,
+        "frp_stats": frp_stats,
+    }
+    if city_clusters:
+        data["city_clusters"] = city_clusters
+    if city and city_centroid:
+        data["city_filter"] = {"city": city, "radius_km": radius_km}
+
+    followups = []
+    if city:
+        followups.append(f"What was the air quality in {city} on {date}?")
+    else:
+        if city_clusters:
+            followups.append(f"Tell me about fires near {city_clusters[0]['city']}")
+        followups.append(f"What was the air quality on {date}?")
+
+    return _make_envelope(
+        date, data,
+        followups=followups,
+        provenance="firms_gcs_archive",
+        tool="aq_fire_activity",
+        target=city or "national",
+        basis={
+            "description": f"VIIRS fire detections for {actual_date} (filtered to Pakistan)",
+            "sources": ["firms_viirs_archive"],
+            "fire_date": actual_date,
+            "limitations": ["FIRMS has ~12h latency; data may lag by 1-2 days for recent dates"],
+        },
+    )

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { BarChart, Bar, XAxis, YAxis, ResponsiveContainer, CartesianGrid, ReferenceLine } from 'recharts'
 import type { StationHistory, AQICategory } from '@/lib/apiClient'
 import { getAQICategory } from '@/lib/aqi'
+import { pktHour, pktHourLabel } from '@/lib/dateLabel'
 
 interface HistoryMiniChartProps {
   data: StationHistory[]
@@ -26,8 +27,8 @@ export function HistoryMiniChart({ data, categories }: HistoryMiniChartProps) {
     const category = getAQICategory(item.aqi_us, categories)
     const pkDate = new Date(item.timestamp_pk || item.timestamp)
     return {
-      time: pkDate.getHours(),
-      timeLabel: pkDate.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false }),
+      time: pktHour(pkDate),
+      timeLabel: pktHourLabel(pkDate),
       aqi: item.aqi_us,
       fill: category.color,
     }

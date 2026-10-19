@@ -1,6 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState, useCallback } from 'react'
+import { canRenderMap } from '@/lib/webgl'
+import { formatPkt } from '@/lib/time'
+import { bandKey, classifyPm25, markerClass, normalizeBand, pm25Color } from '@/lib/aqi'
+import { esc } from '@/lib/html'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import type { ForecastEntry, CurrentStation, CopilotAction, StationMention } from './types'
@@ -8,6 +12,8 @@ import { WindParticleRenderer, type WindMetadata } from './WindParticleLayer'
 import type { FiresGeoJSON } from './api'
 import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 
+// the deployed build reads a token restricted to this site's own addresses
+// (.env.production.local); the literal is the development fallback
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
 const API_BASE = 'https://hawanama-152782825429.asia-south1.run.app'
@@ -15,49 +21,38 @@ const MARKER_MIN_ZOOM = 4
 
 import { loadPakBoundary, isInsidePakistan } from './pakistan'
 
-// ── AQI color class (same as dashboard InteractivePakistanMap) ──
+// ── Health classification: one implementation for the whole dashboard (lib/aqi) ──
+// Live markers and forecast markers are both classified from PM2.5 µg/m³ with the US EPA
+// 2024 breakpoints, so a 40 µg/m³ station and a 40 µg/m³ forecast always carry the same
+// category and colour.
 
-function getAQIColorClass(aqi: number | null | undefined): string {
-  if (aqi == null || aqi <= 0) return 'bg-no-reading'
-  if (aqi <= 50) return 'bg-good'
-  if (aqi <= 100) return 'bg-moderate'
-  if (aqi <= 150) return 'bg-unhealthy-sensitive'
-  if (aqi <= 200) return 'bg-unhealthy'
-  if (aqi <= 300) return 'bg-very-unhealthy'
-  return 'bg-hazardous'
+function getAQIColorClass(_aqi: number | null | undefined, pm25?: number | null): string {
+  return markerClass(pm25)
 }
 
-// Forecast risk_band → AQI marker class
-function bandToMarkerClass(band: string): string {
-  switch (band) {
+// Forecast risk_band (canonical or legacy key) → marker class
+function bandToMarkerClass(band: string, pm25?: number | null): string {
+  if (pm25 != null) return markerClass(pm25)
+  switch (normalizeBand(band)) {
     case 'good': return 'bg-good'
     case 'moderate': return 'bg-moderate'
+    case 'unhealthy_sensitive': return 'bg-unhealthy-sensitive'
     case 'unhealthy': return 'bg-unhealthy'
     case 'very_unhealthy': return 'bg-very-unhealthy'
-    case 'severe': return 'bg-hazardous'
-    default: return 'bg-moderate'
+    case 'hazardous': return 'bg-hazardous'
+    default: return 'bg-no-reading'
   }
 }
 
-// PM2.5 → band fallback
+// PM2.5 → band key
 function pm25ToBand(pm25: number | null | undefined): string {
-  if (pm25 == null) return 'moderate'
-  if (pm25 <= 35) return 'good'
-  if (pm25 <= 75) return 'moderate'
-  if (pm25 <= 150) return 'unhealthy'
-  if (pm25 <= 250) return 'very_unhealthy'
-  return 'severe'
+  return bandKey(pm25)
 }
 
-// AQI category → forecast band
-const AQI_CATEGORY_MAP: Record<string, string> = {
-  good: 'good',
-  moderate: 'moderate',
-  unhealthy_sensitive: 'unhealthy',
-  unhealthy: 'unhealthy',
-  very_unhealthy: 'very_unhealthy',
-  hazardous: 'severe',
-}
+// API aqi_category keys are already canonical; normalise legacy spellings only
+const AQI_CATEGORY_MAP: Record<string, string> = Object.fromEntries(
+  ['good', 'moderate', 'unhealthy_sensitive', 'unhealthy', 'very_unhealthy', 'hazardous', 'severe', 'usg'].map(k => [k, normalizeBand(k)]),
+)
 
 const AQI_CATEGORY_LABELS: Record<string, string> = {
   good: 'Good',
@@ -159,6 +154,7 @@ export function ForecastMap({
   const markersRef = useRef<mapboxgl.Marker[]>([])
   const mapLoaded = useRef(false)
   const [zoomLevel, setZoomLevel] = useState(4.2)
+  const [mapUnavailable, setMapUnavailable] = useState(false)
   const providerMapRef = useRef<ProviderMap | null>(null)
   const fireSourceAdded = useRef(false)
 
@@ -216,6 +212,12 @@ export function ForecastMap({
   // Initialize map
   useEffect(() => {
     if (!mapContainer.current || map.current) return
+    if (!canRenderMap()) {
+      // No WebGL: leave the container empty; the page's MapErrorBoundary shows the fallback
+      // when the construction below throws, and this check avoids the throw altogether.
+      setMapUnavailable(true)
+      return
+    }
 
     map.current = new mapboxgl.Map({
       container: mapContainer.current,
@@ -231,9 +233,16 @@ export function ForecastMap({
       antialias: true,
     })
 
+    map.current.on('error', (ev: any) => {
+      const status = ev?.error?.status ?? ev?.error?.statusCode
+      if (status === 404 || status === 400 || ev?.sourceId || ev?.tile) return
+      console.warn('[forecast map] error', ev?.error?.message ?? ev)
+    })
+    map.current.getCanvas().addEventListener('webglcontextlost', () => setMapUnavailable(true))
+
     map.current.on('load', async () => {
       if (!map.current) return
-      await loadPakBoundary()
+      try { await loadPakBoundary() } catch (err) { console.warn('[forecast map] boundary load failed', err) }
 
       // ── 3D Terrain ──
       map.current.addSource('mapbox-dem', {
@@ -417,17 +426,17 @@ export function ForecastMap({
 
         try {
           const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`,
-            { headers: { Authorization: `Bearer ${process.env.NEXT_PUBLIC_TASKS_API_SECRET || ''}` } }
+            `${API_BASE}/api/v1/ops/pipeline/tiles/${predDate}/point?lat=${lat.toFixed(4)}&lon=${lng.toFixed(4)}&smoothed=true`
           )
           if (!res.ok) return
           const data = await res.json()
           const pm25 = data.pm25
           if (pm25 == null) return
 
-          const band = pm25 <= 35 ? 'Good' : pm25 <= 75 ? 'Moderate' : pm25 <= 150 ? 'Unhealthy' : pm25 <= 250 ? 'Very Unhealthy' : 'Severe'
-          const color = pm25 <= 35 ? '#6ecc39' : pm25 <= 75 ? '#f0c20c' : pm25 <= 150 ? '#f18017' : pm25 <= 250 ? '#a070b5' : '#991b1b'
-          const textColor = pm25 <= 75 ? '#333' : '#fff'
+          const cls = classifyPm25(pm25)
+          const band = cls.label
+          const color = cls.color
+          const textColor = cls.textColor
 
           pm25Popup.setLngLat(e.lngLat).setHTML(`
             <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5;text-align:center">
@@ -562,11 +571,11 @@ export function ForecastMap({
         const coords = (e.features[0].geometry as GeoJSON.Point).coordinates.slice() as [number, number]
         firePopup.setLngLat(coords).setHTML(`
           <div style="font-family:system-ui,-apple-system,sans-serif;font-size:12px;line-height:1.5">
-            <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Fire Detection</div>
-            <div>FRP: <b>${props.frp} MW</b></div>
-            <div>Confidence: <b style="text-transform:capitalize">${props.confidence}</b></div>
-            <div>Satellite: <b>${props.satellite}</b></div>
-            <div style="color:#64748b;font-size:11px;margin-top:2px">${props.acq_date}</div>
+            <div style="font-weight:600;color:#ea580c;margin-bottom:4px">Satellite fire detection</div>
+            <div>FRP: <b>${esc(props.frp)} MW</b> <span style="color:#94a3b8">(radiative power)</span></div>
+            <div>Confidence: <b style="text-transform:capitalize">${esc(props.confidence)}</b></div>
+            <div>Satellite: <b>${esc(props.satellite)}</b> VIIRS</div>
+            <div style="color:#64748b;font-size:11px;margin-top:2px">Acquired ${esc(props.acq_datetime_utc ? formatPkt(props.acq_datetime_utc) : props.acq_date)}</div>
           </div>
         `).addTo(map.current)
       })
@@ -789,11 +798,12 @@ export function ForecastMap({
       ).forEach((station) => {
         if (station.pm25 == null && station.aqi_raw == null) return
 
-        const colorClass = getAQIColorClass(station.aqi_raw)
-        const aqiCat = station.aqi_category || 'moderate'
-        const band = AQI_CATEGORY_MAP[aqiCat] || 'moderate'
+        // Classify from PM2.5 so live and forecast markers can never disagree at the same value
+        const colorClass = getAQIColorClass(station.aqi_raw, station.pm25)
+        const aqiCat = station.aqi_category || 'unknown'
+        const band = station.pm25 != null ? bandKey(station.pm25) : (AQI_CATEGORY_MAP[aqiCat] || 'unknown')
         const color = BAND_COLORS[band] || '#9ca3af'
-        const textColor = band === 'moderate' ? '#333' : '#fff'
+        const textColor = band === 'moderate' || band === 'good' ? '#333' : '#fff'
 
         const el = createMarkerEl(station.pm25, colorClass)
 
@@ -803,14 +813,14 @@ export function ForecastMap({
             new mapboxgl.Popup({ offset: 16, closeButton: false, maxWidth: '240px' })
               .setHTML(`
                 <div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5">
-                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${station.name || 'Station'}</div>
-                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${station.city || ''}</div>
+                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${esc(station.name || 'Station')}</div>
+                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${esc(station.city || '')}</div>
                   <div style="background:${color};color:${textColor};border-radius:8px;padding:8px 10px;margin-bottom:8px">
                     <div style="display:flex;justify-content:space-between;align-items:baseline">
                       <span style="font-size:22px;font-weight:700">${station.pm25 != null ? Math.round(station.pm25) : '—'}</span>
                       <span style="font-size:11px;opacity:0.85">µg/m³</span>
                     </div>
-                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${AQI_CATEGORY_LABELS[aqiCat] || aqiCat}</div>
+                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${esc(BAND_LABELS[band] || AQI_CATEGORY_LABELS[aqiCat] || aqiCat)}</div>
                   </div>
                   ${station.aqi_raw != null ? `<div style="font-size:11px;color:#475569">AQI: <b>${Math.round(station.aqi_raw)}</b></div>` : ''}
                 </div>
@@ -835,11 +845,11 @@ export function ForecastMap({
       ).forEach((entry) => {
         if (entry.latitude == null || entry.longitude == null) return
 
-        const rawBand = entry.risk_band
-        const band = (rawBand && rawBand !== 'unknown') ? rawBand : pm25ToBand(entry.pm25_forecast)
-        const colorClass = bandToMarkerClass(band)
+        // The forecast value decides the band; stored risk_band is only a fallback when it is missing
+        const band = entry.pm25_forecast != null ? pm25ToBand(entry.pm25_forecast) : normalizeBand(entry.risk_band)
+        const colorClass = bandToMarkerClass(band, entry.pm25_forecast)
         const color = BAND_COLORS[band] || '#9ca3af'
-        const textColor = band === 'moderate' ? '#333' : '#fff'
+        const textColor = band === 'moderate' || band === 'good' ? '#333' : '#fff'
 
         const el = createMarkerEl(entry.pm25_forecast, colorClass)
 
@@ -868,19 +878,19 @@ export function ForecastMap({
             new mapboxgl.Popup({ offset: 16, closeButton: false, maxWidth: '240px' })
               .setHTML(`
                 <div style="font-family:system-ui,-apple-system,sans-serif;font-size:13px;line-height:1.5">
-                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${entry.station_name || `Station ${entry.sensor_id}`}</div>
-                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${entry.city_name || ''}</div>
+                  <div style="font-weight:600;font-size:14px;margin-bottom:2px">${esc(entry.station_name || `Station ${entry.sensor_id}`)}</div>
+                  <div style="color:#64748b;font-size:12px;margin-bottom:8px">${esc(entry.city_name || '')}</div>
                   <div style="background:${color};color:${textColor};border-radius:8px;padding:8px 10px;margin-bottom:8px">
                     <div style="display:flex;justify-content:space-between;align-items:baseline">
                       <span style="font-size:22px;font-weight:700">${formatPM25(entry.pm25_forecast)}</span>
                       <span style="font-size:11px;opacity:0.85">µg/m³</span>
                     </div>
-                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${BAND_LABELS[band] || band}</div>
+                    <div style="font-size:11px;opacity:0.9;margin-top:2px">${esc(BAND_LABELS[band] || band)}</div>
                   </div>
                   <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;font-size:11px;color:#475569">
                     <div>Q75: <b>${formatPM25(entry.pm25_q75)}</b></div>
                     <div>Q90: <b>${formatPM25(entry.pm25_q90)}</b></div>
-                    <div>Priority: <b style="text-transform:capitalize">${entry.priority || '—'}</b></div>
+                    <div>Priority: <b style="text-transform:capitalize">${esc(entry.priority || '—')}</b></div>
                     <div>Conf: <b style="text-transform:capitalize">${entry.confidence || '—'}</b></div>
                   </div>
                   ${entry.ramp_detected ? '<div style="color:#d97706;font-weight:600;margin-top:6px;font-size:12px">&#9889; Ramp Detected</div>' : ''}
@@ -1131,6 +1141,15 @@ export function ForecastMap({
 
       {/* Map container */}
       <div ref={mapContainer} className="w-full h-full" />
+      {mapUnavailable && (
+        <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-50">
+          <div className="max-w-md rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            <div className="font-medium">Interactive map unavailable.</div>
+            <div className="text-amber-800 mt-1">This browser cannot render the map (WebGL unavailable or the graphics context was lost). The brief, station data and chat on this page still work.</div>
+            <button type="button" onClick={() => window.location.reload()} className="mt-2 rounded-lg border border-amber-300 bg-white px-3 py-1 text-xs font-medium hover:bg-amber-100">Retry</button>
+          </div>
+        </div>
+      )}
 
       {/* PM2.5 hover readout — upper left, always visible at city zoom */}
       {zoomLevel >= 8 && (
@@ -1139,26 +1158,14 @@ export function ForecastMap({
             {hoverPM25 ? (
               <>
                 <div className="text-center min-w-[44px]">
-                  <div className={`text-2xl font-bold tabular-nums leading-none ${
-                    hoverPM25.pm25 <= 15 ? 'text-emerald-300' :
-                    hoverPM25.pm25 <= 35 ? 'text-emerald-400' :
-                    hoverPM25.pm25 <= 55 ? 'text-amber-400' :
-                    hoverPM25.pm25 <= 75 ? 'text-orange-400' :
-                    hoverPM25.pm25 <= 150 ? 'text-orange-500' :
-                    'text-red-400'
-                  }`}>
+                  <div className="text-2xl font-bold tabular-nums leading-none" style={{ color: pm25Color(hoverPM25.pm25) }}>
                     {Math.round(hoverPM25.pm25)}
                   </div>
                   <div className="text-[9px] text-slate-400 font-medium mt-0.5">µg/m³</div>
                 </div>
                 <div className="text-[10px] leading-tight border-l border-white/10 pl-3">
                   <div className="font-semibold text-white">{hoverPM25.label || 'PM2.5'}</div>
-                  <div className="text-slate-500">{
-                    hoverPM25.pm25 <= 35 ? 'Good' :
-                    hoverPM25.pm25 <= 75 ? 'Moderate' :
-                    hoverPM25.pm25 <= 150 ? 'Unhealthy' :
-                    hoverPM25.pm25 <= 250 ? 'Very Unhealthy' : 'Severe'
-                  }</div>
+                  <div className="text-slate-500">{classifyPm25(hoverPM25.pm25).label}</div>
                 </div>
                 {hoverPM25.population != null && hoverPM25.population > 0 && (
                   <div className="text-center border-l border-white/10 pl-3 min-w-[40px]">

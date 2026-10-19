@@ -2,12 +2,18 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { ChatMessage } from './ChatMessage'
-import { AnalystPanel, StationTrendPanel, type TrayStation, type StationTrendInfo } from './AnalystTray'
+import dynamic from 'next/dynamic'
+import type { TrayStation, StationTrendInfo } from './AnalystTray'
+// Recharts (~100 KB gzip) only loads when the Analytics tab is opened
+const AnalystPanel = dynamic(() => import('./AnalystTray').then(m => m.AnalystPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading charts…</div> })
+const StationTrendPanel = dynamic(() => import('./AnalystTray').then(m => m.StationTrendPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading chart…</div> })
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
+import { useOptionalSelection } from '@/lib/selection'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
-const API_TOKEN = process.env.NEXT_PUBLIC_TASKS_API_SECRET || ""
 const DESK_PREFIX = `${API_BASE}/api/v1/ops/analyst-desk`
+// The copilot is public and metered server-side (daily per-visitor and global budgets).
+const BUDGET_MESSAGE = "The assistant has reached its usage limit for today. Please try again tomorrow."
 
 const ACTION_RE = /\{\{ACTION:(\{.*?\})\}\}/g
 
@@ -16,6 +22,13 @@ const SUGGESTED_QUESTIONS = [
   "Show me all ramp events",
   "How is Lahore looking for the next 3 days?",
   "Which stations should I prioritize?",
+]
+
+const TRACKER_SUGGESTED_QUESTIONS = [
+  "What were the worst cities on this day?",
+  "Were there any fires detected?",
+  "What was driving the pollution?",
+  "Which stations exceeded healthy levels?",
 ]
 
 const STATION_CHIPS = [
@@ -27,6 +40,7 @@ const STATION_CHIPS = [
 
 interface CopilotChatProps {
   selectedDate: string
+  trackerMode?: boolean
   onAction?: (action: CopilotAction) => void
   stationMention?: StationMention | null
   cityMention?: string | null
@@ -36,29 +50,40 @@ interface CopilotChatProps {
   activeTab?: 'chat' | 'analytics'
 }
 
-export function CopilotChat({ selectedDate, onAction, stationMention, cityMention, onMentionConsumed, stations, onStreamingChange, activeTab: externalTab }: CopilotChatProps) {
+export function CopilotChat({ selectedDate, trackerMode = false, onAction, stationMention, cityMention, onMentionConsumed, stations, onStreamingChange, activeTab: externalTab }: CopilotChatProps) {
   const [internalTab, setInternalTab] = useState<'chat' | 'analytics'>('chat')
   const activeTab = externalTab ?? internalTab
+  // Shared selection: sent with every request so the answer describes what the map shows
+  const selection = useOptionalSelection()
+  const selectionContext = selection?.toContext()
+  const selectionLine = selection?.describe()
   const setActiveTab = setInternalTab
   const [messages, setMessages] = useState<ChatMessageType[]>(() => {
-    // Restore cached briefing from today if available
-    if (typeof window !== 'undefined') {
-      const lastBriefDate = localStorage.getItem('analyst_briefing_date')
-      const today = new Date().toISOString().slice(0, 10)
-      if (lastBriefDate === today) {
-        try {
-          const cached = localStorage.getItem('analyst_briefing_messages')
-          if (cached) return JSON.parse(cached)
-        } catch { /* ignore parse errors */ }
-      }
+    // Tracker mode never reads from cache — briefs per selected date
+    if (trackerMode || typeof window === 'undefined') return []
+    // Analyst mode: restore cached briefing from today if available
+    const lastBriefDate = localStorage.getItem('analyst_briefing_date')
+    const today = new Date().toISOString().slice(0, 10)
+    if (lastBriefDate === today) {
+      try {
+        const cached = localStorage.getItem('analyst_briefing_messages')
+        if (cached) return JSON.parse(cached)
+      } catch { /* ignore parse errors */ }
     }
     return []
   })
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
-  const [sessionId] = useState(() => crypto.randomUUID())
+  // Analyst mode: fixed session per mount. Tracker mode: a fresh session per selected date.
+  // Both include a random id so no two visitors can ever share a server-side conversation.
+  const [_sessionId] = useState(() => crypto.randomUUID())
+  const sessionId = trackerMode ? `tracker-${selectedDate}-${_sessionId}` : _sessionId
+  // Tracker mode: track which date was last briefed so we re-brief on date change
+  const [trackerBriefedDate, setTrackerBriefedDate] = useState<string>('')
   const [briefingDone, setBriefingDone] = useState(() => {
-    // Only brief once per calendar day — show cached brief on reload
+    // Tracker mode always starts unbriefed — briefs per selected date
+    if (trackerMode) return false
+    // Analyst mode: only brief once per calendar day
     if (typeof window !== 'undefined') {
       const lastBriefDate = localStorage.getItem('analyst_briefing_date')
       const today = new Date().toISOString().slice(0, 10)
@@ -139,12 +164,21 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     try {
       const res = await fetch(`${DESK_PREFIX}${endpoint}`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(API_TOKEN ? { Authorization: `Bearer ${API_TOKEN}` } : {}),
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
+
+      if (res.status === 429 || res.status === 503) {
+        let detail = BUDGET_MESSAGE
+        try {
+          const err = await res.json()
+          if (typeof err?.detail === 'string') detail = err.detail
+        } catch { /* keep the default message */ }
+        setMessages(prev =>
+          prev.map(m => (m.id === assistantId ? { ...m, content: detail, streaming: false } : m))
+        )
+        return
+      }
 
       if (!res.ok || !res.body) {
         throw new Error(`HTTP ${res.status}`)
@@ -246,8 +280,9 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
     }
   }, [extractActions, onAction, onStreamingChange])
 
-  // Cache briefing messages whenever they change (after streaming ends)
+  // Cache briefing messages whenever they change (after streaming ends) — analyst mode only
   useEffect(() => {
+    if (trackerMode) return
     if (briefingDone && messages.length > 0 && !messages.some(m => m.streaming)) {
       try {
         const today = new Date().toISOString().slice(0, 10)
@@ -255,29 +290,32 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
         localStorage.setItem('analyst_briefing_messages', JSON.stringify(messages))
       } catch { /* quota exceeded — ignore */ }
     }
-  }, [briefingDone, messages])
+  }, [briefingDone, messages, trackerMode])
 
-  // Auto-briefing on mount (once per calendar day)
+  // Auto-briefing: tracker mode re-briefs on every date change; analyst mode briefs once per day
   useEffect(() => {
-    if (briefingDone || !selectedDate) return
+    if (!selectedDate) return
+
+    if (trackerMode) {
+      // Re-brief whenever the selected date changes
+      if (trackerBriefedDate === selectedDate) return
+      setTrackerBriefedDate(selectedDate)
+      const assistantId = crypto.randomUUID()
+      setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
+      streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate, context: selectionContext }, assistantId)
+      return
+    }
+
+    // Analyst mode: brief once per calendar day
+    if (briefingDone) return
     setBriefingDone(true)
     if (typeof window !== 'undefined') {
       localStorage.setItem('analyst_briefing_date', new Date().toISOString().slice(0, 10))
     }
-
     const assistantId = crypto.randomUUID()
-    setMessages([{
-      id: assistantId,
-      role: 'assistant',
-      content: '',
-      streaming: true,
-    }])
-
-    streamResponse('/copilot/briefing', {
-      session_id: sessionId,
-      date: selectedDate,
-    }, assistantId)
-  }, [selectedDate, briefingDone, sessionId, streamResponse])
+    setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
+    streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate, context: selectionContext }, assistantId)
+  }, [selectedDate, trackerBriefedDate, briefingDone, sessionId, streamResponse, trackerMode])
 
   // Send a message
   const sendMessage = useCallback(async (text: string) => {
@@ -306,6 +344,7 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
       session_id: sessionId,
       message: text.trim(),
       date: selectedDate,
+      context: selectionContext,
     }, assistantId)
 
     inputRef.current?.focus()
@@ -378,7 +417,7 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
               <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-1.5">
                 Ask about...
               </p>
-              {SUGGESTED_QUESTIONS.map((q, i) => (
+              {(trackerMode ? TRACKER_SUGGESTED_QUESTIONS : SUGGESTED_QUESTIONS).map((q, i) => (
                 <button
                   key={i}
                   onClick={() => handleSuggestion(q)}
@@ -426,6 +465,11 @@ export function CopilotChat({ selectedDate, onAction, stationMention, cityMentio
       )}
 
       {/* Input */}
+      {selectionLine && activeTab === 'chat' && (
+        <div className="px-3 py-1 border-t border-slate-100 text-[10px] text-slate-400 truncate" title="The assistant answers about this selection">
+          Answering about: <span className="text-slate-600">{selectionLine}</span>
+        </div>
+      )}
       <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-slate-100">
         <div className="flex items-center gap-1.5">
           <input

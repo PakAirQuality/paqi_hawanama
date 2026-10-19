@@ -118,21 +118,12 @@ export const api = {
     if (params?.bbox) query.append('bbox', params.bbox)
     
     const url = `/api/v1/dashboard/stations${query.toString() ? '?' + query.toString() : ''}`
-    const response = await fetch(url)
+    const response = await fetch(url, { credentials: 'omit' })
     const data = await response.json()
-    
-    // Extract stations array from the API response structure
-    const stations = data.stations || []
-    
-    // Filter out stations with readings older than 2 hours
-    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000)
-    
-    return stations.filter((station: any) => {
-      if (!station.last_reading) return false
-      
-      const lastReadingTime = new Date(station.last_reading)
-      return lastReadingTime > twoHoursAgo
-    })
+
+    // Server returns each station's newest PM2.5-bearing hour (48 h lookback, 6 h freshness),
+    // so a weather-only row at H+1 no longer blanks a marker and the HH:00 cliff is gone.
+    return data.stations || []
   },
 
   // Get single station
@@ -243,13 +234,14 @@ export const api = {
 // --- Estimation layer helpers ---
 
 export async function fetchTileDates(limit = 365): Promise<string[]> {
-  const res = await fetch(`${API_BASE_URL}/v1/ops/pipeline/tiles/dates?limit=${limit}`)
+  const res = await fetch(`/api/v1/ops/pipeline/tiles/dates?limit=${limit}`, { credentials: 'omit' })
   if (!res.ok) throw new Error('Failed to fetch tile dates')
   const data = await res.json()
   return (data.dates ?? []) as string[]
 }
 
 export interface DailyStation {
+  station_id?: string
   name: string
   city: string
   pm25: number
@@ -260,7 +252,7 @@ export interface DailyStation {
 }
 
 export async function fetchDailyStations(date: string): Promise<DailyStation[]> {
-  const res = await fetch(`${API_BASE_URL}/v1/ops/pipeline/stations/daily/${date}?country=Pakistan&min_hours=6`)
+  const res = await fetch(`/api/v1/ops/pipeline/stations/daily/${date}?country=Pakistan&min_hours=6`, { credentials: 'omit' })
   if (!res.ok) throw new Error('Failed to fetch daily stations')
   const data = await res.json()
   return (data.stations ?? []) as DailyStation[]
@@ -275,7 +267,7 @@ export interface DailyBrief {
 }
 
 export async function fetchDailyBrief(date: string): Promise<DailyBrief | null> {
-  const res = await fetch(`/api/v1/ops/pipeline/briefs/${date}`)
+  const res = await fetch(`/api/v1/ops/pipeline/briefs/${date}`, { credentials: 'omit' })
   if (res.status === 404) return null
   if (!res.ok) throw new Error(`Failed to load brief for ${date}`)
   return res.json()
