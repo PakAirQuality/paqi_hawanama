@@ -270,7 +270,7 @@ resource "google_cloud_scheduler_job" "firms_fire_ingest" {
 
   http_target {
     http_method = "POST"
-    uri         = "${local.ingest_base_url}/api/v1/ops/analyst-desk/fires/ingest?window_days=2"
+    uri         = "${local.ingest_base_url}/api/v1/ops/analyst-desk/fires/ingest?window_days=3"
 
     headers = {
       "Content-Type" = "application/json"
