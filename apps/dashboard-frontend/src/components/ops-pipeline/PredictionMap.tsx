@@ -6,7 +6,7 @@ import { INVENTORY_NOTE, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/sta
 import { formatPkt } from '@/lib/time'
 import { bandKey, normalizeBand, bandColor } from '@/lib/aqi'
 import { esc } from '@/lib/html'
-import { Loader2, X } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { API_BASE } from './api'
@@ -46,6 +46,7 @@ interface StationReading {
   longitude?: number
   valid_hours?: number | null
   complete?: boolean
+  station_id?: string
 }
 
 interface PredictionMapProps {
@@ -61,13 +62,14 @@ interface PredictionMapProps {
   /** Called when the map cannot render; the page shows a non-map fallback */
   onMapUnavailable?: (reason: MapUnavailableReason) => void
   onMapReady?: (flyTo: (lng: number, lat: number, zoom?: number) => void) => void
+  /** A station, brick kiln or industrial site was clicked; the page opens it in the sidebar */
+  onFeatureClick?: (feature: MapFeatureClick) => void
 }
 
-interface SelectedDistrict {
-  name: string
-  pm25: number | null
-  stations: StationReading[]
-}
+export type MapFeatureClick =
+  | { kind: 'station'; station: StationReading }
+  | { kind: 'kiln'; id: string }
+  | { kind: 'industry'; categoryKey: string; name?: string; lng: number; lat: number }
 
 interface HoverPM25 {
   pm25: number
@@ -118,18 +120,16 @@ function createMarkerEl(value: number | null | undefined, colorClass: string): H
   return container
 }
 
-export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady }: PredictionMapProps) {
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
   const [, setHoveredDistrict] = useState<string | null>(null)
-  const [selectedDistrict, setSelectedDistrict] = useState<SelectedDistrict | null>(null)
   const [hoverPM25, setHoverPM25] = useState<HoverPM25 | null>(null)
 
   // Station markers
   const markersRef = useRef<mapboxgl.Marker[]>([])
   const [stations, setStations] = useState<StationReading[]>([])
-  const stationsRef = useRef<StationReading[]>([])
   const [hoveredStation, setHoveredStation] = useState<StationReading | null>(null)
 
   // Fire layer refs
@@ -137,14 +137,12 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   const firesRef = useRef(firesData)
   firesRef.current = firesData
 
-  // Current selection for handlers registered once at map creation (the district click
-  // used to read the first render's date and model for the rest of the session).
-  const selRef = useRef({ selectedDate, model, smoothed })
-  selRef.current = { selectedDate, model, smoothed }
   const onMapUnavailableRef = useRef(onMapUnavailable)
   onMapUnavailableRef.current = onMapUnavailable
+  // Click handlers are registered once at map creation; read the latest callback
+  const onFeatureClickRef = useRef(onFeatureClick)
+  onFeatureClickRef.current = onFeatureClick
   const zoomHandlerRef = useRef<(() => void) | null>(null)
-  const pointAbortRef = useRef<AbortController | null>(null)
 
   // Refs for urban grid hover (same pattern as ForecastMap)
   const urbanGridsRef = useRef<Map<string, UrbanGrid>>(new Map())
@@ -160,7 +158,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   useEffect(() => {
     if (stationsProp) {
       setStations(stationsProp)
-      stationsRef.current = stationsProp
       return
     }
     const fetchStations = async () => {
@@ -172,14 +169,11 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           const data = await res.json()
           const s = data?.stations ?? []
           setStations(s)
-          stationsRef.current = s
         } else {
           setStations([])
-          stationsRef.current = []
         }
       } catch {
         setStations([])
-        stationsRef.current = []
       }
     }
     fetchStations()
@@ -420,6 +414,13 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           map.getCanvas().style.cursor = ''
           kilnPopup.remove()
         })
+
+        for (const layerId of ['brick-kilns-layer', 'brick-kilns-dots']) {
+          map.on('click', layerId, (e) => {
+            const id = e.features?.[0]?.properties?.id
+            if (id != null) onFeatureClickRef.current?.({ kind: 'kiln', id: String(id) })
+          })
+        }
       } catch (e) {
         console.warn('[BrickKilns] Failed to load:', e)
       }
@@ -522,6 +523,12 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           map.on('mouseleave', layerId, () => {
             map.getCanvas().style.cursor = ''
             industryPopup.remove()
+          })
+          map.on('click', layerId, (e) => {
+            const feat = e.features?.[0]
+            if (!feat) return
+            const [lng, lat] = (feat.geometry as GeoJSON.Point).coordinates
+            onFeatureClickRef.current?.({ kind: 'industry', categoryKey: layer.key, name: feat.properties?.name ?? undefined, lng, lat })
           })
         }
       } catch (e) {
@@ -733,7 +740,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
             map.setFeatureState({ source: 'pakistan-districts', id: newId }, { hover: true })
             setHoveredDistrict(newId)
           }
-          map.getCanvas().style.cursor = 'pointer'
         }
       })
 
@@ -747,69 +753,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         map.getCanvas().style.cursor = ''
       })
 
-      // Click handler - select district and fetch PM2.5
-      let selectedId: string | null = null
-
-      map.on('click', 'districts-fill', async (e) => {
-        if (!e.features || e.features.length === 0) return
-        const feature = e.features[0]
-        const districtName = feature.properties?.shapeName
-        const newId = districtName
-
-        if (selectedId) map.setFeatureState({ source: 'pakistan-districts', id: selectedId }, { selected: false })
-        selectedId = newId
-        map.setFeatureState({ source: 'pakistan-districts', id: newId }, { selected: true })
-
-        let centroid: [number, number]
-        if (feature.geometry.type === 'Polygon') {
-          centroid = getCentroid((feature.geometry as GeoJSON.Polygon).coordinates[0])
-        } else if (feature.geometry.type === 'MultiPolygon') {
-          const largest = (feature.geometry as GeoJSON.MultiPolygon).coordinates.reduce((a, b) =>
-            a[0].length > b[0].length ? a : b
-          )
-          centroid = getCentroid(largest[0])
-        } else {
-          centroid = [e.lngLat.lng, e.lngLat.lat]
-        }
-
-        // Find stations in this district by city name match
-        const districtLower = (districtName ?? '').toLowerCase()
-        const districtStations = stationsRef.current.filter(s => {
-          const city = (s.city ?? '').toLowerCase()
-          return city.includes(districtLower) || districtLower.includes(city)
-        })
-
-        try {
-          // Read the live selection (not the first render's) and cancel any earlier point query
-          const sel = selRef.current
-          const extraParams = [sel.smoothed && 'smoothed=true', sel.model !== 'backbone' && `model=${sel.model}`].filter(Boolean).map(p => '&' + p).join('')
-          pointAbortRef.current?.abort()
-          const ac = new AbortController()
-          pointAbortRef.current = ac
-          const res = await fetch(
-            `${API_BASE}/api/v1/ops/pipeline/tiles/${sel.selectedDate}/point?lat=${centroid[1]}&lon=${centroid[0]}${extraParams}`,
-            { signal: ac.signal }
-          )
-          if (res.ok) {
-            const data = await res.json()
-            setSelectedDistrict({ name: districtName, pm25: data.pm25, stations: districtStations })
-          } else {
-            setSelectedDistrict({ name: districtName, pm25: null, stations: districtStations })
-          }
-        } catch {
-          setSelectedDistrict({ name: districtName, pm25: null, stations: districtStations })
-        }
-      })
-
-      map.on('click', (e) => {
-        const features = map.queryRenderedFeatures(e.point, { layers: ['districts-fill'] })
-        if (features.length === 0 && selectedId) {
-          map.setFeatureState({ source: 'pakistan-districts', id: selectedId }, { selected: false })
-          selectedId = null
-          setSelectedDistrict(null)
-        }
-      })
-
       setMapLoaded(true)
       } catch (err) {
         // A failed layer must not leave the spinner up forever or take the page down.
@@ -820,7 +763,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     })
 
     return () => {
-      pointAbortRef.current?.abort()
       if (mapRef.current) {
         mapRef.current.remove()
         mapRef.current = null
@@ -849,6 +791,10 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
       el.addEventListener('mouseenter', () => setHoveredStation(stn))
       el.addEventListener('mouseleave', () => setHoveredStation(null))
+      el.addEventListener('click', (e) => {
+        e.stopPropagation()
+        onFeatureClickRef.current?.({ kind: 'station', station: stn })
+      })
 
       const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
         .setLngLat([lon, lat])
@@ -1012,7 +958,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     urbanGridsRef.current.clear()
     urbanGridLoadingRef.current.clear()
 
-    setSelectedDistrict(null)
     setHoverPM25(null)
   }, [selectedDate, smoothed, model, mapLoaded])
 
@@ -1037,48 +982,12 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       )}
 
       {/* Urban grid hover readout */}
-      {hoverPM25 && !selectedDistrict && !hoveredStation && (
+      {hoverPM25 && !hoveredStation && (
         <div className="absolute bottom-16 left-4 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 px-3 py-2">
           <div className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide">{hoverPM25.label}</div>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-xl font-bold text-slate-900">{hoverPM25.pm25.toFixed(1)}</span>
             <span className="text-xs text-slate-500">µg/m³</span>
-          </div>
-        </div>
-      )}
-
-      {/* Selected district info panel */}
-      {selectedDistrict && (
-        <div className="absolute top-6 left-6 z-20 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200/60 overflow-hidden min-w-[200px]">
-          <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-            <h3 className="text-sm font-bold text-slate-800">{selectedDistrict.name}</h3>
-            <button onClick={() => setSelectedDistrict(null)} className="ml-3 text-slate-400 hover:text-slate-600">
-              <X size={14} />
-            </button>
-          </div>
-          <div className="px-4 py-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">PM₂.₅ Prediction</div>
-            <div className="flex items-baseline gap-1.5 mt-1">
-              <span className="text-3xl font-bold" style={{ color: selectedDistrict.pm25 != null ? BAND_COLORS[pm25ToBand(selectedDistrict.pm25)] : '#94a3b8' }}>
-                {selectedDistrict.pm25 !== null ? selectedDistrict.pm25.toFixed(1) : '—'}
-              </span>
-              <span className="text-sm text-slate-500">μg/m³</span>
-            </div>
-            {selectedDistrict.stations.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-slate-100">
-                <div className="text-[10px] text-slate-500 uppercase tracking-wide font-medium mb-1">
-                  Observed ({selectedDistrict.stations.length} station{selectedDistrict.stations.length > 1 ? 's' : ''})
-                </div>
-                {selectedDistrict.stations.map((stn, i) => (
-                  <div key={i} className="flex items-center justify-between text-[11px] py-0.5">
-                    <span className="text-slate-600 truncate max-w-[120px]">{stn.name}</span>
-                    <span className="font-semibold tabular-nums ml-2" style={{ color: BAND_COLORS[pm25ToBand(stn.pm25)] }}>
-                      {stn.pm25.toFixed(1)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -1094,11 +1003,3 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   )
 }
 
-function getCentroid(ring: number[][]): [number, number] {
-  let x = 0, y = 0
-  for (const coord of ring) {
-    x += coord[0]
-    y += coord[1]
-  }
-  return [x / ring.length, y / ring.length]
-}

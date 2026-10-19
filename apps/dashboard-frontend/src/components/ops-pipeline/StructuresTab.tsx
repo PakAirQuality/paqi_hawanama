@@ -110,6 +110,8 @@ export interface StructuresTabProps {
   selectedDate: string | null
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
   initialView?: 'stations' | 'sources'
+  /** Open this item's detail view (a map click). A new object each time, so a repeat click reopens it. */
+  focus?: StructuresFocus | null
 }
 
 // Health classification: one implementation for the whole dashboard (lib/aqi)
@@ -224,8 +226,16 @@ type View =
   | { type: 'industry'; categoryKey: string }
   | { type: 'industry-detail'; item: IndustryItem; categoryKey: string }
 
-export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView }: StructuresTabProps) {
-  const [view, setView] = useState<View>(initialView === 'stations' ? { type: 'stations' } : initialView === 'sources' ? { type: 'categories' } : { type: 'categories' })
+export type StructuresFocus = Extract<View, { type: 'station-detail' | 'kiln-detail' | 'industry-detail' }>
+
+export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus }: StructuresTabProps) {
+  const [view, setView] = useState<View>(focus ?? (initialView === 'stations' ? { type: 'stations' } : { type: 'categories' }))
+  // Follow a new focus from the map (state adjusted during render, not in an effect)
+  const [prevFocus, setPrevFocus] = useState(focus)
+  if (focus !== prevFocus) {
+    setPrevFocus(focus)
+    if (focus) setView(focus)
+  }
   const [search, setSearch] = useState('')
   const [sortBy, setSortBy] = useState<'pm25' | 'name' | 'city' | 'network'>('pm25')
   const [kilnSort, setKilnSort] = useState<'province' | 'district' | 'id'>('province')
