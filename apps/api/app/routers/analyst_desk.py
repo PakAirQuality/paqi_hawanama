@@ -19,10 +19,10 @@ import io
 import json
 import logging
 import re
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 
 from app.core.config import settings
 from app.core.security import verify_tasks_token
@@ -477,197 +477,85 @@ async def get_fires(
 
 # ── FIRMS fire data ingestion ────────────────────────────────────────────
 
-FIRMS_API_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
-# South Asia bounding box (covers Pakistan + neighbours for context)
-FIRMS_BBOX = "60,23,78,37"
+def _fire_recorder():
+    """RunRecorder for ingest-fires (best effort; the run proceeds without ops.ingest_runs)."""
+    from pathlib import Path
+    from app.core.database import AsyncSessionLocal
+    from app.ingestion.runs import RunRecorder
+    return RunRecorder(AsyncSessionLocal, Path(settings.INGEST_OUT_DIR), required=False)
 
 
 @router.post(
     "/fires/ingest",
-    summary="Fetch FIRMS fire data from NASA and upload to GCS",
-    description="Fetches VIIRS NOAA-20 active fire detections from NASA FIRMS API "
-                "for the specified date range and uploads simplified CSVs to GCS.",
+    summary="Fetch FIRMS fire detections from NASA and store them per Pakistan day",
+    description="Fetches VIIRS detections (NOAA-20, NOAA-21, Suomi NPP while available) through the "
+                "FIRMS area API for the last `window_days` UTC days and rewrites every Pakistan day "
+                "inside the window. Recorded in ops.ingest_runs as task ingest-fires; the HTTP status "
+                "follows the run (200 success, 207 partial, 500 failed).",
 )
 async def ingest_fires(
-    window_days: int = Query(2, ge=1, le=5, description="UTC days to fetch, ending today; every Pakistan day inside the window is rewritten"),
+    request: Request,
+    window_days: int = Query(3, ge=1, le=10, description="UTC days to fetch, ending today (FIRMS serves at most 10); every Pakistan day inside the window is rewritten"),
     days_back: Optional[int] = Query(None, description="Deprecated alias of window_days"),
     date: Optional[str] = Query(None, description="Treat this UTC date as 'today' (re-fetch a past window)"),
     _auth=Depends(verify_tasks_token),
-) -> Dict[str, Any]:
-    """Fetch VIIRS detections (NOAA-20, NOAA-21, Suomi NPP while available) through the
-    FIRMS area API and store them per Pakistan acquisition day with a status sidecar.
-
-    Runs every few hours; the last days are always refreshed, zero-detection days are
-    stored as header-only files, and a failed source is recorded instead of silently
-    producing an empty day.
-    """
-    import time
+):
+    """See the runbook at the top of app/services/fires.py."""
     import httpx
-    from app.services.fires import ingest_window
+    from app.ingestion.runs import RunOutcome, new_run_id, outcome_response, trigger_from_headers
+    from app.services.fires import FIRMS_MAX_WINDOW_DAYS, ingest_window
 
-    firms_key = settings.FIRMS_MAP_KEY
-    if not firms_key:
-        raise HTTPException(status_code=500, detail="FIRMS_MAP_KEY not configured")
-    window = min(max(days_back or window_days, 1), 5)
+    window = min(max(days_back or window_days, 1), FIRMS_MAX_WINDOW_DAYS)
     now_utc = None
     if date:
         _date_str(date)
-        now_utc = datetime.strptime(date, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=__import__("datetime").timezone.utc)
+        now_utc = datetime.strptime(date, "%Y-%m-%d").replace(hour=23, minute=59, tzinfo=timezone.utc)
 
-    t0 = time.perf_counter()
-    client = _gcs_client()
-    bucket = client.bucket(FORECASTS_BUCKET)
-    async with httpx.AsyncClient(timeout=90.0) as http:
-        outcome = await ingest_window(http=http, key=firms_key, bucket=bucket, gcs_client=client, now_utc=now_utc, window_days=window)
-
-    sources = [{"source": s.source, "status": s.status, "rows": s.rows, "error": s.error} for s in outcome.sources]
-    ok = any(s.status == "ok" for s in outcome.sources)
-    logger.info("FIRMS ingest: days=%s sources=%s", outcome.per_day, [(s.source, s.status, s.rows) for s in outcome.sources])
-    return {
-        "ok": ok,
-        "window_days": window,
-        "days": outcome.per_day,
-        "sources": sources,
-        "elapsed_s": round(time.perf_counter() - t0, 2),
-    }
-
-
-@router.post(
-    "/fires/backfill",
-    summary="Backfill historical FIRMS fire data from NASA archive",
-    description="Fetches VIIRS fire detections for a date range using the appropriate "
-                "NASA FIRMS product (SNPP SP for archive, NOAA-20 NRT for recent). "
-                "Batches in 5-day chunks. Skips dates already in GCS.",
-)
-async def backfill_fires(
-    start_date: str = Query(..., description="Start date YYYY-MM-DD"),
-    end_date: str = Query(..., description="End date YYYY-MM-DD (inclusive)"),
-    overwrite: bool = Query(False, description="Re-fetch even if GCS file exists"),
-    source: Optional[str] = Query(None, description="Force FIRMS source (e.g. VIIRS_SNPP_SP, VIIRS_NOAA20_NRT). Auto-selects if omitted."),
-    _auth=Depends(verify_tasks_token),
-) -> Dict[str, Any]:
-    """Backfill historical FIRMS fire data in 5-day batches."""
-    import time
-    import httpx
-
-    firms_key = settings.FIRMS_MAP_KEY
-    if not firms_key:
-        raise HTTPException(status_code=500, detail="FIRMS_MAP_KEY not configured")
-
+    recorder = _fire_recorder()
+    outcome = RunOutcome(run_id=new_run_id("ingest-fires"), task="ingest-fires", provider_code="firms",
+                         scope="pakistan", trigger=trigger_from_headers(request.headers))
+    outcome.details["config"] = {"window_days": window, "as_of_utc": date, "bucket": FORECASTS_BUCKET}
+    await recorder.start(outcome)
+    result = None
     try:
-        dt_start = datetime.strptime(start_date, "%Y-%m-%d").date()
-        dt_end = datetime.strptime(end_date, "%Y-%m-%d").date()
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format, use YYYY-MM-DD")
+        firms_key = settings.FIRMS_MAP_KEY
+        if not firms_key:
+            outcome.fail("missing_key", "FIRMS_MAP_KEY not configured")
+        else:
+            client = _gcs_client()
+            bucket = client.bucket(FORECASTS_BUCKET)
+            async with httpx.AsyncClient(timeout=90.0) as http:
+                result = await ingest_window(http=http, key=firms_key, bucket=bucket, gcs_client=client,
+                                             now_utc=now_utc, window_days=window)
+            c = outcome.counts
+            c.expected = c.attempted = len(result.sources)
+            c.completed = sum(1 for r in result.sources if r.status == "ok")
+            c.failed = c.attempted - c.completed
+            c.rows_fetched, c.rows_written = result.rows_fetched, result.rows_written
+            outcome.latest_observation_ts = result.latest_acq_utc
+            outcome.details["sources"] = [{"source": r.source, "status": r.status, "rows": r.rows, "error": r.error} for r in result.sources]
+            outcome.details["days"] = result.per_day
+            outcome.details["key"] = result.key
+            if result.key and result.key.get("status") == "invalid":
+                outcome.fail("invalid_key", "FIRMS map key rejected; add a new FIRMS_MAP_KEY secret version and roll the services")
+            elif c.completed == 0:
+                outcome.fail("all_sources_failed", "; ".join(f"{r.source}: {r.error}" for r in result.sources))
+            for r in result.sources:
+                if r.status != "ok":
+                    from app.ingestion.runs import EntityFailure
+                    recorder.add_failure(EntityFailure("firms_source", r.source, "fetch_error", r.error or ""))
+    except Exception as exc:
+        logger.exception("FIRMS ingest run %s crashed", outcome.run_id)
+        outcome.fail(type(exc).__name__, str(exc))
+    finally:
+        outcome.finish()
+        await recorder.finish(outcome)
 
-    if dt_start > dt_end:
-        raise HTTPException(status_code=400, detail="start_date must be <= end_date")
-
-    # Auto-select source: NRT for last 60 days, SNPP SP for archive
-    nrt_cutoff = datetime.utcnow().date() - timedelta(days=60)
-
-    client = _gcs_client()
-    bucket = client.bucket(FORECASTS_BUCKET)
-    t0 = time.perf_counter()
-    results = []
-
-    # Process in 5-day chunks (FIRMS API max)
-    chunk_start = dt_start
-    async with httpx.AsyncClient(timeout=90.0) as http:
-        while chunk_start <= dt_end:
-            chunk_days = min(5, (dt_end - chunk_start).days + 1)
-            chunk_end = chunk_start + timedelta(days=chunk_days - 1)
-
-            # Check which dates in this chunk already exist
-            dates_in_chunk = [chunk_start + timedelta(days=i) for i in range(chunk_days)]
-            missing_dates = []
-            for d in dates_in_chunk:
-                ds = d.strftime("%Y%m%d")
-                blob_path = f"hindcast/firms/firms_{ds}.csv"
-                if not overwrite and bucket.blob(blob_path).exists(client):
-                    results.append({"date": d.strftime("%Y-%m-%d"), "status": "skipped", "reason": "already_exists"})
-                else:
-                    missing_dates.append(d)
-
-            if not missing_dates:
-                chunk_start = chunk_end + timedelta(days=1)
-                continue
-
-            # Pick source for this chunk
-            if source:
-                firms_source = source
-            elif chunk_start >= nrt_cutoff:
-                firms_source = "VIIRS_NOAA20_NRT"
-            else:
-                firms_source = "VIIRS_SNPP_SP"
-
-            # Fetch entire chunk in one API call
-            url = f"{FIRMS_API_BASE}/{firms_key}/{firms_source}/{FIRMS_BBOX}/{chunk_days}/{chunk_start.strftime('%Y-%m-%d')}"
-            try:
-                resp = await http.get(url)
-                if resp.status_code != 200:
-                    for d in missing_dates:
-                        results.append({"date": d.strftime("%Y-%m-%d"), "status": "error", "reason": f"FIRMS API {resp.status_code}", "source": firms_source})
-                    chunk_start = chunk_end + timedelta(days=1)
-                    continue
-
-                raw_csv = resp.text
-                if not raw_csv.strip() or "latitude" not in raw_csv.split("\n")[0]:
-                    for d in missing_dates:
-                        results.append({"date": d.strftime("%Y-%m-%d"), "status": "error", "reason": "empty_or_invalid_response", "source": firms_source})
-                    chunk_start = chunk_end + timedelta(days=1)
-                    continue
-
-                # Parse all rows and bucket by acq_date
-                reader = csv.DictReader(io.StringIO(raw_csv))
-                by_date: Dict[str, list] = {}
-                for row in reader:
-                    try:
-                        acq = row.get("acq_date", "")
-                        by_date.setdefault(acq, []).append({
-                            "latitude": row["latitude"],
-                            "longitude": row["longitude"],
-                            "frp": row.get("frp", "0"),
-                            "confidence": row.get("confidence", ""),
-                            "acq_date": acq,
-                            "satellite": row.get("satellite", ""),
-                        })
-                    except (KeyError, ValueError):
-                        continue
-
-                # Write per-date CSVs to GCS
-                for d in missing_dates:
-                    d_str = d.strftime("%Y-%m-%d")
-                    rows = by_date.get(d_str, [])
-                    ds = d.strftime("%Y%m%d")
-                    blob_path = f"hindcast/firms/firms_{ds}.csv"
-
-                    if not rows:
-                        # Write empty CSV so we don't re-fetch this date
-                        output = io.StringIO()
-                        writer = csv.DictWriter(output, fieldnames=["latitude", "longitude", "frp", "confidence", "acq_date", "satellite"])
-                        writer.writeheader()
-                        bucket.blob(blob_path).upload_from_string(output.getvalue(), content_type="text/csv")
-                        results.append({"date": d_str, "status": "published", "fires": 0, "source": firms_source})
-                    else:
-                        output = io.StringIO()
-                        writer = csv.DictWriter(output, fieldnames=["latitude", "longitude", "frp", "confidence", "acq_date", "satellite"])
-                        writer.writeheader()
-                        writer.writerows(rows)
-                        bucket.blob(blob_path).upload_from_string(output.getvalue(), content_type="text/csv")
-                        results.append({"date": d_str, "status": "published", "fires": len(rows), "source": firms_source})
-                        logger.info(f"FIRMS backfill: {d_str} → {len(rows)} fires ({firms_source})")
-
-            except Exception as e:
-                logger.warning(f"FIRMS backfill failed for chunk {chunk_start}–{chunk_end}: {e}")
-                for d in missing_dates:
-                    results.append({"date": d.strftime("%Y-%m-%d"), "status": "error", "reason": str(e)})
-
-            chunk_start = chunk_end + timedelta(days=1)
-
-    elapsed = round(time.perf_counter() - t0, 2)
-    published = sum(1 for r in results if r["status"] == "published")
-    return {"ok": True, "results": results, "published": published, "total_dates": len(results), "elapsed_s": elapsed}
+    logger.info("FIRMS ingest: status=%s run_id=%s error=%s days=%s sources=%s",
+                outcome.status.value, outcome.run_id, outcome.error_class,
+                result.per_day if result else None,
+                [(r.source, r.status, r.rows) for r in result.sources] if result else None)
+    return outcome_response(outcome, "FIRMS fire ingest completed")
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────

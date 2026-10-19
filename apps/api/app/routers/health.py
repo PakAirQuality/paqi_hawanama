@@ -100,6 +100,19 @@ LAST_RUNS_SQL = text("""
     ORDER BY task, started_at DESC
 """)
 
+# Sources whose freshness comes from ops.ingest_runs rather than readings (task name per source).
+RUN_BACKED_SOURCES = {"fires": "ingest-fires"}
+LAST_GOOD_RUN_SQL = text("""
+    SELECT task, run_id, status, finished_at, latest_observation_ts, rows_written
+    FROM ops.ingest_runs
+    WHERE task = :task AND status IN ('success', 'partial')
+    ORDER BY started_at DESC
+    LIMIT 1
+""")
+# Feeds that are listed for information only while they have no threshold (e.g. the BAM push
+# feed while SFL is not sending): shown, never degraded, until a threshold is configured again.
+INFORMATIONAL_SOURCES = ("bam",)
+
 
 @router.get("/freshness")
 async def freshness(db: AsyncSession = Depends(get_database)):
@@ -127,18 +140,23 @@ async def freshness(db: AsyncSession = Depends(get_database)):
         if latest is not None and latest.tzinfo is None:
             latest = latest.replace(tzinfo=timezone.utc)
         age_min = int((now - latest).total_seconds() // 60) if latest else None
-        limit = thresholds.get(source, thresholds["default"])
+        informational = source in INFORMATIONAL_SOURCES and source not in thresholds
+        limit = None if informational else thresholds.get(source, thresholds["default"])
         sources.append({
             "source": source, "scope_type": m["scope_type"],
             "latest_ts": _iso(latest), "latest_ingested_at": _iso(m["latest_ingested_at"]),
             "active_24h": int(m["active_24h"] or 0),
             "age_min": age_min, "threshold_min": limit,
-            "status": "ok" if (age_min is not None and age_min <= limit) else "degraded",
+            "status": "no_threshold" if informational else ("ok" if (age_min is not None and age_min <= limit) else "degraded"),
         })
     for source, limit in thresholds.items():
-        if source != "default" and source not in seen:
+        if source != "default" and source not in seen and source not in RUN_BACKED_SOURCES:
             sources.append({"source": source, "scope_type": None, "latest_ts": None, "latest_ingested_at": None,
                             "active_24h": 0, "age_min": None, "threshold_min": limit, "status": "degraded"})
+    for source in INFORMATIONAL_SOURCES:
+        if source not in seen and source not in thresholds:
+            sources.append({"source": source, "scope_type": None, "latest_ts": None, "latest_ingested_at": None,
+                            "active_24h": 0, "age_min": None, "threshold_min": None, "status": "no_threshold"})
 
     runs: List[Dict[str, Any]] = []
     runs_error: Optional[str] = None
@@ -160,6 +178,38 @@ async def freshness(db: AsyncSession = Depends(get_database)):
     except Exception as exc:
         # ops.ingest_runs may not exist yet (migration 001 not applied); not a freshness failure.
         runs_error = str(exc)[:200]
+
+    # Run-backed sources (fires): degraded when the last run failed, when no run has ever
+    # succeeded, or when the last success is older than the threshold.
+    for source, task in RUN_BACKED_SOURCES.items():
+        if source not in thresholds:
+            continue
+        limit = thresholds[source]
+        last = next((r for r in runs if r["task"] == task), None)
+        good = None
+        if runs_error is None:
+            try:
+                row = (await db.execute(LAST_GOOD_RUN_SQL, {"task": task})).fetchone()
+                good = dict(row._mapping) if row else None
+            except Exception as exc:
+                runs_error = str(exc)[:200]
+        finished = good["finished_at"] if good else None
+        if finished is not None and finished.tzinfo is None:
+            finished = finished.replace(tzinfo=timezone.utc)
+        age_min = int((now - finished).total_seconds() // 60) if finished else None
+        last_failed = bool(last and last["status"] in ("failed", "stale_running"))
+        status = "ok" if (age_min is not None and age_min <= limit and not last_failed) else "degraded"
+        latest_obs = good["latest_observation_ts"] if good else None
+        if latest_obs is not None and latest_obs.tzinfo is None:
+            latest_obs = latest_obs.replace(tzinfo=timezone.utc)
+        sources.append({
+            "source": source, "scope_type": "run", "task": task,
+            "latest_ts": _iso(latest_obs), "latest_ingested_at": _iso(finished),
+            "active_24h": int(good["rows_written"] or 0) if good else 0,
+            "age_min": age_min, "threshold_min": limit, "status": status,
+            "last_run_status": last["status"] if last else None,
+            "last_run_error": last["error_class"] if last else None,
+        })
 
     degraded = any(s["status"] == "degraded" for s in sources)
     body = {

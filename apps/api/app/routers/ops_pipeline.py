@@ -2050,8 +2050,11 @@ def _build_brief_context(
     enhanced_stats: Optional[Dict],
     fires_csv: Optional[str],
     matched: Optional[Dict[str, Optional[Dict[str, float]]]] = None,
+    fires_date: Optional[str] = None,
+    date: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Build template variables from raw data sources."""
+    """Build template variables from raw data sources. `fires_date` names the day the fire
+    file actually covers when it differs from `date` (latest available within 3 days)."""
     matched = matched or {}
 
     # ── Station observations ──
@@ -2125,8 +2128,10 @@ def _build_brief_context(
             fires_text = f"{fire_count} VIIRS fire detections in Pakistan ({high_conf} high-confidence)."
         else:
             fires_text = "No fire detections in Pakistan."
+        if fires_date and date and fires_date != date:
+            fires_text += f" (Detections are for {fires_date}, the latest day stored; none stored for {date}.)"
     else:
-        fires_text = "FIRMS fire data unavailable for this date."
+        fires_text = "FIRMS fire data unavailable for this date and the two days before it."
 
     return {
         "station_count": str(station_count),
@@ -2293,11 +2298,13 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
 
     # ── FIRMS fire detections ──
     fires_csv: Optional[str] = None
+    fires_date: Optional[str] = None
     for offset in range(3):
         d = datetime.strptime(date, "%Y-%m-%d") - timedelta(days=offset)
         trial_ds = d.strftime("%Y%m%d")
         fires_csv = _load_forecasts_text_safe(f"hindcast/firms/firms_{trial_ds}.csv")
         if fires_csv and fires_csv.strip():
+            fires_date = d.strftime("%Y-%m-%d")
             break
 
     # ── Matched-station bias for both models (prediction sampled at station points) ──
@@ -2314,7 +2321,7 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
             matched[model_key] = _matched_bias(valid_stations, preds)
 
     # ── Generate ──
-    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv, matched)
+    context = _build_brief_context(stations, pred_stats, enhanced_stats, fires_csv, matched, fires_date=fires_date, date=date)
     narrative = await _generate_brief_llm(date, context)
 
     obs_mean_val = float(context["obs_mean"]) if context["obs_mean"] != "unavailable" else None
@@ -2338,6 +2345,7 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
             "stations": len(stations) > 0,
             "predictions": pred_stats is not None,
             "fires": fires_csv is not None and bool(fires_csv.strip()),
+            "fires_date": fires_date,
         },
     }
 

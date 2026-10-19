@@ -7,7 +7,7 @@ What this module fixes relative to the first implementation:
   Pakistan calendar day), so a request for a Pakistan date returns that day's fires;
 * two satellites (NOAA-20 and NOAA-21; Suomi NPP optional until its products stop on
   1 November 2026) through the FIRMS *area* API, west,south,east,north bbox;
-* the last two days are refreshed on every run (a partial early-morning file is never
+* the last days of the window are refreshed on every run (a partial early-morning file is never
   frozen), zero-detection days are written as header-only files, and every day carries a
   ``.meta.json`` sidecar with the requested/observation period, per-source status and
   fetch time;
@@ -17,6 +17,36 @@ What this module fixes relative to the first implementation:
 Files: ``hindcast/firms/firms_{YYYYMMDD}.csv`` (+ ``.meta.json``) in the forecasts bucket.
 Older files written by the previous ingester are keyed by the UTC acquisition date and have
 no sidecar; they are reported with ``day_basis='acq_utc'``.
+
+Operations runbook
+------------------
+* Schedule: Cloud Scheduler ``firms-fire-ingest`` (asia-south1) POSTs
+  ``/api/v1/ops/analyst-desk/fires/ingest?window_days=3`` on hawanama-ingest every 3 h
+  (``infra/scheduler.tf``). Each run is recorded in ``ops.ingest_runs`` as task
+  ``ingest-fires`` and the HTTP status follows the run (200 success, 207 partial, 500
+  failed), so Scheduler marks and retries real failures.
+* Health: ``/api/v1/health/freshness`` reports source ``fires`` from the last run; it is
+  degraded when the last run failed or the last success is older than
+  ``FRESHNESS_MAX_AGE_MIN["fires"]`` (default 540 min = three missed runs) and the
+  endpoint then answers 503, which the Cloud Monitoring uptime check turns into an email.
+* Alerts (``infra/monitoring/``): "health freshness 503", "scheduler job failed" and
+  "FIRMS ingest failed / invalid key". Each names the failing source or job.
+* Key rotation (NASA FIRMS map key, one per e-mail, free at
+  https://firms.modaps.eosdis.nasa.gov/api/map_key/): ``check_key`` is called at the start
+  of every run and an invalid key fails the run with ``error_class='invalid_key'``.
+  To replace it: add a new Secret Manager version of ``FIRMS_MAP_KEY`` (never paste the
+  key into chat or code), run ``gcloud run services update hawanama-ingest --region
+  asia-south1 --update-secrets=FIRMS_MAP_KEY=FIRMS_MAP_KEY:latest`` (and the same for
+  ``hawanama``), then ``gcloud scheduler jobs run firms-fire-ingest``. Disable the old
+  version afterwards. Budget: 5,000 requests per 10 min per key; a run uses one request
+  per satellite.
+* Satellites: NOAA-20 and NOAA-21 are the primary sources; Suomi NPP is requested only
+  before ``SNPP_END`` (2026-11-01, when NOAA stops its product delivery). When another
+  satellite is retired, change ``DEFAULT_SOURCES``/``sources_for`` and the test
+  ``test_sources_drop_snpp_after_its_end_date``; a source that keeps returning errors makes
+  every run ``partial`` and shows as such on the dashboard.
+* Backfill: ``POST /fires/ingest?window_days=10&date=YYYY-MM-DD`` refetches a past window
+  (the FIRMS area API serves at most 10 days per request).
 """
 
 from __future__ import annotations
@@ -34,6 +64,9 @@ logger = logging.getLogger(__name__)
 
 PK_TZ = ZoneInfo("Asia/Karachi")
 FIRMS_API_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
+FIRMS_KEY_STATUS_URL = "https://firms.modaps.eosdis.nasa.gov/mapserver/mapkey_status/"
+FIRMS_MAX_WINDOW_DAYS = 10  # the area API serves at most 10 days per request
+RETRY_DELAY_S = 5.0
 # South Asia bounding box (west,south,east,north): Pakistan plus neighbours for context
 FIRMS_BBOX = "60,23,78,37"
 SNPP_END = date(2026, 11, 1)  # NOAA ends Suomi NPP product delivery 2026-11-01 13:00 UTC
@@ -138,17 +171,75 @@ class IngestOutcome:
     days: List[str] = field(default_factory=list)
     per_day: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     sources: List[SourceResult] = field(default_factory=list)
+    key: Optional[Dict[str, Any]] = None          # check_key() result
+    rows_fetched: int = 0                          # rows parsed from every source
+    rows_written: int = 0                          # rows in the day files rewritten
+    latest_acq_utc: Optional[datetime] = None      # newest detection seen
+
+    @property
+    def status(self) -> str:
+        """ok (every source answered) · partial · unavailable (no source answered / bad key)."""
+        if self.key and self.key.get("status") == "invalid":
+            return "unavailable"
+        ok = [s for s in self.sources if s.status == "ok"]
+        if not ok:
+            return "unavailable"
+        return "ok" if len(ok) == len(self.sources) else "partial"
+
+
+async def check_key(http, key: str) -> Dict[str, Any]:
+    """Ask FIRMS whether the map key is valid and how much of its budget is used.
+
+    Returns {"status": "ok"|"invalid"|"error", "transaction_limit", "current_transactions",
+    "transaction_interval", "error"}. The key itself is never included."""
+    try:
+        resp = await http.get(FIRMS_KEY_STATUS_URL, params={"MAP_KEY": key})
+    except Exception as exc:
+        return {"status": "error", "error": type(exc).__name__}
+    text = (resp.text or "").strip()
+    if resp.status_code != 200:
+        return {"status": "error", "error": f"HTTP {resp.status_code}"}
+    try:
+        data = json.loads(text)
+    except ValueError:
+        data = None
+    if isinstance(data, dict) and "transaction_limit" in data:
+        return {
+            "status": "ok",
+            "transaction_limit": data.get("transaction_limit"),
+            "current_transactions": data.get("current_transactions"),
+            "transaction_interval": data.get("transaction_interval"),
+        }
+    # FIRMS answers 200 with a sentence for a bad key ("MAP_KEY is invalid or ...")
+    return {"status": "invalid", "error": text[:120].replace(key, "<key>")}
+
+
+async def _sleep(seconds: float) -> None:
+    import asyncio
+    await asyncio.sleep(seconds)
 
 
 async def fetch_source(http, key: str, source: str, days: int, start: date) -> SourceResult | tuple[SourceResult, str]:
-    """One FIRMS area request. Returns (result, csv_text)."""
+    """One FIRMS area request with a single retry for network errors, 429 and 5xx.
+    Returns (result, csv_text)."""
     url = f"{FIRMS_API_BASE}/{key}/{source}/{FIRMS_BBOX}/{days}/{start.strftime('%Y-%m-%d')}"
-    try:
-        resp = await http.get(url)
-    except Exception as exc:  # network
-        return SourceResult(source, "error", error=type(exc).__name__), ""
-    if resp.status_code != 200:
-        return SourceResult(source, "error", error=f"HTTP {resp.status_code}"), ""
+    resp = None
+    last_error: Optional[str] = None
+    for attempt in range(2):
+        try:
+            resp = await http.get(url)
+        except Exception as exc:  # network
+            resp, last_error = None, type(exc).__name__
+        else:
+            if resp.status_code == 200:
+                break
+            last_error = f"HTTP {resp.status_code}"
+            if resp.status_code != 429 and resp.status_code < 500:
+                break
+        if attempt == 0:
+            await _sleep(RETRY_DELAY_S)
+    if resp is None or resp.status_code != 200:
+        return SourceResult(source, "error", error=last_error or "no response"), ""
     text = resp.text or ""
     head = text.split("\n", 1)[0]
     if "latitude" not in head:
@@ -170,10 +261,17 @@ async def ingest_window(
     """Fetch the last ``window_days`` UTC days (ending today) from every source, re-key by
     Pakistan acquisition day and (re)write every day file in the window plus its sidecar."""
     now_utc = now_utc or datetime.now(timezone.utc)
+    window_days = max(1, min(int(window_days), FIRMS_MAX_WINDOW_DAYS))
     today_utc = now_utc.date()
     start_utc = today_utc - timedelta(days=window_days - 1)
     srcs = sources or sources_for(today_utc)
     outcome = IngestOutcome()
+
+    outcome.key = await check_key(http, key)
+    if outcome.key.get("status") == "invalid":
+        # Do not spend the (possibly rate-limited) area requests on a key FIRMS rejects.
+        outcome.sources = [SourceResult(src, "error", error="invalid_key") for src in srcs]
+        return outcome
 
     rows: List[Dict[str, Any]] = []
     for src in srcs:
@@ -183,6 +281,15 @@ async def ingest_window(
             res.rows = len(parsed)
             rows.extend(parsed)
         outcome.sources.append(res)
+    outcome.rows_fetched = len(rows)
+    for r in rows:
+        if r.get("acq_datetime_utc"):
+            try:
+                t = datetime.fromisoformat(r["acq_datetime_utc"].replace("Z", "+00:00"))
+            except ValueError:
+                continue
+            if outcome.latest_acq_utc is None or t > outcome.latest_acq_utc:
+                outcome.latest_acq_utc = t
 
     any_ok = any(s.status == "ok" for s in outcome.sources)
     all_ok = all(s.status == "ok" for s in outcome.sources)
@@ -219,11 +326,26 @@ async def ingest_window(
             # Only (re)write detections when at least one source answered; otherwise keep
             # whatever the previous run stored and record the failure in the sidecar.
             bucket.blob(csv_path).upload_from_string(rows_to_csv(day_rows), content_type="text/csv")
+            outcome.rows_written += len(day_rows)
         bucket.blob(meta_path).upload_from_string(json.dumps(meta), content_type="application/json")
         outcome.days.append(ds)
         outcome.per_day[ds] = {"count": len(day_rows), "status": meta["status"], "written": any_ok}
         day += timedelta(days=1)
     return outcome
+
+
+def _age_hours(fetched_at: Optional[str], now: Optional[datetime] = None) -> Optional[float]:
+    """Hours since the sidecar's fetched_at (None when unknown)."""
+    if not fetched_at:
+        return None
+    try:
+        t = datetime.fromisoformat(str(fetched_at).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if t.tzinfo is None:
+        t = t.replace(tzinfo=timezone.utc)
+    now = now or datetime.now(timezone.utc)
+    return round(max(0.0, (now - t).total_seconds() / 3600), 1)
 
 
 def _observation_period(rows: List[Dict[str, Any]]) -> Optional[Dict[str, str]]:
@@ -278,6 +400,7 @@ def build_feature_collection(
         "bbox": FIRMS_BBOX,
         "sources": meta.get("sources") if meta else None,
         "last_successful_fetch": meta.get("fetched_at") if meta else None,
+        "fetched_age_hours": _age_hours(meta.get("fetched_at")) if meta else None,
         "day_basis": meta.get("day_basis") if meta else "acq_utc",
         "observation_period": meta.get("observation_period") if meta else None,
         "note": "VIIRS thermal anomalies at satellite-pixel locations; FRP is radiative power in MW. Neither count nor FRP measures a contribution to PM2.5.",
