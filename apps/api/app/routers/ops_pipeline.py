@@ -1889,10 +1889,10 @@ You are an air quality analyst writing the daily operational brief for Pakistan 
 
 ### Station Observations
 - {station_count} stations reporting
-- National mean PM2.5: {obs_mean} µg/m³
+- Reporting-station mean PM2.5 (unweighted mean of station daily means): {obs_mean} µg/m³
 - National max PM2.5: {obs_max} µg/m³
 - Band breakdown: {band_breakdown}
-- Stations exceeding unhealthy thresholds (>75 µg/m³): {unhealthy_count} ({unhealthy_pct}%)
+- Stations in the US AQI Unhealthy band or worse (PM2.5 above 55.4 µg/m³): {unhealthy_count} ({unhealthy_pct}%)
 
 ### Most Polluted Cities (by daily mean)
 {worst_cities}
