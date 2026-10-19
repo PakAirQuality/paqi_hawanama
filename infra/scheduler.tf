@@ -264,9 +264,10 @@ resource "google_cloud_scheduler_job" "punjab_epa_ingestion" {
 # 4b. FIRMS Fire Data Ingestion - every 3 hours (VIIRS overpasses ~08 and ~20 UTC; FIRMS NRT latency ≤3 h)
 resource "google_cloud_scheduler_job" "firms_fire_ingest" {
   name        = "firms-fire-ingest"
-  description = "FIRMS VIIRS (NOAA-20/21, SNPP) fire detections, last 2 UTC days re-keyed to Pakistan days, every 3 h"
+  description = "FIRMS VIIRS (NOAA-20/21, SNPP until 2026-11-01) fire detections, last 3 UTC days re-keyed to Pakistan days, every 3 h; recorded as ingest-fires, /health/freshness degrades after 540 min without a success"
   schedule    = "20 */3 * * *"
   time_zone   = "UTC"
+  attempt_deadline = "300s"
 
   http_target {
     http_method = "POST"

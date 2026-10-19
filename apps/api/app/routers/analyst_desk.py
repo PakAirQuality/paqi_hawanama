@@ -480,7 +480,7 @@ async def get_fires(
 def _fire_recorder():
     """RunRecorder for ingest-fires (best effort; the run proceeds without ops.ingest_runs)."""
     from pathlib import Path
-    from app.core.database import AsyncSessionLocal
+    from app.ingestion.db import AsyncSessionLocal
     from app.ingestion.runs import RunRecorder
     return RunRecorder(AsyncSessionLocal, Path(settings.INGEST_OUT_DIR), required=False)
 
