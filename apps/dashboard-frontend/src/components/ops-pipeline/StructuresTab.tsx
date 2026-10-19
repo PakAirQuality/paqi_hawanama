@@ -71,7 +71,7 @@ interface StationItem {
   network?: string
 }
 
-interface KilnItem {
+export interface KilnItem {
   id: string
   state: string
   district?: string
@@ -84,7 +84,7 @@ interface KilnItem {
   lon: number
 }
 
-interface IndustryItem {
+export interface IndustryItem {
   name: string
   type?: string
   fuel?: string
@@ -96,7 +96,7 @@ interface IndustryItem {
   lon: number
 }
 
-interface IndustryCategory {
+export interface IndustryCategory {
   key: string
   label: string
   color: string
@@ -234,16 +234,6 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   const [industryLimit, setIndustryLimit] = useState(200)
 
   // ── Derived data ──
-  const kilnsByProvince = useMemo(() => {
-    const map: Record<string, KilnItem[]> = {}
-    for (const k of kilns) {
-      ;(map[k.state] ??= []).push(k)
-    }
-    return Object.entries(map)
-      .map(([province, items]) => ({ province, items, count: items.length }))
-      .sort((a, b) => b.count - a.count)
-  }, [kilns])
-
   const sortedKilns = useMemo(() => {
     const list = [...kilns]
     const majorProvinces = ['Punjab', 'Sindh', 'Khyber-Pakhtunkhwa', 'Balochistan', 'Islamabad', 'Azad Kashmir']
@@ -503,7 +493,6 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             // Compute group stats for subheading
             let groupStats = ''
             if (showHeader && (kilnSort === 'province' || kilnSort === 'district')) {
-              const groupKey = kilnSort === 'province' ? 'state' : 'district'
               const groupVal = kilnSort === 'province' ? k.state : (k.district || 'Unknown')
               const group = searched.filter(x => (kilnSort === 'province' ? x.state : (x.district || 'Unknown')) === groupVal)
               const fuelCounts: Record<string, number> = {}
@@ -614,6 +603,11 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     const cat = industryCategories.find(c => c.key === view.categoryKey)
     if (!cat) return null
 
+    // Check which group fields are available for this category
+    const hasProvince = cat.items.some(x => x.province)
+    const hasDistrict = cat.items.some(x => x.district)
+    const hasType = cat.items.some(x => x.type)
+
     // Effective sort — fall back to 'name' if current sort field doesn't exist
     const effectiveSort = (!hasProvince && industrySort === 'province') || (!hasDistrict && industrySort === 'district') || (!hasType && industrySort === 'type') ? 'name' : industrySort
 
@@ -663,11 +657,6 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     const rowIcon = INDUSTRY_ROW_ICONS[cat.key] || INDUSTRY_ROW_ICONS.industrial_sites
     const catColor = CATEGORY_COLORS[cat.key] || cat.color
 
-    // Check which group fields are available for this category
-    const hasProvince = cat.items.some(x => x.province)
-    const hasDistrict = cat.items.some(x => x.district)
-    const hasType = cat.items.some(x => x.type)
-
     // Subtitle for each item
     const itemSub = (item: IndustryItem) => {
       if (item.fuel) return item.fuel
@@ -698,7 +687,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             />
           </div>
           <select
-            value={(!hasProvince && industrySort === 'province') || (!hasDistrict && industrySort === 'district') || (!hasType && industrySort === 'type') ? 'name' : industrySort}
+            value={effectiveSort}
             onChange={e => { setIndustrySort(e.target.value as 'province' | 'district' | 'type' | 'name'); setIndustryLimit(200) }}
             className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none shrink-0"
           >
@@ -876,7 +865,7 @@ interface StationDetailProps {
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
 }
 
-function StationDetailView({ station, selectedDate, onBack, onFlyTo }: StationDetailProps) {
+function StationDetailView({ station, selectedDate, onBack }: StationDetailProps) {
   const { data: hourlyData, isLoading: hourlyLoading } = useQuery({
     queryKey: ['station-hourly', station.station_id, selectedDate],
     queryFn: async () => {
@@ -1118,7 +1107,7 @@ function DetailRow({ label, value }: { label: string; value: string }) {
   )
 }
 
-function StationInsight({ station, stats, rolling7d, selectedDate }: { station: StationItem; stats: { mean: number; max: number; min: number; count: number } | null; rolling7d: number | null; selectedDate?: string }) {
+function StationInsight({ station, stats, rolling7d, selectedDate }: { station: StationItem; stats: { mean: number; max: number; min: number; count: number } | null; rolling7d: number | null; selectedDate: string | null }) {
   const dateLabel = selectedDate
     ? new Date(selectedDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
     : 'this date'

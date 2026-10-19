@@ -7,7 +7,7 @@ import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
 import { fetchTileDates, fetchStationDaily, fetchPredictionData, fetchRunReport, fetchStationDirectory } from '@/components/ops-pipeline'
 import { PredictionMap } from '@/components/ops-pipeline/PredictionMap'
 import { OpsContextPanel } from '@/components/ops-pipeline/ContextPanel'
-import { StructuresTab } from '@/components/ops-pipeline/StructuresTab'
+import { StructuresTab, type IndustryCategory, type IndustryItem, type KilnItem } from '@/components/ops-pipeline/StructuresTab'
 import { FiresPanel } from '@/components/ops-pipeline/FiresPanel'
 import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
@@ -17,7 +17,6 @@ import { useSelection } from '@/lib/selection'
 import { formatDateOnly, pktToday } from '@/lib/time'
 import { INDUSTRY_CATEGORIES, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
 import { MapErrorBoundary, MapUnavailableNotice } from '@/components/MapErrorBoundary'
-import { AqiLegend } from '@/components/ops-pipeline/AqiLegend'
 import type { MapUnavailableReason } from '@/lib/webgl'
 
 export default function OpsPipelinePage() {
@@ -36,18 +35,18 @@ export default function OpsPipelinePage() {
 
   // Map flyTo callback + static data
   const [flyTo, setFlyTo] = useState<((lng: number, lat: number, zoom?: number) => void) | null>(null)
-  const [kilnsData, setKilnsData] = useState<any[]>([])
-  const [industryData, setIndustryData] = useState<any[]>([])
+  const [kilnsData, setKilnsData] = useState<KilnItem[]>([])
+  const [industryData, setIndustryData] = useState<IndustryCategory[]>([])
 
   // Static inventories for the Sources panel: same cached loads the map uses (parsed once)
   useEffect(() => {
     loadKilnsGeoJSON()
       .then(data => {
-        setKilnsData(data.features.map((f: any) => ({
+        setKilnsData(data.features.map(f => ({
           ...f.properties,
-          lat: f.geometry.coordinates[1],
-          lon: f.geometry.coordinates[0],
-        })))
+          lat: (f.geometry as GeoJSON.Point).coordinates[1],
+          lon: (f.geometry as GeoJSON.Point).coordinates[0],
+        }) as KilnItem))
       })
       .catch(() => {})
 
@@ -55,11 +54,11 @@ export default function OpsPipelinePage() {
       .then(data => {
         setIndustryData(INDUSTRY_CATEGORIES.filter(c => data[c.key]?.features?.length).map(c => ({
           ...c,
-          items: data[c.key].features.map((f: any) => ({
+          items: data[c.key].features.map(f => ({
             ...f.properties,
-            lat: f.geometry.coordinates[1],
-            lon: f.geometry.coordinates[0],
-          })),
+            lat: (f.geometry as GeoJSON.Point).coordinates[1],
+            lon: (f.geometry as GeoJSON.Point).coordinates[0],
+          }) as IndustryItem),
         })))
       })
       .catch(() => {})
@@ -149,7 +148,7 @@ export default function OpsPipelinePage() {
       const data = await fetchFires(selectedPredDate!)
       return {
         ...data,
-        features: data.features.filter((f: any) => {
+        features: data.features.filter(f => {
           const [lng, lat] = f.geometry.coordinates
           return isInsidePakistan(lng, lat)
         }),
@@ -186,7 +185,7 @@ export default function OpsPipelinePage() {
   // Enrich daily stations with station_ids + network from directory
   const enrichedStations = useMemo(() => {
     return (stationData?.stations ?? [])
-      .map((s: any) => {
+      .map(s => {
         const sid = s.station_id?.trim() || stationIdLookup.get(`${s.name}|${s.city}`)
         return {
           name: s.name,
@@ -198,7 +197,7 @@ export default function OpsPipelinePage() {
           network: providerMap?.by_name_city?.[`${s.name}|${s.city}`] || (sid && providerMap?.by_station_id?.[sid]) || providerMap?.by_name?.[s.name] || undefined,
         }
       })
-      .filter((s: any) => s.pm25 != null)
+      .filter(s => s.pm25 != null)
   }, [stationData, stationIdLookup, providerMap])
 
   // Only days whose Pakistan calendar day has ended (station daily aggregation can exist).
@@ -362,13 +361,6 @@ export default function OpsPipelinePage() {
             onMapReady={(fn) => setFlyTo(() => fn)}
           />
         </MapErrorBoundary>
-
-        {/* Legend — always visible, with the no-data treatment */}
-        {!mapUnavailable && (
-          <div className="absolute bottom-14 right-4 z-10 hidden sm:block">
-            <AqiLegend model={model} />
-          </div>
-        )}
 
         {/* Floating assessment card — upper right (Gaza CausePanel pattern) */}
         <OpsContextPanel

@@ -11,6 +11,13 @@ export function canRenderMap(): boolean {
   }
 }
 
+/** The fields our Mapbox 'error' handlers read; tile and source errors carry sourceId/tile. */
+export type MapErrorEvent = {
+  error?: { message?: string; status?: number; statusCode?: number }
+  sourceId?: string
+  tile?: unknown
+}
+
 export type MapUnavailableReason = 'no-webgl' | 'init-failed' | 'layers-failed' | 'context-lost' | 'runtime-error'
 
 export const MAP_UNAVAILABLE_TEXT: Record<MapUnavailableReason, string> = {

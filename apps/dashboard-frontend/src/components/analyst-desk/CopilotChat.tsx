@@ -266,7 +266,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
           } catch { /* ignore parse errors on partial chunks */ }
         }
       }
-    } catch (err) {
+    } catch {
       setMessages(prev =>
         prev.map(m =>
           m.id === assistantId
@@ -385,7 +385,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
             className={`relative flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
               activeTab === 'analytics'
                 ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
-                : trendStation && activeTab !== 'analytics'
+                : trendStation
                   ? 'text-blue-600 border-b-2 border-blue-400 animate-pulse'
                   : 'text-slate-400 hover:text-slate-600'
             }`}

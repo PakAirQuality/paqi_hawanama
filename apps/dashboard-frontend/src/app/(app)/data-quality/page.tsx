@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip,
+  Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ComposedChart, Area,
 } from "recharts";
 
@@ -136,12 +136,6 @@ function coverageColor(pct: number): string {
   if (pct >= 80) return "text-green-600";
   if (pct >= 50) return "text-yellow-600";
   return "text-red-600";
-}
-
-function coverageBg(pct: number): string {
-  if (pct >= 80) return "bg-green-500";
-  if (pct >= 50) return "bg-yellow-500";
-  return "bg-red-500";
 }
 
 // ── Component ──
@@ -373,7 +367,7 @@ export default function DataQualityPage() {
                           <XAxis dataKey="hour" tick={{ fontSize: 11 }} interval={2} />
                           <YAxis tick={{ fontSize: 11 }} label={{ value: "μg/m³", angle: -90, position: "insideLeft", fontSize: 11 }} />
                           <Tooltip
-                            formatter={(v: number, name: string) => [
+                            formatter={(v?: number, name?: string) => [
                               `${v} μg/m³`,
                               name === "mean" ? "Mean" : name === "p10" ? "P10" : name === "p90" ? "P90" : name === "p50" ? "Median" : name,
                             ]}
@@ -437,7 +431,7 @@ export default function DataQualityPage() {
                   <div>
                     <p className="text-sm font-medium mb-2">Worst Days</p>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
-                      {episodes.top_days.map((day, i) => (
+                      {episodes.top_days.map((day) => (
                         <div key={day.date} className="flex items-center justify-between rounded-lg border border-border/50 px-3 py-2">
                           <div>
                             <p className="text-sm font-medium">{day.date}</p>

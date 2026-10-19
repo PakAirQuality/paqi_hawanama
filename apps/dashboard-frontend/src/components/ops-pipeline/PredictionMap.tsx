@@ -1,12 +1,11 @@
 "use client"
 
 import { useRef, useState, useEffect } from 'react'
-import { canRenderMap, type MapUnavailableReason } from '@/lib/webgl'
+import { canRenderMap, type MapErrorEvent, type MapUnavailableReason } from '@/lib/webgl'
 import { INVENTORY_NOTE, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
 import { formatPkt } from '@/lib/time'
-import { bandKey, markerClass, normalizeBand, bandColor } from '@/lib/aqi'
+import { bandKey, normalizeBand, bandColor } from '@/lib/aqi'
 import { esc } from '@/lib/html'
-import { useRouter } from 'next/navigation'
 import { Loader2, X } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -120,11 +119,10 @@ function createMarkerEl(value: number | null | undefined, colorClass: string): H
 }
 
 export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady }: PredictionMapProps) {
-  const router = useRouter()
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
-  const [hoveredDistrict, setHoveredDistrict] = useState<string | null>(null)
+  const [, setHoveredDistrict] = useState<string | null>(null)
   const [selectedDistrict, setSelectedDistrict] = useState<SelectedDistrict | null>(null)
   const [hoverPM25, setHoverPM25] = useState<HoverPM25 | null>(null)
 
@@ -221,7 +219,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     mapRef.current = map
 
     // Tile 404s are routine (no COG for a date); anything else is a real failure.
-    map.on('error', (ev: any) => {
+    map.on('error', (ev: MapErrorEvent) => {
       const status = ev?.error?.status ?? ev?.error?.statusCode
       if (status === 404 || status === 400) return
       if (ev?.sourceId || ev?.tile) return
@@ -654,7 +652,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         if (src) {
           const filtered = {
             ...firesRef.current,
-            features: firesRef.current.features.filter((f: any) => {
+            features: firesRef.current.features.filter(f => {
               const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
               return isInsidePakistan(lng, lat)
             }),
@@ -764,9 +762,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
         let centroid: [number, number]
         if (feature.geometry.type === 'Polygon') {
-          centroid = getCentroid((feature.geometry as any).coordinates[0])
+          centroid = getCentroid((feature.geometry as GeoJSON.Polygon).coordinates[0])
         } else if (feature.geometry.type === 'MultiPolygon') {
-          const largest = (feature.geometry as any).coordinates.reduce((a: any, b: any) =>
+          const largest = (feature.geometry as GeoJSON.MultiPolygon).coordinates.reduce((a, b) =>
             a[0].length > b[0].length ? a : b
           )
           centroid = getCentroid(largest[0])
@@ -829,31 +827,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       }
     }
   }, [])
-
-  // Dedicated BAM reference-monitor marker — always shown, opens the /bam QC page.
-  // Independent of the daily-aggregate `stations` list (BAM isn't in it).
-  useEffect(() => {
-    if (!mapRef.current || !mapLoaded) return
-    const map = mapRef.current
-    const BAM_LAT = 24.837633
-    const BAM_LON = 67.103668
-    const el = document.createElement('div')
-    el.style.cssText = 'cursor:pointer; display:flex; flex-direction:column; align-items:center;'
-    el.title = 'BAM 1006 (Karachi) — click for QC/QA status'
-    el.innerHTML = `
-      <div style="background:#7c3aed;color:#fff;font:600 10px/1 ui-sans-serif,system-ui;
-                  padding:4px 7px;border-radius:9999px;box-shadow:0 1px 4px rgba(0,0,0,.35);
-                  border:2px solid #fff;letter-spacing:.3px;white-space:nowrap;">BAM ▸</div>
-      <div style="width:2px;height:8px;background:#7c3aed;"></div>`
-    el.addEventListener('click', (e) => {
-      e.stopPropagation()
-      router.push('/bam')
-    })
-    const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
-      .setLngLat([BAM_LON, BAM_LAT])
-      .addTo(map)
-    return () => { marker.remove() }
-  }, [mapLoaded, router])
 
   // Render station markers
   useEffect(() => {
@@ -949,7 +922,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         await loadPakBoundary()
         src.setData({
           ...firesData,
-          features: firesData.features.filter((f: any) => {
+          features: firesData.features.filter(f => {
             const [lng, lat] = (f.geometry as GeoJSON.Point).coordinates
             return isInsidePakistan(lng, lat)
           }),

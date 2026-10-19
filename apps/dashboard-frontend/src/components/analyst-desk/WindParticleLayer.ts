@@ -5,6 +5,8 @@
  * Ported from web-next/src/components/map/layers/WindParticleLayer.ts
  */
 
+import type mapboxgl from 'mapbox-gl'
+
 export interface WindMetadata {
   width: number
   height: number
@@ -37,7 +39,7 @@ const ZOOM_MAX = 10
 export class WindParticleRenderer {
   private canvas: HTMLCanvasElement
   private ctx: CanvasRenderingContext2D
-  private map: any
+  private map: mapboxgl.Map
   private meta: WindMetadata
   private maxParticles: number
   private baseParticles: number
@@ -57,7 +59,7 @@ export class WindParticleRenderer {
   private mapMoving = false
   private speedScale = 1
 
-  constructor(map: any, windImage: HTMLImageElement, meta: WindMetadata) {
+  constructor(map: mapboxgl.Map, windImage: HTMLImageElement, meta: WindMetadata) {
     this.map = map
     this.meta = meta
 
@@ -111,6 +113,7 @@ export class WindParticleRenderer {
   /** Cache visible viewport bounds as normalised grid coords (0–1) */
   private _updateVisibleBounds() {
     const bounds = this.map.getBounds()
+    if (!bounds) return  // map not sized yet; keep the previous viewport
     const { lon_min, lon_max, lat_min, lat_max } = this.meta
     const lonRange = lon_max - lon_min
     const latRange = lat_max - lat_min

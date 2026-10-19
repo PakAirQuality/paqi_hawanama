@@ -82,7 +82,7 @@ export default function AnalystDeskPage() {
     retry: 2,
   })
 
-  const { data: forecast, isLoading: forecastLoading } = useQuery({
+  const { data: forecast } = useQuery({
     queryKey: ['analyst-forecast', selectedDate],
     queryFn: () => fetchForecast(selectedDate),
     staleTime: 5 * 60 * 1000,

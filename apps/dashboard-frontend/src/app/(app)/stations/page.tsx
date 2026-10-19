@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { OverviewPanel } from "@/components/stations/panels/OverviewPanel";
 import { UptimePanel } from "@/components/stations/panels/UptimePanel";
 import { DiurnalPanel } from "@/components/stations/panels/DiurnalPanel";
@@ -48,7 +48,7 @@ export default function StationsPage() {
   const [search, setSearch] = useState("");
 
   // Group stations by city and filter by search
-  const { filteredStations, groupedStations, matchCount } = useMemo(() => {
+  const { groupedStations, matchCount } = useMemo(() => {
     if (!stations) return { filteredStations: [], groupedStations: new Map<string, StationListItem[]>(), matchCount: 0 };
 
     const q = search.toLowerCase().trim();

@@ -268,9 +268,9 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
         let centroid: [number, number]
 
         if (feat.geometry.type === 'Polygon') {
-          centroid = getCentroid((feat.geometry as any).coordinates[0])
+          centroid = getCentroid((feat.geometry as GeoJSON.Polygon).coordinates[0])
         } else if (feat.geometry.type === 'MultiPolygon') {
-          const largest = (feat.geometry as any).coordinates.reduce((a: any, b: any) =>
+          const largest = (feat.geometry as GeoJSON.MultiPolygon).coordinates.reduce((a, b) =>
             a[0].length > b[0].length ? a : b
           )
           centroid = getCentroid(largest[0])

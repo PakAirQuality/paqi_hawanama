@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import {
-  LineChart,
   Line,
   XAxis,
   YAxis,
@@ -13,6 +12,7 @@ import {
   Area,
   ComposedChart,
 } from "recharts";
+import type { ValueType } from "recharts/types/component/DefaultTooltipContent";
 
 const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
 
@@ -266,7 +266,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                 />
                 <Tooltip
                   labelFormatter={(v) => formatHour(v as number)}
-                  formatter={(value: any, name: string) => {
+                  formatter={(value?: ValueType, name?: string) => {
                     if (value == null) return ["--", name];
                     const label =
                       name === "mean"
