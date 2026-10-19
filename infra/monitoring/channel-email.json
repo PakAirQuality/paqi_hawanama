@@ -1,0 +1,7 @@
+{
+  "type": "email",
+  "displayName": "Hawanama ops email",
+  "description": "Operations alerts for the Hawanama API and ingest services",
+  "labels": { "email_address": "rehan@pakairquality.com" },
+  "enabled": true
+}

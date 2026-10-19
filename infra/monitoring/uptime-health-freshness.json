@@ -1,0 +1,18 @@
+{
+  "displayName": "hawanama health freshness",
+  "monitoredResource": {
+    "type": "uptime_url",
+    "labels": { "project_id": "hawanama-2", "host": "hawanama-152782825429.asia-south1.run.app" }
+  },
+  "httpCheck": {
+    "requestMethod": "GET",
+    "path": "/api/v1/health/freshness",
+    "port": 443,
+    "useSsl": true,
+    "validateSsl": true,
+    "acceptedResponseStatusCodes": [{ "statusClass": "STATUS_CLASS_2XX" }]
+  },
+  "period": "300s",
+  "timeout": "30s",
+  "selectedRegions": ["ASIA_PACIFIC", "EUROPE", "USA_OREGON"]
+}

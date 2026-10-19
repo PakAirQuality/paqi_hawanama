@@ -1,0 +1,21 @@
+{
+  "displayName": "Hawanama scheduler job failed",
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "A Cloud Scheduler job in hawanama-2 finished with an error (the target returned non-2xx or timed out). The job name is in the incident labels. Task endpoints return 207 for partial runs and 500 for failed runs, so this fires on real failures, including a fire ingest with an invalid FIRMS key or every satellite down. Check `gcloud scheduler jobs describe JOB --location=asia-south1 --project=hawanama-2` and the target service logs."
+  },
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "scheduler attempt failed",
+    "conditionMatchedLog": {
+      "filter": "resource.type=\"cloud_scheduler_job\" AND severity>=ERROR",
+      "labelExtractors": { "job": "EXTRACT(resource.labels.job_id)" }
+    }
+  }],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "21600s" },
+    "autoClose": "86400s"
+  },
+  "notificationChannels": ["__CHANNEL__"],
+  "enabled": true
+}
