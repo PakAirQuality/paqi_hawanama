@@ -204,6 +204,17 @@ MODEL_FALLBACK_CHAIN = [
     "gemini-2.5-flash",
 ]
 
+# Thinking effort per model family. Gemini 3's default (high) thinking spent ~5 s per call
+# deciding which tool to use; low keeps Pro's answers at a fraction of the latency.
+# Gemini 3 takes a thinking level, Gemini 2.5 a token budget.
+def _thinking_config(model_name: str) -> dict:
+    if model_name.startswith("gemini-3"):
+        return {"thinking_level": "low"}
+    if model_name.startswith("gemini-2.5-pro"):
+        return {"thinking_budget": 1024}
+    return {"thinking_budget": 512}
+
+
 # Lazy singleton — avoids import-time crash when GEMINI_API_KEY is unset
 _copilot_agent = None
 
@@ -221,16 +232,18 @@ def get_agent(model_name: str | None = None):
         return _copilot_agent
 
     from pydantic_ai import Agent
-    from pydantic_ai.models.google import GoogleModel
+    from pydantic_ai.models.google import GoogleModel, GoogleModelSettings
     from pydantic_ai.providers.google import GoogleProvider
 
     api_key = settings.GEMINI_API_KEY
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY not configured")
 
+    name = model_name or "gemini-3.1-pro-preview"
     model = GoogleModel(
-        model_name or "gemini-3.1-pro-preview",
+        name,
         provider=GoogleProvider(api_key=api_key),
+        settings=GoogleModelSettings(google_thinking_config=_thinking_config(name)),
     )
 
     agent = Agent(
