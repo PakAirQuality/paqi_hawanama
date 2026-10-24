@@ -228,7 +228,7 @@ async def get_city(
         ...,
         description="Select city from dropdown list",
         example="lahore",
-        enum=[
+        json_schema_extra={"enum": [
             "abbottabad", "bahawalpur", "bhopalwala", "chak-jhumra", "daska-kalan", 
             "dera-ismail-khan", "eminabad", "faisalabad", "gujranwala", "haripur", 
             "hundal", "hyderabad", "islamabad", "jhang", "jhelum", "kahna-nau", 
@@ -238,7 +238,7 @@ async def get_city(
             "mirpur-khas", "multan", "murree", "pasrur", "pattoki", "peshawar", 
             "pindi-bhattian", "qadirpur-ran", "quetta", "rahim-yar-khan", "raiwind", 
             "rawalpindi", "rojhan", "sambrial", "sheikhupura", "sialkot", "skardu", "sukkur"
-        ]
+        ]}
     ),
     db: AsyncSession = Depends(get_database)
 ):
@@ -466,7 +466,7 @@ async def get_city_historical(
         ...,
         description="Select city from dropdown list",
         example="lahore",
-        enum=[
+        json_schema_extra={"enum": [
             "abbottabad", "bahawalpur", "bhopalwala", "chak-jhumra", "daska-kalan", 
             "dera-ismail-khan", "eminabad", "faisalabad", "gujranwala", "haripur", 
             "hundal", "hyderabad", "islamabad", "jhang", "jhelum", "kahna-nau", 
@@ -476,7 +476,7 @@ async def get_city_historical(
             "mirpur-khas", "multan", "murree", "pasrur", "pattoki", "peshawar", 
             "pindi-bhattian", "qadirpur-ran", "quetta", "rahim-yar-khan", "raiwind", 
             "rawalpindi", "rojhan", "sambrial", "sheikhupura", "sialkot", "skardu", "sukkur"
-        ]
+        ]}
     ),
     hours: int = 24,
     db: AsyncSession = Depends(get_database)
@@ -585,7 +585,7 @@ async def get_city_historical_from_stations(
         ...,
         description="Select city from dropdown list",
         example="lahore",
-        enum=[
+        json_schema_extra={"enum": [
             "abbottabad", "bahawalpur", "bhopalwala", "chak-jhumra",
             "daska-kalan", "dera-ismail-khan", "eminabad", "faisalabad",
             "gujranwala", "haripur", "hundal", "hyderabad", "islamabad",
@@ -597,7 +597,7 @@ async def get_city_historical_from_stations(
             "peshawar", "pindi-bhattian", "qadirpur-ran", "quetta",
             "rahim-yar-khan", "raiwind", "rawalpindi", "rojhan", "sambrial",
             "sheikhupura", "sialkot", "skardu", "sukkur"
-        ],
+        ]},
     ),
     hours: int = 24,  # how far back you want (e.g. 24, 168, 24*365)
     resolution: Optional[str] = None,  # "daily" to skip hourly data and reduce payload ~24x
