@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { useOptionalSelection } from '@/lib/selection'
 import { formatPkt, relativeAge } from '@/lib/time'
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://hawanama-152782825429.asia-south1.run.app'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
 
 interface FreshnessSource {
   source: string

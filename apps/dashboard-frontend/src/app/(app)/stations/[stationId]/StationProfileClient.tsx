@@ -9,7 +9,7 @@ import { UptimePanel } from "@/components/stations/panels/UptimePanel"
 import { DiurnalPanel } from "@/components/stations/panels/DiurnalPanel"
 import { EpisodesPanel } from "@/components/stations/panels/EpisodesPanel"
 
-const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
 
 // ── Types ──
 

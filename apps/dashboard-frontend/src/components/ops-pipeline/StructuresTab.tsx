@@ -119,7 +119,7 @@ function pm25ToBandColor(pm25: number): string {
   return pm25Color(pm25)
 }
 
-const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
 
 // ── PM2.5 bar color (same categories as the markers) ──
 function pm25BarColor(v: number): string {

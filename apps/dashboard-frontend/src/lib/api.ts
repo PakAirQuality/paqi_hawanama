@@ -1,5 +1,5 @@
 // API client for internal station endpoints
-const API_BASE = 'https://hawanama-152782825429.asia-south1.run.app/api/v1';
+const API_BASE = `${process.env.NEXT_PUBLIC_API_URL ?? ''}/api/v1`;
 
 export interface Station {
   station_id: string;

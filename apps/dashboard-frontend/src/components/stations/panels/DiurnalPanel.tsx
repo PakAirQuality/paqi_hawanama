@@ -14,7 +14,7 @@ import {
 } from "recharts";
 import type { ValueType } from "recharts/types/component/DefaultTooltipContent";
 
-const API_BASE = "https://hawanama-152782825429.asia-south1.run.app";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 type HourBucket = {
   hour_local: number;
