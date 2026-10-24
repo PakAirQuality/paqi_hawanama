@@ -145,7 +145,7 @@ export default function AboutPage() {
 
         <h2 className="text-2xl font-semibold mt-10 mb-3">How to cite</h2>
         <pre className="whitespace-pre-wrap text-sm bg-muted/40 border rounded p-4 text-muted-foreground">
-{`Pakistan Air Quality Initiative (${new Date().getUTCFullYear()}). Hawanama: real-time air quality data for Pakistan and South Asia. https://hawanama.org`}
+{`Pakistan Air Quality Initiative (${new Date().getUTCFullYear()}). Hawanama: real-time air quality data for Pakistan and South Asia. ${SITE.url}`}
         </pre>
 
         <h2 className="text-2xl font-semibold mt-10 mb-3">Credits</h2>

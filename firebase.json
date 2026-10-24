@@ -1,7 +1,7 @@
 {
   "hosting": [
     {
-      "site": "hawanama-2",
+      "site": "hawanama-dashboard",
       "public": "apps/web-next/out",
       "trailingSlash": true,
       "rewrites": [
@@ -46,7 +46,7 @@
       ]
     },
     {
-      "site": "hawanama-dashboard",
+      "site": "hawanama-2",
       "public": "apps/dashboard-frontend/out",
       "trailingSlash": true,
       "redirects": [
@@ -54,7 +54,14 @@
           "source": "/emissions{,/**}",
           "destination": "https://emissions.hawanama.org",
           "type": 302
-        }
+        },
+        { "source": "/city", "destination": "https://hawanama-dashboard.web.app/city/", "type": 301 },
+        { "source": "/city/:path*", "destination": "https://hawanama-dashboard.web.app/city/:path*/", "type": 301 },
+        { "source": "/station/:path*", "destination": "https://hawanama-dashboard.web.app/station/:path*/", "type": 301 },
+        { "source": "/about", "destination": "https://hawanama-dashboard.web.app/about/", "type": 301 },
+        { "source": "/about/:path*", "destination": "https://hawanama-dashboard.web.app/about/:path*/", "type": 301 },
+        { "source": "/sitemap.xml", "destination": "https://hawanama-dashboard.web.app/sitemap.xml", "type": 301 },
+        { "source": "/robots.txt", "destination": "https://hawanama-dashboard.web.app/robots.txt", "type": 301 }
       ],
       "rewrites": [
         {

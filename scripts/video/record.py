@@ -26,7 +26,7 @@ from pathlib import Path
 
 from playwright.sync_api import Page, sync_playwright
 
-SITE_URL = "https://hawanama-dashboard.web.app"
+SITE_URL = "https://hawanama.org"
 OUTPUT_DIR = Path(__file__).resolve().parents[2] / "video-output"
 USER_DATA_DIR = OUTPUT_DIR / "user_data_dir"
 VIEWPORT = {"width": 1920, "height": 1080}

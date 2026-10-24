@@ -73,8 +73,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
                 {/* Persistent selection strip: what every panel on the page is describing */}
                 <SelectionStrip />
                 {/* Public site: link back to the main map */}
-                <a href="https://hawanama.org" className="text-sm text-slate-500 hover:text-slate-900 hidden sm:block">
-                  hawanama.org
+                <a href="https://hawanama-dashboard.web.app" className="text-sm text-slate-500 hover:text-slate-900 hidden sm:block">
+                  Public map
                 </a>
               </div>
             </div>
