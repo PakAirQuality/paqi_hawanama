@@ -1115,17 +1115,30 @@ async def list_cog_dates(
         all_dates = sorted(backbone_dates)
 
     dates = all_dates[-limit:]
-    # A date is "complete" once the station daily aggregation for it can exist, i.e. the
-    # Pakistan calendar day has ended (the aggregation runs at 04:00 UTC). Clients must use
+    # A date is "complete" once its Pakistan calendar day has ended AND the station daily
+    # aggregation for it has been written (04:00 UTC next morning). The NRT prediction lands
+    # ~18:00 UTC the same day, so between midnight and 09:00 PKT the newest prediction has no
+    # station means or brief yet; clients open on the latest complete date. Clients must use
     # this flag rather than comparing against the browser's UTC date.
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
+    from app.services.station_daily import RAW_DATA_BUCKET
     today_pkt = _dt.now(ZoneInfo("Asia/Karachi")).strftime("%Y-%m-%d")
+    # Only the newest ended days can still be waiting for aggregation; listing every
+    # partition takes seconds, so probe just those.
+    pending: set = set()
+    try:
+        raw_bucket = _gcs_client().bucket(RAW_DATA_BUCKET)
+        for d in [d for d in dates if d < today_pkt][-3:]:
+            if not any(True for _ in raw_bucket.list_blobs(prefix=f"raw/station_daily/date={d}/", max_results=1)):
+                pending.add(d)
+    except Exception as e:
+        logger.warning(f"Failed to check station daily aggregation, completeness falls back to the PKT day: {e}")
     details = [
         {
             "date": d,
             "models": [m for m, present in (("backbone", d in backbone_dates), ("support_aware", d in sa_dates)) if present],
-            "complete": d < today_pkt,
+            "complete": d < today_pkt and d not in pending,
         }
         for d in dates
     ]
@@ -1139,7 +1152,8 @@ async def list_cog_dates(
             "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson",
         },
         headers={
-            "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+            # Short edge TTL: "complete" flips when the morning aggregation lands.
+            "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=3600",
         },
     )
 
@@ -2232,8 +2246,8 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
             # This GET goes Cloud Run → Fastly → GCS, seeding the s-maxage=86400 response.
             try:
                 import httpx
-                brief_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/briefs/{date}"
-                stations_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/stations/daily/{date}?country=Pakistan&min_hours=6"
+                brief_url = f"https://hawanama.org/api/v1/ops/pipeline/briefs/{date}"
+                stations_url = f"https://hawanama.org/api/v1/ops/pipeline/stations/daily/{date}?country=Pakistan&min_hours=6"
                 async with httpx.AsyncClient(timeout=20.0) as warm_client:
                     brief_resp = await warm_client.get(brief_url)
                     stations_resp = await warm_client.get(stations_url)

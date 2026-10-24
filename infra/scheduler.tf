@@ -385,13 +385,14 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
   }
 }
 
-# 7. Daily Brief Generation - 10:00 AM UTC (3:00 PM PKT)
-# Runs after daily prediction pipeline has typically completed.
+# 7. Daily Brief Generation - 4:30 and 10:30 AM UTC (9:30 AM and 3:30 PM PKT)
+# A brief needs the day's prediction (NRT, ~18:00 UTC the same day) and its station daily
+# means (station-daily-aggregation, 4:00 AM UTC), so 4:30 publishes it; 10:30 is a catch-up.
 # days_back=7 catches any missed dates; already-cached briefs are skipped instantly.
 resource "google_cloud_scheduler_job" "daily_brief_generation" {
   name        = "daily-brief-generation"
   description = "Generate daily AQ briefs for recent prediction dates (skips already-cached)"
-  schedule    = "0 10 * * *"  # 10:00 AM UTC (3:00 PM PKT)
+  schedule    = "30 4,10 * * *"  # 4:30 and 10:30 AM UTC (9:30 AM and 3:30 PM PKT)
   time_zone   = "UTC"
 
   http_target {
