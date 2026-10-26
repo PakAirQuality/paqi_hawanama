@@ -81,10 +81,10 @@ class Settings(BaseSettings):
     TILE_RATE_LIMIT_PER_MINUTE: int = 900      # raster/tile routers (a map view fetches dozens per pan)
 
     # Public copilot budget (paid Gemini calls; counters in ops.copilot_usage, migration 004)
-    COPILOT_IP_DAILY_LIMIT: int = 20              # requests per client IP per UTC day
-    COPILOT_GLOBAL_DAILY_REQUESTS: int = 500      # requests across all clients per UTC day
-    COPILOT_GLOBAL_DAILY_TOKENS: int = 2_000_000  # prompt+completion tokens per UTC day
-    COPILOT_RATE_LIMIT_PER_MINUTE: int = 6        # burst guard per IP per instance
+    COPILOT_IP_DAILY_LIMIT: int = 100             # requests per client IP per UTC day
+    COPILOT_GLOBAL_DAILY_REQUESTS: int = 2500     # requests across all clients per UTC day
+    COPILOT_GLOBAL_DAILY_TOKENS: int = 10_000_000 # prompt+completion tokens per UTC day
+    COPILOT_RATE_LIMIT_PER_MINUTE: int = 15       # burst guard per IP per instance
     COPILOT_MAX_MESSAGE_CHARS: int = 2000
 
     # Ops Pipeline (ML estimation jobs)
