@@ -13,6 +13,21 @@ from app.utils.geo import haversine_km, validate_coordinates, validate_radius
 
 client = TestClient(app)
 
+CITY_RESPONSE = {
+    "source": "airvisual",
+    "distance_km": 1.0,
+    "entity": {"lat": 31.517, "lon": 74.360, "country": "Pakistan", "state": "Punjab", "city": "Lahore"},
+    "current": {
+        "ts_utc": "2025-09-24T14:00:00+00:00",
+        "ts_local": "2025-09-24T19:00:00+05:00",
+        "aqi": {"us": 95, "cn": 70, "main_us": "pm25", "main_cn": "pm25"},
+        "weather": {"temp_c": 28, "humidity": 54},
+        "pollutants": {"pm25": {"conc": 32.6, "unit": "µg/m³"}},
+        "qc_state": "OK",
+        "units": {"pm25": "µg/m³"},
+    },
+}
+
 
 class TestGeoUtils:
     """Test cases for geographic utilities"""
@@ -126,7 +141,7 @@ class TestNearestRouter:
             }
         }
         
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.return_value = type('MockResponse', (), mock_response)()
             mock_get_service.return_value = mock_service
@@ -164,7 +179,7 @@ class TestNearestRouter:
             }
         }
         
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_station.return_value = type('MockResponse', (), mock_response)()
             mock_get_service.return_value = mock_service
@@ -207,11 +222,9 @@ class TestNearestRouter:
     
     def test_aqi_parameter(self):
         """Test AQI filter parameter"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
-            mock_service.get_nearest_city.return_value = type('MockResponse', (), {
-                "source": "airvisual", "distance_km": 1.0, "entity": {}, "current": {}
-            })()
+            mock_service.get_nearest_city.return_value = type('MockResponse', (), CITY_RESPONSE)()
             mock_get_service.return_value = mock_service
             
             # Test different AQI filters
@@ -226,11 +239,9 @@ class TestNearestRouter:
     
     def test_timezone_parameter(self):
         """Test timezone parameter"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
-            mock_service.get_nearest_city.return_value = type('MockResponse', (), {
-                "source": "airvisual", "distance_km": 1.0, "entity": {}, "current": {}
-            })()
+            mock_service.get_nearest_city.return_value = type('MockResponse', (), CITY_RESPONSE)()
             mock_get_service.return_value = mock_service
             
             response = client.get("/api/v1/nearest/city?lat=31.5204&lon=74.3587&tz=UTC")
@@ -243,7 +254,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_nearest_city_not_found(self):
         """Test nearest city when none found within radius"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.side_effect = RuntimeError("no_nearest_city")
             mock_get_service.return_value = mock_service
@@ -257,7 +268,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_nearest_station_not_found(self):
         """Test nearest station when none found within radius"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_station.side_effect = RuntimeError("no_nearest_station")
             mock_get_service.return_value = mock_service
@@ -271,7 +282,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_nearest_station_plan_upgrade_required(self):
         """Test nearest station when plan upgrade is required"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_station.side_effect = RuntimeError("Nearest station requires plan upgrade")
             mock_get_service.return_value = mock_service
@@ -286,7 +297,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_service_unavailable(self):
         """Test endpoints when service is unavailable"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.side_effect = RuntimeError("client not available")
             mock_get_service.return_value = mock_service
@@ -300,7 +311,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_upstream_api_error(self):
         """Test handling of upstream API errors"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.side_effect = RuntimeError("Upstream API error: 500 Internal Server Error")
             mock_get_service.return_value = mock_service
@@ -315,7 +326,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_parameter_validation_error(self):
         """Test handling of parameter validation errors"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.side_effect = ValueError("Invalid coordinates")
             mock_get_service.return_value = mock_service
@@ -329,7 +340,7 @@ class TestNearestRouter:
     @pytest.mark.asyncio
     async def test_unexpected_error(self):
         """Test handling of unexpected errors"""
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.side_effect = Exception("Unexpected error")
             mock_get_service.return_value = mock_service
@@ -415,7 +426,7 @@ class TestIntegrationFlow:
             }
         }
         
-        with patch('app.services.airvisual_nearest.get_nearest_service') as mock_get_service:
+        with patch('app.routers.nearest.get_nearest_service') as mock_get_service:
             mock_service = AsyncMock()
             mock_service.get_nearest_city.return_value = type('MockResponse', (), mock_city_response)()
             mock_service.get_nearest_station.return_value = type('MockResponse', (), {
