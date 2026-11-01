@@ -1,5 +1,5 @@
 """
-Punjab EPA ingestion (aqipunjab.com), an independent connector with its own
+Punjab EPA ingestion (aqi.punjab.gov.pk, formerly aqipunjab.com), an independent connector with its own
 credential and endpoint. It is never routed through IQAir.
 
 Changes from the original:
@@ -24,6 +24,7 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlsplit
 
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,7 +77,11 @@ class PunjabEPAClient:
 
     def __init__(self, *, settings=None, http: Optional[httpx.AsyncClient] = None):
         s = settings or _default_settings
-        self.base = (s.PUNJAB_EPA_API_BASE or "https://aqipunjab.com/api").rstrip("/")
+        self.base = (s.PUNJAB_EPA_API_BASE or "https://aqi.punjab.gov.pk/api").rstrip("/")
+        # The API only serves requests that present its own site as the origin; derive it from the
+        # base so a domain move (aqipunjab.com -> aqi.punjab.gov.pk, 25 Oct 2026) is a config change.
+        parts = urlsplit(self.base)
+        self.origin = f"{parts.scheme}://{parts.netloc}"
         self.api_key = s.PUNJAB_EPA_API_KEY or ""
         self.timeout = default_timeout(connect=10.0, read=float(s.PUNJAB_EPA_TIMEOUT_S))
         self._http = http
@@ -88,7 +93,7 @@ class PunjabEPAClient:
     def _headers(self) -> Dict[str, str]:
         return {
             "Content-Type": "application/json", "X-Requested-With": "XMLHttpRequest", "X-API-Key": self.api_key,
-            "X-Platform": "web", "Origin": "https://aqipunjab.com", "Referer": "https://aqipunjab.com/",
+            "X-Platform": "web", "Origin": self.origin, "Referer": f"{self.origin}/",
         }
 
     async def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
