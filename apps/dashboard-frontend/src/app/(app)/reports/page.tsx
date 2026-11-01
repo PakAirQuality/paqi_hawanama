@@ -101,7 +101,7 @@ export default function ReportsPage() {
 
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">City</label>
-            <select className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-50 disabled:text-slate-400" value={city} onChange={(e) => setCity(e.target.value)} disabled={!selectedProvince || cities.length === 0}>
+            <select className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 disabled:bg-slate-50 disabled:text-slate-500" value={city} onChange={(e) => setCity(e.target.value)} disabled={!selectedProvince || cities.length === 0}>
               <option value="">{!selectedProvince ? 'Select a province first' : cities.length ? 'Select…' : 'No cities with active stations'}</option>
               {cities.map((c) => <option key={c.city} value={c.city}>{c.city} ({c.station_count} station{c.station_count === 1 ? '' : 's'})</option>)}
             </select>
@@ -116,24 +116,24 @@ export default function ReportsPage() {
               </div>
             </div>
             {mode === 'stations' ? (
-              <div className="rounded-lg border max-h-56 overflow-y-auto divide-y">
-                {!city && <div className="p-3 text-sm text-slate-400">Select a city to list its stations.</div>}
-                {city && stations.length === 0 && <div className="p-3 text-sm text-slate-400">No active stations with recent data in {city}.</div>}
+              <div className="rounded-lg border max-h-56 overflow-y-auto ">
+                {!city && <div className="p-3 text-sm text-slate-500">Select a city to list its stations.</div>}
+                {city && stations.length === 0 && <div className="p-3 text-sm text-slate-500">No active stations with recent data in {city}.</div>}
                 {stations.map((s) => (
                   <label key={s.station_id} className="flex items-center gap-3 px-3 py-2 text-sm hover:bg-slate-50 cursor-pointer">
                     <input type="checkbox" checked={stationIds.includes(s.station_id)} onChange={() => toggleStation(s.station_id)} disabled={!stationIds.includes(s.station_id) && stationIds.length >= LIMITS.maxStations} />
                     <span className="flex-1 min-w-0">
                       <span className="text-slate-800">{s.station_name}</span>
-                      {s.duplicate_name && <span className="ml-1 text-[10px] text-amber-600">(same name as another station)</span>}
-                      <span className="block text-[11px] text-slate-400">
-                        {s.provider || 'unknown provider'} · id {s.station_id} · last reading {s.last_observation ? formatPkt(s.last_observation) : 'none in 30 days'}
-                        {s.last_pm25 != null && <> · {Math.round(s.last_pm25)} µg/m³ ({classifyPm25(s.last_pm25).shortLabel})</>}
+                      {s.duplicate_name && <span className="ml-1 text-[11px] text-amber-600">(same name as another station)</span>}
+                      <span className="block text-[11px] text-slate-500">
+                        {s.provider || 'unknown provider'}, id {s.station_id}, last reading {s.last_observation ? formatPkt(s.last_observation) : 'none in 30 days'}
+                        {s.last_pm25 != null && <>, {Math.round(s.last_pm25)} µg/m³ ({classifyPm25(s.last_pm25).shortLabel})</>}
                       </span>
                     </span>
                   </label>
                 ))}
                 {stations.length > 0 && (
-                  <div className="px-3 py-1.5 text-[11px] text-slate-400 flex justify-between">
+                  <div className="px-3 py-1.5 text-[11px] text-slate-500 flex justify-between">
                     <span>{stationIds.length} of {stations.length} selected (max {LIMITS.maxStations})</span>
                     <button type="button" className="underline" onClick={() => setStationIds(stations.slice(0, LIMITS.maxStations).map((s) => s.station_id))}>Select first {Math.min(LIMITS.maxStations, stations.length)}</button>
                   </div>
@@ -153,11 +153,11 @@ export default function ReportsPage() {
                 {POLLUTANTS.map((p) => (
                   <label key={p.key} className="flex items-center gap-1.5">
                     <input type="checkbox" checked={parameters.includes(p.key)} onChange={(e) => setParameters((prev) => e.target.checked ? [...prev, p.key] : prev.filter((x) => x !== p.key))} />
-                    {p.label} <span className="text-slate-400 text-xs">{p.unit}</span>
+                    {p.label} <span className="text-slate-500 text-xs">{p.unit}</span>
                   </label>
                 ))}
               </div>
-              <p className="text-[11px] text-slate-400 mt-1">Most stations report PM2.5 only; other columns are empty where the monitor does not measure them.</p>
+              <p className="text-[11px] text-slate-500 mt-1">Most stations report PM2.5 only; other columns are empty where the monitor does not measure them.</p>
             </div>
           )}
 
@@ -236,9 +236,9 @@ function ReportResults({ report, view, setView }: { report: Report; view: 'table
 
       <div className="text-xs text-slate-500 mb-3">
         {report.kind === 'stations' ? (
-          <>Interval {report.meta.start_pk.replace('T', ' ').slice(0, 16)} to {report.meta.end_pk.replace('T', ' ').slice(0, 16)} PKT · {report.meta.aggregation} · {report.meta.row_count} rows{report.meta.truncated ? ' (truncated by the server limit)' : ''}</>
+          <>Interval {report.meta.start_pk.replace('T', ' ').slice(0, 16)} to {report.meta.end_pk.replace('T', ' ').slice(0, 16)} PKT, {report.meta.aggregation}, {report.meta.row_count} rows{report.meta.truncated ? ' (truncated by the server limit)' : ''}</>
         ) : (
-          <>Interval {formatPkt(report.meta.start_utc)} to {formatPkt(report.meta.end_utc)} · {report.meta.aggregation} · {report.meta.stations_in_scope} stations in scope</>
+          <>Interval {formatPkt(report.meta.start_utc)} to {formatPkt(report.meta.end_utc)}, {report.meta.aggregation}, {report.meta.stations_in_scope} stations in scope</>
         )}
       </div>
 
@@ -250,9 +250,9 @@ function ReportResults({ report, view, setView }: { report: Report; view: 'table
             <div key={s.key} className="rounded-lg border bg-white px-3 py-2 text-xs">
               <div className="font-medium text-slate-800 truncate">{s.name}</div>
               <div className="text-slate-500 mt-0.5">
-                mean {st.mean != null ? st.mean.toFixed(1) : '—'} · median {st.median != null ? st.median.toFixed(1) : '—'} · min {st.min ?? '—'} · max {st.max ?? '—'} {unit}
+                mean {st.mean != null ? st.mean.toFixed(1) : '—'}, median {st.median != null ? st.median.toFixed(1) : '—'}, min {st.min ?? '—'}, max {st.max ?? '—'} {unit}
               </div>
-              <div className="text-slate-400">{st.n} valid of {expected} hours ({Math.round(st.completeness * 100)}% complete){st.mean != null && <> · {classifyPm25(st.mean).label}</>}</div>
+              <div className="text-slate-500">{st.n} valid of {expected} hours ({Math.round(st.completeness * 100)}% complete){st.mean != null && <>, {classifyPm25(st.mean).label}</>}</div>
             </div>
           )
         })}
@@ -288,22 +288,22 @@ function ReportResults({ report, view, setView }: { report: Report; view: 'table
             </thead>
             <tbody>
               {report.rows.length === 0 && (
-                <tr><td className="px-3 py-6 text-slate-400" colSpan={6}>No readings in this interval.</td></tr>
+                <tr><td className="px-3 py-6 text-slate-500" colSpan={6}>No readings in this interval.</td></tr>
               )}
               {report.kind === 'stations'
                 ? report.rows.map((r, i) => (
-                  <tr key={i} className="border-t border-slate-100">
+                  <tr key={i} className=" border-slate-100">
                     <td className="px-3 py-1.5 text-slate-700 whitespace-nowrap">{r.station_name}</td>
                     <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{r.timestamp_pk.replace('T', ' ').slice(0, 16)}</td>
                     {report.meta.parameters.map((p) => <td key={p} className="px-3 py-1.5 tabular-nums">{r[p] == null ? '—' : Number(r[p]).toFixed(1)}</td>)}
-                    <td className="px-3 py-1.5 text-slate-400">{r.qc_state}</td>
+                    <td className="px-3 py-1.5 text-slate-500">{r.qc_state}</td>
                   </tr>
                 ))
                 : report.rows.map((r, i) => (
-                  <tr key={i} className="border-t border-slate-100">
+                  <tr key={i} className=" border-slate-100">
                     <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">{r.timestamp_pk.replace('T', ' ').slice(0, 16)}</td>
                     <td className="px-3 py-1.5 tabular-nums">{r.pm25.toFixed(1)}</td>
-                    <td className="px-3 py-1.5 text-slate-400">{r.stations_used}</td>
+                    <td className="px-3 py-1.5 text-slate-500">{r.stations_used}</td>
                   </tr>
                 ))}
             </tbody>

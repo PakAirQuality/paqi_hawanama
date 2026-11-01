@@ -24,11 +24,11 @@ export function firesShortLabel(data: FiresGeoJSON | null | undefined, count: nu
   const delayed = firesDelayed(data)
   switch (status) {
     case 'ok':
-      return { text: `${count} detections${delayed ? ' · delayed' : ''}`, warn: delayed }
+      return { text: `${count} detections${delayed ? ', delayed' : ''}`, warn: delayed }
     case 'empty':
-      return { text: `No detections${delayed ? ' · delayed' : ''}`, warn: delayed }
+      return { text: `No detections${delayed ? ', delayed' : ''}`, warn: delayed }
     case 'partial':
-      return { text: `${count} detections · partial`, warn: true }
+      return { text: `${count} detections, partial`, warn: true }
     case 'stale':
       return { text: `${count} from ${formatDateOnly(data.date)}`, warn: true }
     default:

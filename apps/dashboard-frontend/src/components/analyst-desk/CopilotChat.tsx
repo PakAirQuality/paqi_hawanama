@@ -5,8 +5,8 @@ import { ChatMessage } from './ChatMessage'
 import dynamic from 'next/dynamic'
 import type { TrayStation, StationTrendInfo } from './AnalystTray'
 // Recharts (~100 KB gzip) only loads when the Analytics tab is opened
-const AnalystPanel = dynamic(() => import('./AnalystTray').then(m => m.AnalystPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading charts…</div> })
-const StationTrendPanel = dynamic(() => import('./AnalystTray').then(m => m.StationTrendPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-400">Loading chart…</div> })
+const AnalystPanel = dynamic(() => import('./AnalystTray').then(m => m.AnalystPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-500">Loading charts…</div> })
+const StationTrendPanel = dynamic(() => import('./AnalystTray').then(m => m.StationTrendPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-500">Loading chart…</div> })
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
 import { useOptionalSelection } from '@/lib/selection'
 
@@ -368,26 +368,25 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
     <div className="flex flex-col h-full bg-white">
       {/* Tab header — only shown when not externally controlled */}
       {!externalTab && (
-        <div className="flex border-b border-slate-100">
+        <div className="flex border-slate-100">
           <button
             onClick={() => setActiveTab('chat')}
             className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-              activeTab === 'chat'
+ activeTab === 'chat'
                 ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
-                : 'text-slate-400 hover:text-slate-600'
+                : 'text-slate-500 hover:text-slate-600'
             }`}
           >
-            <div className={`w-1.5 h-1.5 rounded-full shrink-0 ${isStreaming ? 'bg-amber-400 animate-pulse' : 'bg-emerald-400'}`} />
-            Chat
+            {isStreaming ? 'Chat…' : 'Chat'}
           </button>
           <button
             onClick={() => setActiveTab('analytics')}
             className={`relative flex-1 flex items-center justify-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors ${
-              activeTab === 'analytics'
+ activeTab === 'analytics'
                 ? 'text-slate-800 font-semibold border-b-2 border-slate-800'
                 : trendStation
-                  ? 'text-blue-600 border-b-2 border-blue-400 animate-pulse'
-                  : 'text-slate-400 hover:text-slate-600'
+                  ? 'text-blue-600 border-b-2 border-blue-400'
+                  : 'text-slate-500 hover:text-slate-600'
             }`}
           >
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -414,7 +413,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
           {/* Suggested questions */}
           {showSuggestions && (
             <div className="mt-3 space-y-1">
-              <p className="text-[10px] text-slate-400 font-medium uppercase tracking-wide mb-1.5">
+              <p className="text-[11px] text-slate-500 font-medium tracking-wide mb-1.5">
                 Ask about...
               </p>
               {(trackerMode ? TRACKER_SUGGESTED_QUESTIONS : SUGGESTED_QUESTIONS).map((q, i) => (
@@ -431,7 +430,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
 
           {/* Empty state */}
           {messages.length === 0 && !isStreaming && (
-            <div className="flex items-center justify-center h-full text-slate-400 text-xs">
+            <div className="flex items-center justify-center h-full text-slate-500 text-xs">
               Loading briefing...
             </div>
           )}
@@ -451,12 +450,12 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
 
       {/* Station suggestion chips */}
       {showStationChips && input.startsWith('@') && (
-        <div className="px-3 py-1.5 border-t border-slate-100 flex flex-wrap gap-1">
+        <div className="px-3 py-1.5 border-slate-100 flex flex-wrap gap-1">
           {STATION_CHIPS.map((chip, i) => (
             <button
               key={i}
               onClick={() => sendMessage(input + chip)}
-              className="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
+              className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors"
             >
               {chip}
             </button>
@@ -466,11 +465,11 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
 
       {/* Input */}
       {selectionLine && activeTab === 'chat' && (
-        <div className="px-3 py-1 border-t border-slate-100 text-[10px] text-slate-400 truncate" title="The assistant answers about this selection">
+        <div className="px-3 py-1 border-slate-100 text-[11px] text-slate-500 truncate" title="The assistant answers about this selection">
           Answering about: <span className="text-slate-600">{selectionLine}</span>
         </div>
       )}
-      <form onSubmit={handleSubmit} className="px-3 py-2 border-t border-slate-100">
+      <form onSubmit={handleSubmit} className="px-3 py-2 border-slate-100">
         <div className="flex items-center gap-1.5">
           <input
             ref={inputRef}
@@ -479,7 +478,7 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
             onChange={e => setInput(e.target.value)}
             placeholder="Ask about forecasts, cities, watchlists..."
             disabled={isStreaming}
-            className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-transparent disabled:opacity-50"
+            className="flex-1 px-3 py-1.5 rounded-lg border border-slate-200 text-xs text-slate-800 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-300 focus:border-transparent disabled:opacity-50"
           />
           <button
             type="submit"

@@ -22,19 +22,17 @@ const A = ({ href, children }: { href: string; children: React.ReactNode }) => (
 )
 
 export default function AboutPage() {
-  const pkCities = allCities.filter((c) => c.country === 'Pakistan').length
-  const pkStations = allStations.filter((s) => s.country === 'Pakistan').length
   const datasetJsonLd = {
     '@context': 'https://schema.org',
     '@type': 'Dataset',
-    name: 'Hawanama hourly air quality readings for Pakistan and South Asia',
-    description: `Hourly PM2.5 (µg/m³) and US AQI from ${allStations.length} monitoring stations in ${allCities.length} cities across Pakistan, India, Bangladesh, Nepal and Sri Lanka, collected by the Pakistan Air Quality Initiative and partners.`,
+    name: 'Hawanama hourly air quality readings for Pakistan',
+    description: `Hourly PM2.5 (µg/m³) and US AQI from ${allStations.length} monitoring stations in ${allCities.length} cities across Pakistan, collected by the Pakistan Air Quality Initiative and partners.`,
     url: absoluteUrl('/about/'),
     license: 'https://creativecommons.org/licenses/by/4.0/',
     isAccessibleForFree: true,
     creator: { '@id': `${SITE.url}/#organization` },
-    keywords: ['air quality', 'PM2.5', 'AQI', 'Pakistan', 'South Asia', 'air pollution', 'open data'],
-    spatialCoverage: { '@type': 'Place', name: 'Pakistan and South Asia' },
+    keywords: ['air quality', 'PM2.5', 'AQI', 'Pakistan', 'air pollution', 'open data'],
+    spatialCoverage: { '@type': 'Place', name: 'Pakistan' },
     temporalCoverage: '2016/..',
     distribution: [
       { '@type': 'DataDownload', encodingFormat: 'text/csv', contentUrl: `${SITE.links.apiBase}/exports/station-readings-csv` },
@@ -51,7 +49,7 @@ export default function AboutPage() {
           <div className="flex items-center justify-between">
             <div>
               <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-              <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+              <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
             </div>
             <nav className="flex items-center space-x-4">
               <Link href="/" className="text-sm hover:underline">Dashboard</Link>
@@ -69,8 +67,7 @@ export default function AboutPage() {
           <A href={SITE.links.paqi}>Pakistan Air Quality Initiative (PAQI)</A>, a community-driven effort that has
           measured and published Pakistan’s air pollution since 2016. The map shows hourly fine particulate matter
           (PM2.5) and the US Air Quality Index (AQI) for {allStations.length} monitoring stations in {allCities.length}{' '}
-          cities across Pakistan, India, Bangladesh, Nepal and Sri Lanka, including {pkStations} monitors in{' '}
-          {pkCities} Pakistani cities such as Lahore, Karachi, Islamabad, Peshawar, Faisalabad and Quetta.
+          Pakistani cities such as Lahore, Karachi, Islamabad, Peshawar, Faisalabad and Quetta.
         </p>
 
         <h2 className="text-2xl font-semibold mt-10 mb-3">Where the data comes from</h2>
@@ -83,10 +80,6 @@ export default function AboutPage() {
           <li>
             <strong className="text-foreground">Government reference monitors</strong>: Punjab Environmental Protection
             Agency and Urban Unit beta-attenuation (BAM) monitors where available.
-          </li>
-          <li>
-            <strong className="text-foreground">Regional monitors</strong> in India, Bangladesh, Nepal and Sri Lanka
-            published through IQAir, for cross-border context.
           </li>
         </ul>
         <p className="text-muted-foreground mt-4">
@@ -145,7 +138,7 @@ export default function AboutPage() {
 
         <h2 className="text-2xl font-semibold mt-10 mb-3">How to cite</h2>
         <pre className="whitespace-pre-wrap text-sm bg-muted/40 border rounded p-4 text-muted-foreground">
-{`Pakistan Air Quality Initiative (${new Date().getUTCFullYear()}). Hawanama: real-time air quality data for Pakistan and South Asia. https://hawanama.org`}
+{`Pakistan Air Quality Initiative (${new Date().getUTCFullYear()}). Hawanama: real-time air quality data for Pakistan. https://hawanama.org`}
         </pre>
 
         <h2 className="text-2xl font-semibold mt-10 mb-3">Credits</h2>

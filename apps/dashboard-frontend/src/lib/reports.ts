@@ -36,12 +36,14 @@ export interface ProvinceOption { label: string; province: string; country: stri
 /** /meta/provinces returns "Province, Country" strings; split them so filters are explicit. */
 export async function getProvinces(): Promise<ProvinceOption[]> {
   const list = await getJson<string[]>('/api/v1/meta/provinces')
-  return list.map((label) => {
-    const idx = label.lastIndexOf(', ')
-    return idx > 0
-      ? { label, province: label.slice(0, idx), country: label.slice(idx + 2) }
-      : { label, province: label, country: 'Pakistan' }
-  })
+  return list
+    .map((label) => {
+      const idx = label.lastIndexOf(', ')
+      return idx > 0
+        ? { label, province: label.slice(0, idx), country: label.slice(idx + 2) }
+        : { label, province: label, country: 'Pakistan' }
+    })
+    .filter((p) => p.country === 'Pakistan')
 }
 
 export interface CityOption { city: string; province: string; country: string; station_count: number; aliases?: string[] }
@@ -160,7 +162,7 @@ function csvCell(v: unknown): string {
 export function reportToCsv(report: Report): string {
   const lines: string[] = []
   const m = report.meta as Record<string, unknown>
-  lines.push(`# Hawanama report · generated ${new Date().toISOString()}`)
+  lines.push(`# Hawanama report, generated ${new Date().toISOString()}`)
   lines.push(`# interval ${m.start_utc} to ${m.end_utc} (UTC) = ${m.start_pk ?? ''} to ${m.end_pk ?? ''} (Asia/Karachi)`)
   lines.push(`# aggregation: ${m.aggregation}`)
   if (report.kind === 'stations') {

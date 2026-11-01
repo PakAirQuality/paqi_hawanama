@@ -6,11 +6,11 @@ import { SITE, jsonLd, organizationJsonLd, websiteJsonLd } from "@/lib/site";
 export const metadata: Metadata = {
   metadataBase: new URL(SITE.url),
   title: {
-    default: "Hawanama: Real-time Air Quality in Pakistan and South Asia",
+    default: "Hawanama: Real-time Air Quality in Pakistan",
     template: "%s | Hawanama",
   },
   description:
-    "Live air quality map for Pakistan and South Asia by the Pakistan Air Quality Initiative (PAQI). Hourly PM2.5 and US AQI for Lahore, Karachi, Islamabad, Peshawar and 600+ cities, with open data downloads.",
+    "Live air quality map for Pakistan by the Pakistan Air Quality Initiative (PAQI). Hourly PM2.5 and US AQI for Lahore, Karachi, Islamabad, Peshawar and cities across the country, with open data downloads.",
   keywords: [
     "Pakistan air quality",
     "AQI Pakistan",
@@ -34,7 +34,7 @@ export const metadata: Metadata = {
     siteName: SITE.name,
     locale: "en_US",
     url: "/",
-    title: "Hawanama: Real-time Air Quality in Pakistan and South Asia",
+    title: "Hawanama: Real-time Air Quality in Pakistan",
     description: SITE.description,
     images: [{ url: SITE.ogImage, width: 1200, height: 630, alt: "Hawanama air quality map of Pakistan" }],
   },
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     site: SITE.twitter,
     creator: SITE.twitter,
-    title: "Hawanama: Real-time Air Quality in Pakistan and South Asia",
+    title: "Hawanama: Real-time Air Quality in Pakistan",
     description: SITE.description,
     images: [SITE.ogImage],
   },

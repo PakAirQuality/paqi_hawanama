@@ -10,7 +10,7 @@ export default function SiteFooter() {
         <div>
           <p className="font-semibold text-foreground">{SITE.name}</p>
           <p className="text-muted-foreground mt-1">
-            Real-time air quality for Pakistan and South Asia, a project of the{' '}
+            Real-time air quality for Pakistan, a project of the{' '}
             <a href={SITE.links.paqi} className="underline hover:text-foreground" {...ext}>
               {SITE.org}
             </a>

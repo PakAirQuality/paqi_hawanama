@@ -5,8 +5,8 @@
 
 export const MAP_CONFIG = {
   style: 'mapbox://styles/mapbox/standard',
-  center: [78, 22] as [number, number], // South Asia center
-  zoom: 3.6,
+  center: [69.35, 30.0] as [number, number], // Pakistan center
+  zoom: 5,
   projection: 'globe' as const, // Beautiful globe projection with 2D overlay
   accessToken: process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '',
   config: {

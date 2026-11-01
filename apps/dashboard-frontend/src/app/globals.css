@@ -1,20 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Hide all MapLibre attribution and controls */
-.maplibregl-ctrl-logo {
-  display: none !important;
-}
-
-.maplibregl-ctrl-attrib {
-  display: none !important;
-}
-
-.maplibregl-ctrl-attrib-inner {
-  display: none !important;
-}
-
-.maplibregl-ctrl-attrib-button {
+/* Keep the compact Mapbox attribution visible (required by Mapbox and OpenStreetMap terms) */
+.mapboxgl-ctrl-logo {
   display: none !important;
 }
 
@@ -30,6 +18,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -96,7 +85,8 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "calt";
   }
 }
 
@@ -115,46 +105,92 @@
 }
 
 .aqi-marker {
-  color: white;
+  color: #111827;
   font-size: 12px;
-  font-weight: normal;
-  box-shadow: 0 0 0 3px var(--glow-color, rgba(255, 255, 255, 0.4)), 0 0 12px var(--glow-color, rgba(255, 255, 255, 0.6)), 0 2px 4px rgba(0, 0, 0, 0.3);
+  font-weight: 400;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
+  transition: width 0.15s, height 0.15s;
+}
+
+/* Country-level zoom: small plain discs, numbers appear once there is room to read them */
+.aqi-marker-compact .aqi-marker {
+  width: 12px;
+  height: 12px;
+  font-size: 0;
 }
 
 .aqi-marker.bg-no-reading {
   background-color: #FFFFFFE6;
   color: #666;
-  --glow-color: rgba(255, 255, 255, 0.4);
 }
 .aqi-marker.bg-good {
   background-color: rgba(110, 204, 57, 1);
-  --glow-color: rgba(110, 204, 57, 0.4);
 }
 .aqi-marker.bg-moderate {
   background-color: rgba(240, 194, 12, 1);
-  color: #333;
-  --glow-color: rgba(240, 194, 12, 0.4);
 }
 .aqi-marker.bg-unhealthy-sensitive {
   background-color: rgba(241, 128, 23, 1);
-  --glow-color: rgba(241, 128, 23, 0.4);
 }
 .aqi-marker.bg-unhealthy {
   background-color: rgba(239, 120, 85, 1);
-  --glow-color: rgba(239, 120, 85, 0.4);
 }
 .aqi-marker.bg-very-unhealthy {
+  color: #ffffff;
   background-color: #a070b5;
-  --glow-color: rgba(160, 112, 181, 0.4);
 }
 .aqi-marker.bg-hazardous {
+  color: #ffffff;
   background-color: #991b1b;
-  --glow-color: rgba(153, 27, 27, 0.4);
+}
+
+/* ── Accessibility ── */
+:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Figures: even-width digits with Inter's open-digit alternates, tighter at display sizes */
+.tabular-nums {
+  font-feature-settings: "tnum" 1, "ss01" 1, "cv11" 1;
+}
+
+/* ── Loading and chart motion ── */
+.skeleton {
+  background: linear-gradient(100deg, rgba(15, 23, 42, 0.06) 30%, rgba(15, 23, 42, 0.12) 50%, rgba(15, 23, 42, 0.06) 70%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.bar-grow {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: bar-grow 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes bar-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
 }

@@ -81,9 +81,9 @@ export default function MapRefactored({
   const { stations, error } = useStationsData(viewMode === 'live');
 
   const [viewport, setViewport] = useState({
-    longitude: center?.[0] || 78,
-    latitude: center?.[1] || 22,
-    zoom: zoom ?? 3.6,
+    longitude: center?.[0] || 69.35,
+    latitude: center?.[1] || 30.0,
+    zoom: zoom ?? 5,
   });
 
   const [map, setMap] = useState<any>(null);
@@ -106,7 +106,7 @@ export default function MapRefactored({
   });
   const dailyStations: DailyStation[] = (viewMode === 'history' && dailyStationsData) ? dailyStationsData : EMPTY_DAILY;
 
-  // Fly between modes: zoom into Pakistan for ESTIMATED, back to the South Asia
+  // Fly between modes: zoom into Pakistan for ESTIMATED, back to the starting
   // overview for LIVE. Skip the initial mount (when viewMode is still its default
   // 'live') so we don't animate from the user's already-correct starting view.
   const flownOnce = useRef(false);
@@ -117,8 +117,8 @@ export default function MapRefactored({
       flownOnce.current = true
     } else if (flownOnce.current) {
       map.flyTo({
-        center: [center?.[0] ?? 78, center?.[1] ?? 22],
-        zoom: zoom ?? 3.6,
+        center: [center?.[0] ?? 69.35, center?.[1] ?? 30.0],
+        zoom: zoom ?? 5,
         duration: 1200,
         essential: true,
       })
@@ -215,7 +215,7 @@ export default function MapRefactored({
   // AqiMarker only changes appearance at zoom 3 and zoom 8, so markers re-render on those
   // crossings only; panning and small zooms leave the memoized marker list untouched
   // (react-map-gl repositions Marker elements itself on every map move).
-  const zoomBand = (viewport?.zoom ?? 3.6) < 3 ? 2 : (viewport?.zoom ?? 3.6) < 8 ? 5 : 9;
+  const zoomBand = (viewport?.zoom ?? 5) < 3 ? 2 : (viewport?.zoom ?? 5) < 8 ? 5 : 9;
 
   const handleMapLoad = (evt: any) => {
     const mapInstance = evt.target;
@@ -301,7 +301,7 @@ export default function MapRefactored({
     <div className={`w-full h-full relative ${className}`}>
       <Map
         {...viewport}
-        zoom={viewport?.zoom ?? 3.6}
+        zoom={viewport?.zoom ?? 5}
         mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''}
         mapStyle="mapbox://styles/mapbox/streets-v12"
         onMove={handleMapChange}

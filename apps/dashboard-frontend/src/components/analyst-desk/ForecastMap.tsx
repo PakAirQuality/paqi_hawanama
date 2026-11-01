@@ -17,7 +17,7 @@ import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 // (.env.production.local); the literal is the development fallback
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
-const API_BASE = 'https://hawanama-152782825429.asia-south1.run.app'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://hawanama-152782825429.asia-south1.run.app'
 const MARKER_MIN_ZOOM = 4
 
 import { loadPakBoundary, isInsidePakistan } from './pakistan'
@@ -69,25 +69,13 @@ const AQI_CATEGORY_LABELS: Record<string, string> = {
 function createMarkerEl(value: number | null | undefined, colorClass: string): HTMLDivElement {
   const container = document.createElement('div')
   container.className = 'aqi-marker-container point'
-  container.style.cssText = 'width:28px;display:flex;flex-direction:column;align-items:center;'
+  container.style.cssText = 'display:flex;align-items:center;justify-content:center;'
 
   const marker = document.createElement('div')
   marker.className = `aqi-marker ${colorClass}`
   marker.textContent = value != null ? `${Math.round(value)}` : '-'
 
-  // Vertical stem (visible at closer zoom via CSS)
-  const stem = document.createElement('div')
-  stem.className = 'aqi-stem'
-  stem.style.cssText = 'width:1.5px;height:0px;background:rgba(0,0,0,0.25);transition:height 0.3s;'
-
-  // Ground dot
-  const dot = document.createElement('div')
-  dot.className = 'aqi-ground-dot'
-  dot.style.cssText = 'width:4px;height:2px;border-radius:50%;background:rgba(0,0,0,0.15);transition:opacity 0.3s;opacity:0;'
-
   container.appendChild(marker)
-  container.appendChild(stem)
-  container.appendChild(dot)
   return container
 }
 
@@ -152,6 +140,7 @@ export function ForecastMap({
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<mapboxgl.Map | null>(null)
   const markersRef = useRef<mapboxgl.Marker[]>([])
+  const markersShownRef = useRef(false)
   const mapLoaded = useRef(false)
   const [zoomLevel, setZoomLevel] = useState(4.2)
   const [mapUnavailable, setMapUnavailable] = useState(false)
@@ -229,8 +218,8 @@ export function ForecastMap({
       center: [69.3459, 30.3],
       zoom: 4.2,
       projection: 'globe',
-      maxZoom: 18,
-      minZoom: 2,
+      maxZoom: 16,
+      minZoom: 3.6,
       pitch: 30,
       bearing: -10,
       maxPitch: 85,
@@ -242,7 +231,9 @@ export function ForecastMap({
       if (status === 404 || status === 400 || ev?.sourceId || ev?.tile) return
       console.warn('[forecast map] error', ev?.error?.message ?? ev)
     })
-    map.current.getCanvas().addEventListener('webglcontextlost', () => setMapUnavailable(true))
+    const thisMap = map.current
+    thisMap.getCanvas().addEventListener('webglcontextlost', (e) => { e.preventDefault(); if (map.current === thisMap) setMapUnavailable(true) })
+    thisMap.getCanvas().addEventListener('webglcontextrestored', () => { if (map.current === thisMap) setMapUnavailable(false) })
 
     map.current.on('load', async () => {
       if (!map.current) return
@@ -763,19 +754,16 @@ export function ForecastMap({
     if (!map.current) return
     const zoom = map.current.getZoom()
     const visible = zoom >= MARKER_MIN_ZOOM
-    const close = zoom >= 10  // stems appear at city zoom
-    for (const marker of markersRef.current) {
-      if (visible) {
-        marker.addTo(map.current!)
-        // Animate stems at close zoom
-        const el = marker.getElement()
-        const stem = el.querySelector('.aqi-stem') as HTMLElement
-        const dot = el.querySelector('.aqi-ground-dot') as HTMLElement
-        if (stem) stem.style.height = close ? '18px' : '0px'
-        if (dot) dot.style.opacity = close ? '1' : '0'
-      } else {
-        marker.remove()
+    const compact = zoom < 8 // small plain discs until there is room for the numbers
+    if (visible !== markersShownRef.current) {
+      markersShownRef.current = visible
+      for (const marker of markersRef.current) {
+        if (visible) marker.addTo(map.current!)
+        else marker.remove()
       }
+    }
+    for (const marker of markersRef.current) {
+      marker.getElement().classList.toggle('aqi-marker-compact', compact)
     }
   }
 
@@ -785,6 +773,7 @@ export function ForecastMap({
 
     markersRef.current.forEach(m => m.remove())
     markersRef.current = []
+    markersShownRef.current = false
 
     if (!showStations) return
 
@@ -860,11 +849,7 @@ export function ForecastMap({
         if (entry.ramp_detected) {
           const inner = el.querySelector('.aqi-marker') as HTMLElement
           if (inner) {
-            inner.style.boxShadow = `
-              0 0 0 4px ${BAND_COLORS[band] || '#9ca3af'}60,
-              0 0 16px ${BAND_COLORS[band] || '#9ca3af'}80,
-              0 2px 4px rgba(0, 0, 0, 0.3)
-            `
+            inner.style.boxShadow = `0 0 0 3px ${BAND_COLORS[band] || '#9ca3af'}66, 0 1px 3px rgba(15, 23, 42, 0.35)`
           }
         }
 
@@ -1089,11 +1074,11 @@ export function ForecastMap({
       <div className="absolute top-3 right-3 z-10 flex items-center gap-2">
         {/* Network filter badge (conditional) */}
         {networkFilter && (
-          <div className="flex items-center gap-1.5 bg-slate-800/85 backdrop-blur-sm rounded-lg px-3 py-1.5 shadow-lg ring-1 ring-white/10 text-[11px] font-medium text-slate-200">
+          <div className="flex items-center gap-1.5 bg-white/85 backdrop-blur-xl rounded-xl px-3 py-1.5 shadow-lg ring-1 ring-black/5 text-[11px] font-medium text-slate-800">
             <span>{networkFilter}</span>
             <button
               onClick={onClearNetworkFilter}
-              className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-white/15 hover:bg-white/25 text-white/70 text-xs leading-none"
+              className="ml-1 w-4 h-4 flex items-center justify-center rounded-full bg-slate-900/10 hover:bg-slate-900/20 text-slate-700 text-xs leading-none"
             >
               &times;
             </button>
@@ -1101,44 +1086,42 @@ export function ForecastMap({
         )}
 
         {/* Timeline pill */}
-        <div className="flex items-center gap-1.5 bg-slate-800/85 backdrop-blur-sm rounded-lg px-2 py-1.5 shadow-lg ring-1 ring-white/10">
+        <div className="flex items-center gap-1.5 bg-white/85 backdrop-blur-xl rounded-xl px-2 py-1.5 shadow-lg ring-1 ring-black/5">
           <button
             onClick={() => { if (selectedHorizon > 0) onHorizonChange(selectedHorizon - 1) }}
             disabled={selectedHorizon <= 0}
-            className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30 transition-colors shrink-0"
+            className="p-1 rounded-md hover:bg-slate-900/[0.06] disabled:opacity-30 transition-colors shrink-0"
           >
-            <svg className="w-3.5 h-3.5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
+            <svg className="w-3.5 h-3.5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" /></svg>
           </button>
 
-          <div className="text-center min-w-[110px] text-[12px] font-semibold text-white shrink-0">
+          <div className="text-center min-w-[110px] text-[12px] font-semibold text-slate-900 shrink-0">
             {steps[selectedHorizon].label}
           </div>
 
           <button
             onClick={() => { if (selectedHorizon < 3) onHorizonChange(selectedHorizon + 1) }}
             disabled={selectedHorizon >= 3}
-            className="p-1 rounded-md hover:bg-white/10 disabled:opacity-30 transition-colors shrink-0"
+            className="p-1 rounded-md hover:bg-slate-900/[0.06] disabled:opacity-30 transition-colors shrink-0"
           >
-            <svg className="w-3.5 h-3.5 text-white/70" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
+            <svg className="w-3.5 h-3.5 text-slate-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" /></svg>
           </button>
 
-          {/* Dot indicators instead of slider */}
-          <div className="flex items-center gap-1 ml-1">
+          {/* Day selector */}
+          <div className="flex items-center gap-0.5 ml-1 rounded-md bg-slate-900/[0.06] p-0.5" role="group" aria-label="Forecast day">
             {steps.map((s, i) => (
               <button
                 key={i}
                 onClick={() => onHorizonChange(i)}
-                className={`w-1.5 h-1.5 rounded-full transition-colors ${
-                  i === selectedHorizon ? 'bg-amber-400' : 'bg-white/25 hover:bg-white/40'
+                aria-pressed={i === selectedHorizon}
+                className={`rounded px-2 py-0.5 text-[11px] font-medium transition-colors ${
+ i === selectedHorizon ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-600 hover:text-slate-900'
                 }`}
-              />
+              >
+                {i === 0 ? 'Today' : `+${i}d`}
+              </button>
             ))}
           </div>
-        </div>
-
-        {/* Zoom level indicator */}
-        <div className="px-2 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg ring-1 ring-white/10 text-[11px] font-mono text-white/70 tabular-nums">
-          z{zoomLevel.toFixed(1)}
         </div>
 
       </div>
@@ -1158,38 +1141,38 @@ export function ForecastMap({
       {/* PM2.5 hover readout — upper left, always visible at city zoom */}
       {zoomLevel >= 8 && (
         <div className="absolute top-3 left-3 z-10 pointer-events-none">
-          <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-xl bg-slate-800/90 backdrop-blur-sm shadow-lg ring-1 ring-white/10 min-w-[180px]">
+          <div className="flex items-center gap-3 px-3.5 py-2.5 rounded-2xl bg-white/85 backdrop-blur-xl shadow-lg ring-1 ring-black/5 min-w-[180px]">
             {hoverPM25 ? (
               <>
                 <div className="text-center min-w-[44px]">
-                  <div className="text-2xl font-bold tabular-nums leading-none" style={{ color: pm25Color(hoverPM25.pm25) }}>
+                  <div className="text-2xl font-semibold tabular-nums leading-none text-slate-900">
                     {Math.round(hoverPM25.pm25)}
                   </div>
-                  <div className="text-[9px] text-slate-400 font-medium mt-0.5">µg/m³</div>
+                  <div className="text-[11px] text-slate-600 font-medium mt-0.5">µg/m³</div>
                 </div>
-                <div className="text-[10px] leading-tight border-l border-white/10 pl-3">
-                  <div className="font-semibold text-white">{hoverPM25.label || 'PM2.5'}</div>
-                  <div className="text-slate-500">{classifyPm25(hoverPM25.pm25).label}</div>
+                <div className="text-[11px] leading-tight border-white/10 pl-3">
+                  <div className="font-semibold text-slate-900">{hoverPM25.label || 'PM2.5'}</div>
+                  <span className="mt-0.5 inline-block rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ background: pm25Color(hoverPM25.pm25), color: classifyPm25(hoverPM25.pm25).textColor }}>{classifyPm25(hoverPM25.pm25).label}</span>
                 </div>
                 {hoverPM25.population != null && hoverPM25.population > 0 && (
-                  <div className="text-center border-l border-white/10 pl-3 min-w-[40px]">
-                    <div className="text-lg font-bold tabular-nums leading-none text-purple-300">
+                  <div className="text-center border-white/10 pl-3 min-w-[40px]">
+                    <div className="text-lg font-semibold tabular-nums leading-none text-slate-900">
                       {hoverPM25.population >= 1000 ? `${(hoverPM25.population / 1000).toFixed(1)}k` : Math.round(hoverPM25.population)}
                     </div>
-                    <div className="text-[8px] text-slate-500 font-medium mt-0.5">pop/km²</div>
+                    <div className="text-[11px] text-slate-500 font-medium mt-0.5">pop/km²</div>
                   </div>
                 )}
                 {hoverPM25.popWeightedPM25 != null && hoverPM25.popWeightedPM25 > 0 && (
-                  <div className="text-center border-l border-white/10 pl-3 min-w-[36px]">
-                    <div className="text-sm font-bold tabular-nums leading-none text-purple-400/70">
+                  <div className="text-center border-white/10 pl-3 min-w-[36px]">
+                    <div className="text-sm font-semibold tabular-nums leading-none text-slate-900">
                       {Math.round(hoverPM25.popWeightedPM25)}
                     </div>
-                    <div className="text-[7px] text-slate-500 font-medium mt-0.5">city avg</div>
+                    <div className="text-[11px] text-slate-500 font-medium mt-0.5">city avg</div>
                   </div>
                 )}
               </>
             ) : (
-              <div className="text-[11px] text-slate-400">
+              <div className="text-[11px] text-slate-500">
                 Hover over map to see PM2.5
               </div>
             )}
@@ -1202,59 +1185,59 @@ export function ForecastMap({
         {/* Layer toggle buttons */}
         <div className="flex items-center gap-1">
           <button
-            onPointerDown={(e) => { e.stopPropagation(); onToggleStations?.(); if (!onToggleStations) setShowStationsLocal(v => !v) }}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
-              showStations ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => { onToggleStations?.(); if (!onToggleStations) setShowStationsLocal(v => !v) }}
+            className={`w-9 h-9 rounded-xl backdrop-blur-xl ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+ showStations ? 'bg-white/90 ring-black/5 shadow-lg' : 'bg-white/60 ring-black/5 opacity-80'
             }`}
-            title={showStations ? 'Hide stations' : 'Show stations'}
+            title={showStations ? 'Hide stations' : 'Show stations'} aria-label={showStations ? 'Hide stations' : 'Show stations'} aria-pressed={!!showStations}
           >
-            <svg className={`w-3.5 h-3.5 ${showStations ? 'text-amber-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-4 h-4 ${showStations ? 'text-amber-600' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z" />
               <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z" />
             </svg>
           </button>
           <button
-            onPointerDown={(e) => { e.stopPropagation(); onToggleSatellite?.(); if (!onToggleSatellite) setShowSatelliteLocal(v => !v) }}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
-              showSatellite ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => { onToggleSatellite?.(); if (!onToggleSatellite) setShowSatelliteLocal(v => !v) }}
+            className={`w-9 h-9 rounded-xl backdrop-blur-xl ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+ showSatellite ? 'bg-white/90 ring-black/5 shadow-lg' : 'bg-white/60 ring-black/5 opacity-80'
             }`}
-            title={showSatellite ? 'Hide PM2.5' : 'Show PM2.5'}
+            title={showSatellite ? 'Hide PM2.5' : 'Show PM2.5'} aria-label={showSatellite ? 'Hide PM2.5' : 'Show PM2.5'} aria-pressed={!!showSatellite}
           >
-            <svg className={`w-3.5 h-3.5 ${showSatellite ? 'text-indigo-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-4 h-4 ${showSatellite ? 'text-indigo-600' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M7.5 3.75H6A2.25 2.25 0 003.75 6v1.5M16.5 3.75H18A2.25 2.25 0 0120.25 6v1.5m0 9V18A2.25 2.25 0 0118 20.25h-1.5m-9 0H6A2.25 2.25 0 013.75 18v-1.5" />
               <circle cx="12" cy="12" r="3" />
             </svg>
           </button>
           <button
-            onPointerDown={(e) => { e.stopPropagation(); onToggleWind?.(); if (!onToggleWind) setShowWindLocal(v => !v) }}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
-              showWind ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => { onToggleWind?.(); if (!onToggleWind) setShowWindLocal(v => !v) }}
+            className={`w-9 h-9 rounded-xl backdrop-blur-xl ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+ showWind ? 'bg-white/90 ring-black/5 shadow-lg' : 'bg-white/60 ring-black/5 opacity-80'
             }`}
-            title={showWind ? 'Hide wind' : 'Show wind'}
+            title={showWind ? 'Hide wind' : 'Show wind'} aria-label={showWind ? 'Hide wind' : 'Show wind'} aria-pressed={!!showWind}
           >
-            <svg className={`w-3.5 h-3.5 ${showWind ? 'text-sky-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-4 h-4 ${showWind ? 'text-sky-600' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M9.59 4.59A2 2 0 1111 8H2m10.59 11.41A2 2 0 1014 16H2m15.73-8.27A2.5 2.5 0 1119.5 12H2" />
             </svg>
           </button>
           <button
-            onPointerDown={(e) => { e.stopPropagation(); onToggleFires?.(); if (!onToggleFires) setShowFiresLocal(v => !v) }}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
-              showFires ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => { onToggleFires?.(); if (!onToggleFires) setShowFiresLocal(v => !v) }}
+            className={`w-9 h-9 rounded-xl backdrop-blur-xl ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+ showFires ? 'bg-white/90 ring-black/5 shadow-lg' : 'bg-white/60 ring-black/5 opacity-80'
             }`}
-            title={showFires ? 'Hide fires' : 'Show fires'}
+            title={showFires ? 'Hide fires' : 'Show fires'} aria-label={showFires ? 'Hide fires' : 'Show fires'} aria-pressed={!!showFires}
           >
-            <svg className={`w-3.5 h-3.5 ${showFires ? 'text-orange-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-4 h-4 ${showFires ? 'text-orange-600' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15.362 5.214A8.252 8.252 0 0112 21 8.25 8.25 0 016.038 7.048 8.287 8.287 0 009 9.6a8.983 8.983 0 013.361-6.867 8.21 8.21 0 003 2.48z" />
             </svg>
           </button>
           <button
-            onPointerDown={(e) => { e.stopPropagation(); onTogglePopulation?.(); if (!onTogglePopulation) setShowPopulationLocal(v => !v) }}
-            className={`w-7 h-7 rounded-lg backdrop-blur-sm ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
-              showPopulation ? 'bg-slate-800/85 ring-white/10' : 'bg-slate-800/50 ring-white/5 opacity-60'
+            onPointerDown={(e) => e.stopPropagation()} onClick={() => { onTogglePopulation?.(); if (!onTogglePopulation) setShowPopulationLocal(v => !v) }}
+            className={`w-9 h-9 rounded-xl backdrop-blur-xl ring-1 flex items-center justify-center transition-all cursor-pointer pointer-events-auto ${
+ showPopulation ? 'bg-white/90 ring-black/5 shadow-lg' : 'bg-white/60 ring-black/5 opacity-80'
             }`}
-            title={showPopulation ? 'Hide population' : 'Show population'}
+            title={showPopulation ? 'Hide population' : 'Show population'} aria-label={showPopulation ? 'Hide population' : 'Show population'} aria-pressed={!!showPopulation}
           >
-            <svg className={`w-3.5 h-3.5 ${showPopulation ? 'text-purple-400' : 'text-white/25'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-4 h-4 ${showPopulation ? 'text-purple-600' : 'text-slate-400'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
             </svg>
           </button>
@@ -1263,10 +1246,10 @@ export function ForecastMap({
         {/* Fire count */}
         {showFires && firesGeoJSON && (
           <div
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-slate-800/85 backdrop-blur-sm shadow-lg text-[11px] font-medium ring-1 ${fireLabel.warn ? 'text-amber-300 ring-amber-400/40' : 'text-amber-400 ring-white/10'}`}
-            title={firesGeoJSON.last_successful_fetch ? `Satellite fire detections · fetched ${firesGeoJSON.last_successful_fetch}` : 'Satellite fire detections'}
+            className={`flex items-center gap-1.5 px-3 py-2 rounded-xl bg-white/85 backdrop-blur-xl shadow-lg text-[12px] font-medium ring-1 ${fireLabel.warn ? 'text-amber-800 ring-amber-500/40' : 'text-amber-800 ring-amber-500/30'}`}
+            title={firesGeoJSON.last_successful_fetch ? `Satellite fire detections, fetched ${firesGeoJSON.last_successful_fetch}` : 'Satellite fire detections'}
           >
-            <svg className="w-3.5 h-3.5 text-orange-400" fill="currentColor" viewBox="0 0 24 24">
+            <svg className="w-3.5 h-3.5 text-orange-600" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 23c-3.6 0-8-3.2-8-9.1C4 7.4 11.3 1.3 11.6 1.1a.7.7 0 01.9 0c.2.2 7.5 6.3 7.5 12.8 0 5.9-4.4 9.1-8 9.1zm0-19.6C10 5.5 6 10.2 6 13.9 6 18.5 9.3 21 12 21s6-2.5 6-7.1c0-3.7-4-8.4-6-10.5z"/>
               <path d="M12 21c-2 0-4-1.6-4-4.6 0-2.4 3.3-5.5 3.5-5.6a.7.7 0 01.9 0c.2.1 3.6 3.2 3.6 5.6 0 3-2 4.6-4 4.6zm0-8c-1.2 1.3-2 3-2 3.4 0 2 1.2 3 2 3s2-1 2-3c0-.5-.8-2.1-2-3.4z"/>
             </svg>
@@ -1296,21 +1279,6 @@ export function ForecastMap({
         }
         .mapboxgl-popup-tip {
           border-top-color: white !important;
-        }
-        .mapboxgl-ctrl-attrib {
-          display: none !important;
-        }
-        /* 3D marker floating effect */
-        .aqi-marker-container {
-          filter: drop-shadow(0 3px 4px rgba(0,0,0,0.2));
-          transition: filter 0.3s;
-        }
-        .aqi-marker-container:hover {
-          filter: drop-shadow(0 6px 8px rgba(0,0,0,0.3));
-          transform: translateY(-2px);
-        }
-        .aqi-marker-container:hover .aqi-stem {
-          height: 22px !important;
         }
       `}</style>
     </div>

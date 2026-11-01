@@ -1,7 +1,6 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { useOptionalSelection } from '@/lib/selection'
 import { formatPkt, relativeAge } from '@/lib/time'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://hawanama-152782825429.asia-south1.run.app'
@@ -30,19 +29,16 @@ async function fetchFreshness(): Promise<{ status: string; sources: FreshnessSou
  * newest station observation, and historical browsing is labelled as such.
  */
 export function FreshnessBadge() {
-  const selection = useOptionalSelection()
   const { data, isError } = useQuery({ queryKey: ['health-freshness'], queryFn: fetchFreshness, refetchInterval: 5 * 60 * 1000, staleTime: 60 * 1000 })
 
   const stations = data?.sources?.find(s => s.source === 'airvisual' && s.scope_type === 'station')
   const age = stations?.age_min ?? null
   const ok = age != null && age <= (stations?.threshold_min ?? 180)
-  const dot = isError || age == null ? 'bg-slate-400' : ok ? 'bg-emerald-500' : 'bg-amber-500'
   const label = isError ? 'Status unavailable'
     : age == null ? 'Checking data age…'
     : `Observations ${relativeAge(stations?.latest_ts)}`
   const title = stations?.latest_ts ? `Latest station observation ${formatPkt(stations.latest_ts)}` : undefined
 
-  const historical = selection && selection.date && !selection.isLatest
 
   // Satellite fires: judged by the API from the last ingest run (3-hourly)
   const fires = data?.sources?.find(s => s.source === 'fires')
@@ -57,16 +53,11 @@ export function FreshnessBadge() {
 
   return (
     <div className="flex items-center gap-2 text-slate-600" title={title}>
-      <div className={`w-2 h-2 rounded-full ${dot} ${ok ? 'animate-pulse' : ''}`} />
-      <span>{label}</span>
+      <span className={isError || (age != null && !ok) ? 'text-amber-700' : ''}>{label}</span>
       {firesText && (
-        <span className={`ml-1 hidden sm:inline-flex items-center gap-1 text-[11px] ${firesOk ? 'text-slate-500' : 'text-amber-700'}`} title={firesTitle}>
-          <span className={`w-1.5 h-1.5 rounded-full ${firesOk ? 'bg-orange-400' : 'bg-amber-500'}`} />
+        <span className={`ml-2 hidden sm:inline-flex items-center text-xs ${firesOk ? 'text-slate-500' : 'text-amber-700'}`} title={firesTitle}>
           {firesText}
         </span>
-      )}
-      {historical && (
-        <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] text-slate-600">Historical view · {selection.date}</span>
       )}
     </div>
   )

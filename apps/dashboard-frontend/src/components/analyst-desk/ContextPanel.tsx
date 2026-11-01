@@ -77,7 +77,7 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
 
   if (!stats) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-400 text-xs">
+      <div className="flex items-center justify-center h-full text-slate-500 text-xs">
         Loading brief...
       </div>
     )
@@ -89,42 +89,42 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
   return (
     <div className="flex flex-col h-full overflow-y-auto" style={{ scrollbarWidth: 'none' }}>
       {/* Header */}
-      <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Pakistan Daily Brief</div>
-        <div className="text-sm font-semibold text-slate-800 mt-0.5">{dayLabel} <span className="text-[10px] font-normal text-slate-400">PKT</span></div>
+      <div className="px-4 py-3 border-slate-100">
+        <div className="text-[11px] text-slate-500 font-medium">Pakistan Daily Brief</div>
+        <div className="text-sm font-semibold text-slate-800 mt-0.5">{dayLabel} <span className="text-[11px] font-normal text-slate-500">PKT</span></div>
       </div>
 
       {/* Reporting-station mean */}
-      <div className="px-4 py-3 border-b border-slate-100">
+      <div className="px-4 py-3 border-slate-100">
         <div className="flex items-center justify-between">
           <div>
-            <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider" title="Unweighted mean of the latest hourly PM2.5 across the stations that reported; not an area or population average">
+            <div className="text-[11px] text-slate-500 font-medium" title="Unweighted mean of the latest hourly PM2.5 across the stations that reported; not an area or population average">
               Reporting-station mean
             </div>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-3xl font-bold tabular-nums" style={{ color: bandColor(stats.band) }}>
                 {stats.mean}
               </span>
-              <span className="text-xs text-slate-400">µg/m³ PM2.5</span>
+              <span className="text-xs text-slate-500">µg/m³ PM2.5</span>
             </div>
             <div className="text-[11px] mt-0.5" style={{ color: bandColor(stats.band) }}>
               {bandLabel(stats.band)}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[10px] text-slate-400">Peak station</div>
+            <div className="text-[11px] text-slate-500">Peak station</div>
             <div className="text-lg font-bold text-slate-700 tabular-nums">{stats.max}</div>
-            <div className="text-[10px] text-slate-400">{stats.stationCount} stations reporting</div>
+            <div className="text-[11px] text-slate-500">{stats.stationCount} stations reporting</div>
           </div>
         </div>
-        <div className="mt-2 text-[9px] text-slate-400">
-          Latest hourly readings · {stats.latestObservation ? `last observation ${formatPkt(stats.latestObservation)}` : 'observation time unknown'} · {BAND_SCALE_LABEL}
+        <div className="mt-2 text-[11px] text-slate-500">
+          Latest hourly readings, {stats.latestObservation ? `last observation ${formatPkt(stats.latestObservation)}` : 'observation time unknown'}, {BAND_SCALE_LABEL}
         </div>
       </div>
 
       {/* Band distribution */}
-      <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Stations by category</div>
+      <div className="px-4 py-3 border-slate-100">
+        <div className="text-[11px] text-slate-500 font-medium mb-2">Stations by category</div>
         <div className="flex h-2 rounded-full overflow-hidden gap-px">
           {BAND_KEYS.map(band => {
             const pct = stats.bands[band] / stats.stationCount * 100
@@ -142,8 +142,8 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
           {BAND_KEYS.map(band => {
             if (!stats.bands[band]) return null
             return (
-              <div key={band} className="flex items-center gap-1 text-[10px] text-slate-500" title={bandLabel(band)}>
-                <div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: bandColor(band) }} />
+              <div key={band} className="flex items-center gap-1 text-[11px] text-slate-500" title={bandLabel(band)}>
+                <div className="w-2.5 h-2.5 rounded-[3px]" style={{ backgroundColor: bandColor(band) }} />
                 {stats.bands[band]} {bandLabel(band, true)}
               </div>
             )
@@ -152,20 +152,19 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       </div>
 
       {/* Worst cities */}
-      <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Highest city means</div>
+      <div className="px-4 py-3 border-slate-100">
+        <div className="text-[11px] text-slate-500 font-medium mb-2">Highest city means</div>
         <div className="space-y-1.5">
           {stats.worstCities.map((c, i) => {
             const band = bandKey(c.avg)
             return (
               <div key={c.city} className="flex items-center gap-2">
-                <span className="text-[10px] text-slate-300 font-mono w-3">{i + 1}</span>
-                <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: bandColor(band) }} />
+                <span className="text-[11px] text-slate-300 font-mono w-3">{i + 1}</span>
                 <span className="text-[11px] text-slate-700 flex-1 truncate">{c.city}</span>
                 <span className="text-[11px] font-semibold tabular-nums" style={{ color: bandColor(band) }}>
                   {Math.round(c.avg)}
                 </span>
-                <span className="text-[9px] text-slate-400">({c.count})</span>
+                <span className="text-[11px] text-slate-500">({c.count})</span>
               </div>
             )
           })}
@@ -173,30 +172,30 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       </div>
 
       {/* Alerts row */}
-      <div className="px-4 py-3 border-b border-slate-100">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-2">Evidence</div>
+      <div className="px-4 py-3 border-slate-100">
+        <div className="text-[11px] text-slate-500 font-medium mb-2">Evidence</div>
         <div className="grid grid-cols-2 gap-2">
           <div className="px-2.5 py-2 rounded-lg bg-orange-50 border border-orange-100">
             <div className="text-lg font-bold text-orange-600 tabular-nums">{firesStatus(firesGeoJSON) === 'unavailable' ? '—' : stats.fireCount}</div>
-            <div className={`text-[10px] ${fireLabel.warn ? 'text-amber-700' : 'text-orange-500'}`}>
+            <div className={`text-[11px] ${fireLabel.warn ? 'text-amber-700' : 'text-orange-500'}`}>
               {firesStatus(firesGeoJSON) === 'unavailable' ? 'Fire data unavailable'
                 : firesStatus(firesGeoJSON) === 'stale' ? `Fire detections (${firesGeoJSON?.date})`
-                : `Satellite fire detections${fireLabel.warn ? ` · ${fireLabel.text.split(' · ').slice(1).join(' · ')}` : ''}`}
+                : `Satellite fire detections${fireLabel.warn ? `, ${fireLabel.text.split(', ').slice(1).join(', ')}` : ''}`}
             </div>
           </div>
           <div className="px-2.5 py-2 rounded-lg bg-amber-50 border border-amber-100">
             <div className="text-lg font-bold text-amber-600 tabular-nums">{stats.rampCount}</div>
-            <div className="text-[10px] text-amber-500">Forecast ramp events</div>
+            <div className="text-[11px] text-amber-500">Forecast ramp events</div>
           </div>
         </div>
       </div>
 
       {/* Unhealthy stations */}
       <div className="px-4 py-3">
-        <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider mb-1">
+        <div className="text-[11px] text-slate-500 font-medium mb-1">
           {bad} station{bad === 1 ? '' : 's'} Unhealthy or worse (AQI above 150)
         </div>
-        <div className="text-[10px] text-slate-400 leading-relaxed">
+        <div className="text-[11px] text-slate-500 leading-relaxed">
           {(['hazardous', 'very_unhealthy', 'unhealthy'] as const)
             .filter(k => stats.bands[k] > 0)
             .map((k, i) => (
@@ -206,7 +205,7 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
               </span>
             ))}
           {stats.bands.unhealthy_sensitive > 0 && (
-            <span className="text-slate-400">{bad > 0 ? '; ' : ''}{stats.bands.unhealthy_sensitive} unhealthy for sensitive groups</span>
+            <span className="text-slate-500">{bad > 0 ? '; ' : ''}{stats.bands.unhealthy_sensitive} unhealthy for sensitive groups</span>
           )}
         </div>
       </div>

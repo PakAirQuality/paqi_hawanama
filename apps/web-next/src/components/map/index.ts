@@ -33,7 +33,6 @@ export {
 export {
   calculateDistance,
   calculateBounds,
-  isWithinSouthAsia,
   isWithinPakistan,
   normalizeLongitude,
   normalizeLatitude

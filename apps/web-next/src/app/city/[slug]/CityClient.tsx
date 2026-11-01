@@ -93,7 +93,7 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -117,7 +117,7 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -214,7 +214,7 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
               />
               <div className="min-w-0">
                 <Link href="/" className="text-lg sm:text-2xl font-bold text-foreground truncate block">Hawanama</Link>
-                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">South Asia Air Quality Monitoring</p>
+                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
             <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">

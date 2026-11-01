@@ -53,8 +53,10 @@ export interface SelectionApi extends Selection {
     location: { type: string; id: string; name: string }
     layers: string[]
   }
-  /** One-line human description: "Lahore · PM2.5 µg/m³ · 17 Oct 2026 PKT · Enhanced model" */
+  /** One-line human description: "Lahore, PM2.5 µg/m³, 17 Oct 2026 PKT, Enhanced model" */
   describe: () => string
+  /** The same description as separate parts, for layouts that divide them visually */
+  describeParts: () => string[]
 }
 
 const DEFAULT: Selection = {
@@ -90,13 +92,14 @@ export function SelectionProvider({ children, initial }: { children: React.React
       location: { type: state.location.type, id: state.location.id ?? '', name: state.location.name ?? '' },
       layers: (Object.keys(state.layers) as Array<keyof Selection['layers']>).filter((k) => state.layers[k]),
     })
-    const describe = () => {
+    const describeParts = () => {
       const where = state.location.name || 'Pakistan'
       const when = state.date ? `${formatShort(state.date)} PKT` : 'latest'
       const model = state.model === 'support_aware' ? 'Enhanced model' : 'Satellite model'
-      return `${where} · PM2.5 ${state.units} · ${when} · ${model}`
+      return [where, `PM2.5 ${state.units}`, when, model]
     }
-    return { ...state, setDate, setModel, setLocation, setLayer, toContext, describe }
+    const describe = () => describeParts().join(', ')
+    return { ...state, setDate, setModel, setLocation, setLayer, toContext, describe, describeParts }
   }, [state, setDate, setModel, setLocation, setLayer])
 
   return <SelectionContext.Provider value={api}>{children}</SelectionContext.Provider>

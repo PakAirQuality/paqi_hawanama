@@ -91,7 +91,7 @@ export function SatelliteImage({ lat, lon, name, markerColor, zoom = 'normal', l
         />
         {/* Top-left label */}
         <div className="absolute top-1.5 left-1.5">
-          <span className="text-[10px] font-medium text-white/90 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded">
+          <span className="text-[11px] font-medium text-white/90 bg-black/40 backdrop-blur-sm px-2 py-0.5 rounded">
             {label}
           </span>
         </div>
@@ -112,7 +112,7 @@ export function SatelliteImage({ lat, lon, name, markerColor, zoom = 'normal', l
         </div>
         {/* Bottom attribution */}
         <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-3 py-2">
-          <div className="text-[9px] text-white/60 font-medium">Esri World Imagery — Click to expand</div>
+          <div className="text-[11px] text-white/60 font-medium">Esri World Imagery — Click to expand</div>
         </div>
       </div>
 
@@ -123,13 +123,13 @@ export function SatelliteImage({ lat, lon, name, markerColor, zoom = 'normal', l
           onClick={() => setShowModal(false)}
         >
           <div
-            className="relative max-w-[92vw] max-h-[88vh] rounded-xl overflow-hidden shadow-2xl"
+            className="relative max-w-[92vw] max-h-[88vh] rounded-xl overflow-hidden shadow-lg"
             onClick={e => e.stopPropagation()}
           >
             <div className="absolute top-0 left-0 right-0 z-10 flex items-center justify-between px-4 py-2.5 bg-gradient-to-b from-black/70 to-transparent">
               <div>
                 <div className="text-sm font-semibold text-white">{name}</div>
-                <div className="text-[10px] text-white/60">{lat.toFixed(5)}, {lon.toFixed(5)}</div>
+                <div className="text-[11px] text-white/60">{lat.toFixed(5)}, {lon.toFixed(5)}</div>
               </div>
               <button
                 onClick={() => setShowModal(false)}
@@ -149,7 +149,7 @@ export function SatelliteImage({ lat, lon, name, markerColor, zoom = 'normal', l
               {renderMarker(markerType, markerType === 'aqi' ? 32 : markerType === 'chimney' ? 28 : 18, mColor, aqiValue)}
             </div>
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/50 to-transparent px-4 py-2">
-              <div className="text-[10px] text-white/50">Esri World Imagery</div>
+              <div className="text-[11px] text-white/50">Esri World Imagery</div>
             </div>
           </div>
         </div>

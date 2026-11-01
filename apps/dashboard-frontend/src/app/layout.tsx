@@ -1,8 +1,12 @@
 import "./globals.css";
+import { Inter } from "next/font/google";
+
+// Inter: clean, even numerals with tabular and open-digit alternates for figures
+const inter = Inter({ subsets: ["latin"], display: "swap", variable: "--font-inter" });
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" className={inter.variable}>
       <head>
         <title>Hawanama Analyst Dashboard: Pakistan PM2.5 model, observations and fires</title>
         <meta name="description" content="Public analyst dashboard of the Pakistan Air Quality Initiative: daily 1 km PM2.5 model estimates, ground observations, satellite fire detections and forecasts for Pakistan, with open data." />

@@ -4,8 +4,9 @@ import { useRef, useState, useEffect } from 'react'
 import { canRenderMap, type MapErrorEvent, type MapUnavailableReason } from '@/lib/webgl'
 import { INVENTORY_NOTE, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
 import { formatPkt } from '@/lib/time'
-import { bandKey, normalizeBand, bandColor } from '@/lib/aqi'
+import { bandKey, normalizeBand, bandColor, classifyPm25 } from '@/lib/aqi'
 import { esc } from '@/lib/html'
+import { AqiCard } from '@/components/shared/AqiCard'
 import { Loader2, X } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -19,7 +20,8 @@ mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
 const STYLE_URL = 'mapbox://styles/rehan0900/cmmh9p69z009m01qu0nnn3iwu'
 const INITIAL_CENTER: [number, number] = [69.3459, 30.3]
-const INITIAL_ZOOM = 3.5
+// Opens on the whole country: tighter on large screens, wider on phones so it still fits
+const initialZoom = () => (typeof window !== 'undefined' && window.innerWidth < 768 ? 4 : 4.6)
 
 // Urban cities for 1km downscaler overlay
 const URBAN_CITIES = [
@@ -59,8 +61,13 @@ interface PredictionMapProps {
   /** Station daily means from the page's shared query; when given, the map does not fetch its own copy */
   stations?: StationReading[]
   /** Called when the map cannot render; the page shows a non-map fallback */
-  onMapUnavailable?: (reason: MapUnavailableReason) => void
-  onMapReady?: (flyTo: (lng: number, lat: number, zoom?: number) => void) => void
+  onMapUnavailable?: (reason: MapUnavailableReason | null) => void
+  /** Hands the page a flyTo whose promise resolves when the camera has stopped moving */
+  onMapReady?: (flyTo: (lng: number, lat: number, zoom?: number) => Promise<void>) => void
+  /** A station marker was clicked */
+  onStationClick?: (station: StationReading) => void
+  /** The visitor's position (only passed when it is inside Pakistan) */
+  userLocation?: { lng: number; lat: number } | null
 }
 
 interface SelectedDistrict {
@@ -81,44 +88,43 @@ function pm25ToBand(pm25: number): string {
   return bandKey(pm25)
 }
 
-function bandToMarkerClass(band: string): string {
-  switch (normalizeBand(band)) {
-    case 'good': return 'bg-good'
-    case 'moderate': return 'bg-moderate'
-    case 'unhealthy_sensitive': return 'bg-unhealthy-sensitive'
-    case 'unhealthy': return 'bg-unhealthy'
-    case 'very_unhealthy': return 'bg-very-unhealthy'
-    case 'hazardous': return 'bg-hazardous'
-    default: return 'bg-no-reading'
-  }
-}
+// Dark numerals on the light bands, white on the two darkest (contrast >= 4.5:1 on each fill)
+const LIGHT_TEXT_BANDS = new Set(['very_unhealthy', 'hazardous'])
 
 const BAND_COLORS: Record<string, string> = new Proxy({}, { get: (_t, k: string) => bandColor(k) })
 
-function createMarkerEl(value: number | null | undefined, colorClass: string): HTMLDivElement {
-  const container = document.createElement('div')
-  container.className = 'aqi-marker-container point'
-  container.style.cssText = 'width:28px;display:flex;flex-direction:column;align-items:center;'
-
-  const marker = document.createElement('div')
-  marker.className = `aqi-marker ${colorClass}`
-  marker.textContent = value != null ? `${Math.round(value)}` : '-'
-
-  const stem = document.createElement('div')
-  stem.className = 'aqi-stem'
-  stem.style.cssText = 'width:1.5px;height:0px;background:rgba(0,0,0,0.25);transition:height 0.3s;'
-
-  const dot = document.createElement('div')
-  dot.className = 'aqi-ground-dot'
-  dot.style.cssText = 'width:4px;height:2px;border-radius:50%;background:rgba(0,0,0,0.15);transition:opacity 0.3s;opacity:0;'
-
-  container.appendChild(marker)
-  container.appendChild(stem)
-  container.appendChild(dot)
-  return container
+/** Round marker icon: flat band colour with a soft shadow, no edge. */
+function makeCircleImage(color: string): { data: ImageData; options: { pixelRatio: number } } {
+  const S = 72, r = 28
+  const canvas = document.createElement('canvas')
+  canvas.width = S; canvas.height = S
+  const ctx = canvas.getContext('2d')!
+  ctx.shadowColor = 'rgba(15,23,42,0.30)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1.5
+  ctx.beginPath(); ctx.arc(S / 2, S / 2 - 1, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill()
+  return { data: ctx.getImageData(0, 0, S, S), options: { pixelRatio: 2 } }
 }
 
-export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady }: PredictionMapProps) {
+/** Is the point inside a Polygon or MultiPolygon (holes respected)? */
+function pointInGeometry(lon: number, lat: number, geom: GeoJSON.Geometry): boolean {
+  const inRing = (ring: number[][]) => {
+    let inside = false
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j]
+      if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside
+    }
+    return inside
+  }
+  const inPolygon = (rings: number[][][]) => inRing(rings[0]) && !rings.slice(1).some(inRing)
+  if (geom.type === 'Polygon') return inPolygon(geom.coordinates)
+  if (geom.type === 'MultiPolygon') return geom.coordinates.some(inPolygon)
+  return false
+}
+
+// Zoom range: a whole-country view at the lowest level (fits a phone), street level at the highest
+const MIN_ZOOM = 3.6
+const MAX_ZOOM = 16
+
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onStationClick, userLocation }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -127,7 +133,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   const [hoverPM25, setHoverPM25] = useState<HoverPM25 | null>(null)
 
   // Station markers
-  const markersRef = useRef<mapboxgl.Marker[]>([])
   const [stations, setStations] = useState<StationReading[]>([])
   const stationsRef = useRef<StationReading[]>([])
   const [hoveredStation, setHoveredStation] = useState<StationReading | null>(null)
@@ -141,9 +146,13 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   // used to read the first render's date and model for the rest of the session).
   const selRef = useRef({ selectedDate, model, smoothed })
   selRef.current = { selectedDate, model, smoothed }
+  const loadSourcesRef = useRef<(() => Promise<void>) | null>(null)
+  const sourcesStartedRef = useRef(false)
+  const [sourcesReady, setSourcesReady] = useState(false)
+  const onStationClickRef = useRef(onStationClick)
+  onStationClickRef.current = onStationClick
   const onMapUnavailableRef = useRef(onMapUnavailable)
   onMapUnavailableRef.current = onMapUnavailable
-  const zoomHandlerRef = useRef<(() => void) | null>(null)
   const pointAbortRef = useRef<AbortController | null>(null)
 
   // Refs for urban grid hover (same pattern as ForecastMap)
@@ -199,10 +208,10 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       container: mapContainer.current,
       style: STYLE_URL,
       center: INITIAL_CENTER,
-      zoom: INITIAL_ZOOM,
-      minZoom: 2,
-      maxZoom: 15,
-      attributionControl: false,
+      zoom: initialZoom(),
+      minZoom: MIN_ZOOM,
+      maxZoom: MAX_ZOOM,
+      attributionControl: true,
       transformRequest: (url: string) => {
         if (url.includes('/ops/pipeline/tiles/') || url.includes('/ops/downscaler/tiles/')) {
           return { url }
@@ -225,14 +234,24 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       if (ev?.sourceId || ev?.tile) return
       console.warn('[map] error', ev?.error?.message ?? ev)
     })
-    map.getCanvas().addEventListener('webglcontextlost', () => {
+    // preventDefault lets the browser restore the context; Mapbox then redraws on its own
+    map.getCanvas().addEventListener('webglcontextlost', (e) => {
+      e.preventDefault()
+      if (mapRef.current !== map) return // a removed (stale) map also fires this event
       onMapUnavailableRef.current?.('context-lost')
+    })
+    map.getCanvas().addEventListener('webglcontextrestored', () => {
+      if (mapRef.current !== map) return
+      onMapUnavailableRef.current?.(null)
     })
 
     // Expose flyTo callback to parent
-    onMapReady?.((lng: number, lat: number, zoom?: number) => {
+    onMapReady?.((lng: number, lat: number, zoom?: number) => new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); resolve() }
+      const timer = setTimeout(() => { map.off('moveend', done); resolve() }, 4000) // already there: no move event
+      map.once('moveend', done)
       map.flyTo({ center: [lng, lat], zoom: zoom ?? 12, duration: 1200 })
-    })
+    }))
 
     map.on('load', async () => {
       try {
@@ -316,6 +335,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         }
       }
 
+      // ── Kilns and industry are low priority: loaded in the background, and only once asked for ──
+      loadSourcesRef.current = async () => {
       // ── Brick kilns — secondary explanatory layer, reveals on zoom ──
       //    z<8.5: hidden. z8.5-10: subtle amber dots. z10+: chimney icons. z12+: hover popups.
       try {
@@ -526,6 +547,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         }
       } catch (e) {
         console.warn('[Industry] Failed to load:', e)
+      }
+        setSourcesReady(true)
       }
 
       // 2. District fill layer (transparent, for interaction)
@@ -752,6 +775,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
       map.on('click', 'districts-fill', async (e) => {
         if (!e.features || e.features.length === 0) return
+        // a click on a station marker opens the station panel, not the district card
+        if (map.getLayer('stations-label') && map.queryRenderedFeatures(e.point, { layers: ['stations-label'] }).length > 0) return
         const feature = e.features[0]
         const districtName = feature.properties?.shapeName
         const newId = districtName
@@ -774,9 +799,15 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
         // Find stations in this district by city name match
         const districtLower = (districtName ?? '').toLowerCase()
+        // Match by position (inside the district's boundary), not by city name: names are inconsistent
+        // and an empty city used to match every district.
+        const fullGeom = (districtsGeoJSON.features as GeoJSON.Feature[]).find(f => f.properties?.shapeName === districtName)?.geometry
         const districtStations = stationsRef.current.filter(s => {
+          const lon = s.lon ?? s.longitude
+          const lat = s.lat ?? s.latitude
+          if (fullGeom && lon != null && lat != null) return pointInGeometry(lon, lat, fullGeom)
           const city = (s.city ?? '').toLowerCase()
-          return city.includes(districtLower) || districtLower.includes(city)
+          return city.length > 0 && (city.includes(districtLower) || districtLower.includes(city))
         })
 
         try {
@@ -828,58 +859,120 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     }
   }, [])
 
-  // Render station markers
+  // "You are here" puck
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded || !userLocation) return
+    const el = document.createElement('div')
+    el.setAttribute('role', 'img')
+    el.setAttribute('aria-label', 'Your location')
+    el.style.cssText = 'width:16px;height:16px;border-radius:50%;background:#2563eb;border:3px solid #fff;box-shadow:0 1px 6px rgba(15,23,42,0.45);'
+    const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([userLocation.lng, userLocation.lat]).addTo(mapRef.current)
+    return () => { marker.remove() }
+  }, [userLocation, mapLoaded])
+
+  // Station markers are GL layers (one source, three layers), not DOM nodes: panning and zooming
+  // no longer reposition ~1000 elements per frame and React is not involved in drawing them.
+  const stationsByIdRef = useRef<StationReading[]>([])
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return
+    const map = mapRef.current
 
-    // Remove old markers
-    markersRef.current.forEach(m => m.remove())
-    markersRef.current = []
-
-    const map = mapRef.current!
-
-    for (const stn of stations) {
+    const features: GeoJSON.Feature[] = []
+    stations.forEach((stn, i) => {
       const lat = stn.lat ?? stn.latitude
       const lon = stn.lon ?? stn.longitude
-      if (lat == null || lon == null || stn.pm25 == null) continue
-
+      if (lat == null || lon == null || stn.pm25 == null) return
       const band = pm25ToBand(stn.pm25)
-      const colorClass = bandToMarkerClass(band)
-      const el = createMarkerEl(stn.pm25, colorClass)
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [lon, lat] },
+        properties: {
+          i,
+          label: String(Math.round(stn.pm25)),
+          pm25: stn.pm25,
+          color: bandColor(band),
+          band: normalizeBand(band),
+          text: LIGHT_TEXT_BANDS.has(normalizeBand(band)) ? '#ffffff' : '#111827',
+        },
+      })
+    })
+    stationsByIdRef.current = stations
+    const data: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features }
 
-      el.addEventListener('mouseenter', () => setHoveredStation(stn))
-      el.addEventListener('mouseleave', () => setHoveredStation(null))
-
-      const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
-        .setLngLat([lon, lat])
-
-      markersRef.current.push(marker)
-    }
-
-    // Zoom-based visibility + stem animation (same as analyst desk)
-    const updateVisibility = () => {
-      const zoom = map.getZoom()
-      const visible = zoom >= 4
-      const close = zoom >= 10
-      for (const marker of markersRef.current) {
-        if (visible) {
-          marker.addTo(map)
-          const el = marker.getElement()
-          const stem = el.querySelector('.aqi-stem') as HTMLElement
-          const dot = el.querySelector('.aqi-ground-dot') as HTMLElement
-          if (stem) stem.style.height = close ? '18px' : '0px'
-          if (dot) dot.style.opacity = close ? '1' : '0'
-        } else {
-          marker.remove()
-        }
+    const existing = map.getSource('stations') as mapboxgl.GeoJSONSource | undefined
+    if (existing) {
+      // New day: dip the markers, swap the data, bring them back (reads as one soft change)
+      if (map.getLayer('stations-label')) {
+        map.setPaintProperty('stations-label', 'icon-opacity', 0.15)
+        map.setPaintProperty('stations-label', 'text-opacity', 0.15)
       }
+      existing.setData(data)
+      const t = setTimeout(() => {
+        if (!map.getLayer('stations-label')) return
+        map.setPaintProperty('stations-label', 'icon-opacity', 1)
+        map.setPaintProperty('stations-label', 'text-opacity', 1)
+      }, 180)
+      return () => clearTimeout(t)
     }
-    updateVisibility()
-    // One zoom listener at a time (they used to accumulate on every date change)
-    if (zoomHandlerRef.current) map.off('zoom', zoomHandlerRef.current)
-    zoomHandlerRef.current = updateVisibility
-    map.on('zoom', updateVisibility)
+
+    map.addSource('stations', { type: 'geojson', data })
+    for (const k of ['good', 'moderate', 'unhealthy_sensitive', 'unhealthy', 'very_unhealthy', 'hazardous']) {
+      const id = `station-pill-${k}`
+      if (map.hasImage(id)) continue
+      const { data: img, options } = makeCircleImage(bandColor(k))
+      map.addImage(id, img, options)
+    }
+    // One symbol layer: number inside a round marker. Markers never hide each other (collision
+    // hiding made them flicker while zooming); they shrink at country level, and the numbers
+    // appear once there is room to read them. Higher PM2.5 draws on top.
+    map.addLayer({
+      id: 'stations-label', type: 'symbol', source: 'stations', minzoom: 4,
+      layout: {
+        'icon-image': ['concat', 'station-pill-', ['get', 'band']],
+        'icon-size': ['interpolate', ['linear'], ['zoom'], 4, 0.42, 6, 0.6, 8, 0.85, 10, 1],
+        'text-field': ['step', ['zoom'], '', 8, ['get', 'label']],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 8, 11, 10, 12],
+        'text-font': ['DIN Pro Regular', 'Arial Unicode MS Regular'],
+        'symbol-sort-key': ['get', 'pm25'],
+        'icon-allow-overlap': true,
+        'text-allow-overlap': true,
+        'icon-ignore-placement': true,
+        'text-ignore-placement': true,
+      },
+      paint: {
+        'text-color': ['get', 'text'],
+        'icon-opacity-transition': { duration: 250, delay: 0 },
+        'text-opacity-transition': { duration: 250, delay: 0 },
+      },
+    })
+
+    let hoveredIdx = -1
+    map.on('mousemove', 'stations-label', (e) => {
+      map.getCanvas().style.cursor = 'pointer'
+      const idx = e.features?.[0]?.properties?.i
+      if (typeof idx !== 'number' || idx === hoveredIdx) return
+      hoveredIdx = idx
+      setHoveredStation(stationsByIdRef.current[idx] ?? null)
+    })
+    map.on('click', 'stations-label', (e) => {
+      const idx = e.features?.[0]?.properties?.i
+      if (typeof idx !== 'number') return
+      const stn = stationsByIdRef.current[idx]
+      if (stn) onStationClickRef.current?.(stn)
+    })
+    map.on('mouseleave', 'stations-label', () => {
+      map.getCanvas().style.cursor = ''
+      hoveredIdx = -1
+      setHoveredStation(null)
+    })
   }, [stations, mapLoaded])
+
+  // Start loading kilns and industry the first time either layer is switched on
+  useEffect(() => {
+    if (!mapLoaded || sourcesStartedRef.current || !(showKilns || showIndustry)) return
+    sourcesStartedRef.current = true
+    void loadSourcesRef.current?.()
+  }, [mapLoaded, showKilns, showIndustry])
 
   // Toggle brick kiln layer visibility
   useEffect(() => {
@@ -889,7 +982,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     for (const id of ['brick-kilns-layer', 'brick-kilns-glow', 'brick-kilns-dots']) {
       if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis)
     }
-  }, [showKilns, mapLoaded])
+  }, [showKilns, mapLoaded, sourcesReady])
 
   // Toggle industry layers visibility
   useEffect(() => {
@@ -901,7 +994,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', vis)
       if (map.getLayer(`${layerId}-bg`)) map.setLayoutProperty(`${layerId}-bg`, 'visibility', vis)
     }
-  }, [showIndustry, mapLoaded])
+  }, [showIndustry, mapLoaded, sourcesReady])
 
   // Toggle fire layers visibility
   useEffect(() => {
@@ -1022,24 +1115,20 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
       {/* Station hover tooltip */}
       {hoveredStation && (
-        <div className="absolute top-6 left-6 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 px-3 py-2.5 min-w-[160px]">
-          <div className="text-xs font-semibold text-slate-800">{hoveredStation.name}</div>
-          <div className="text-[10px] text-slate-500 mt-0.5">{hoveredStation.city}</div>
-          <div className="flex items-baseline gap-1 mt-1.5">
-            <div className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: BAND_COLORS[pm25ToBand(hoveredStation.pm25)] || '#9ca3af' }} />
-            <span className="text-lg font-bold text-slate-900">{hoveredStation.pm25.toFixed(1)}</span>
-            <span className="text-xs text-slate-500">µg/m³</span>
-          </div>
-          <div className="text-[10px] text-slate-400 mt-1">
-            Daily Mean (QA){hoveredStation.valid_hours != null ? ` · ${hoveredStation.valid_hours}h` : ''}
-          </div>
+        <div className="absolute bottom-20 left-4 z-20 w-[300px] pointer-events-none max-md:hidden">
+          <AqiCard
+            pm25={hoveredStation.pm25}
+            title={hoveredStation.name}
+            subtitle={hoveredStation.city}
+            caption={hoveredStation.valid_hours != null ? `${hoveredStation.valid_hours}-hour mean PM2.5` : 'Daily mean PM2.5'}
+          />
         </div>
       )}
 
       {/* Urban grid hover readout */}
       {hoverPM25 && !selectedDistrict && !hoveredStation && (
         <div className="absolute bottom-16 left-4 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 px-3 py-2">
-          <div className="text-[10px] text-emerald-600 font-semibold uppercase tracking-wide">{hoverPM25.label}</div>
+          <div className="text-[11px] text-emerald-600 font-semibold tracking-wide">{hoverPM25.label}</div>
           <div className="flex items-baseline gap-1 mt-0.5">
             <span className="text-xl font-bold text-slate-900">{hoverPM25.pm25.toFixed(1)}</span>
             <span className="text-xs text-slate-500">µg/m³</span>
@@ -1048,46 +1137,92 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       )}
 
       {/* Selected district info panel */}
-      {selectedDistrict && (
-        <div className="absolute top-6 left-6 z-20 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200/60 overflow-hidden min-w-[200px]">
-          <div className="flex items-center justify-between px-4 py-3 bg-slate-50 border-b border-slate-200">
-            <h3 className="text-sm font-bold text-slate-800">{selectedDistrict.name}</h3>
-            <button onClick={() => setSelectedDistrict(null)} className="ml-3 text-slate-400 hover:text-slate-600">
-              <X size={14} />
-            </button>
-          </div>
-          <div className="px-4 py-3">
-            <div className="text-[10px] text-slate-500 uppercase tracking-wide font-medium">PM₂.₅ Prediction</div>
-            <div className="flex items-baseline gap-1.5 mt-1">
-              <span className="text-3xl font-bold" style={{ color: selectedDistrict.pm25 != null ? BAND_COLORS[pm25ToBand(selectedDistrict.pm25)] : '#94a3b8' }}>
-                {selectedDistrict.pm25 !== null ? selectedDistrict.pm25.toFixed(1) : '—'}
-              </span>
-              <span className="text-sm text-slate-500">μg/m³</span>
-            </div>
-            {selectedDistrict.stations.length > 0 && (
-              <div className="mt-2 pt-2 border-t border-slate-100">
-                <div className="text-[10px] text-slate-500 uppercase tracking-wide font-medium mb-1">
-                  Observed ({selectedDistrict.stations.length} station{selectedDistrict.stations.length > 1 ? 's' : ''})
-                </div>
-                {selectedDistrict.stations.map((stn, i) => (
-                  <div key={i} className="flex items-center justify-between text-[11px] py-0.5">
-                    <span className="text-slate-600 truncate max-w-[120px]">{stn.name}</span>
-                    <span className="font-semibold tabular-nums ml-2" style={{ color: BAND_COLORS[pm25ToBand(stn.pm25)] }}>
-                      {stn.pm25.toFixed(1)}
+      {selectedDistrict && (() => {
+        const dBand = selectedDistrict.pm25 != null ? classifyPm25(selectedDistrict.pm25) : null
+        const rows = [...selectedDistrict.stations].sort((x, y) => y.pm25 - x.pm25)
+        return (
+          <section
+            aria-label={`${selectedDistrict.name} district`}
+            className="absolute top-4 left-4 z-20 w-[300px] max-h-[calc(100%-330px)] max-md:top-auto max-md:bottom-[104px] max-md:left-3 max-md:right-3 max-md:w-auto max-md:max-h-[45%] flex flex-col overflow-hidden rounded-2xl text-slate-900"
+            style={{
+              background: 'rgba(255,255,255,0.82)',
+              backdropFilter: 'blur(20px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+              border: '1px solid rgba(15,23,42,0.08)',
+              boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+            }}
+          >
+            {/* Header block takes the band colour, like the station card */}
+            <div
+              style={dBand ? { background: dBand.color, color: LIGHT_TEXT_BANDS.has(dBand.key) ? '#ffffff' : '#111827' } : undefined}
+            >
+              <div className="flex items-center justify-between gap-2 px-4 pt-3.5">
+                <h3 className="text-[15px] font-semibold tracking-tight truncate">{selectedDistrict.name}</h3>
+                <button
+                  onClick={() => setSelectedDistrict(null)}
+                  aria-label="Close district panel"
+                  className="-mr-1.5 rounded-lg p-1.5 opacity-70 hover:bg-black/10 hover:opacity-100 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div className="px-4 pt-2 pb-4">
+                <div className="text-xs opacity-80">Modelled PM₂.₅</div>
+                <div className="mt-1 flex flex-col items-start gap-2.5">
+                  <div className="flex items-baseline gap-1.5 whitespace-nowrap">
+                    <span className="text-[34px] leading-none font-semibold tabular-nums tracking-tight">
+                      {selectedDistrict.pm25 !== null ? selectedDistrict.pm25.toFixed(1) : '—'}
                     </span>
+                    <span className="text-xs opacity-80">µg/m³</span>
                   </div>
-                ))}
+                  {dBand && (
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-semibold whitespace-nowrap"
+                      style={{ background: LIGHT_TEXT_BANDS.has(dBand.key) ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.6)' }}
+                    >
+                      {dBand.label}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {rows.length > 0 && (
+              <div className="min-h-0 flex flex-col border-slate-900/[0.07]">
+                <div className="px-4 pt-2.5 pb-1 text-xs font-semibold text-slate-600">
+                  {rows.length} observed station{rows.length > 1 ? 's' : ''}
+                </div>
+                <ul className="overflow-y-auto px-2 pb-2">
+                  {rows.map((stn, i) => (
+                    <li key={i} className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-[13px] hover:bg-slate-900/[0.04]">
+                      <span className="truncate text-slate-800">{stn.name}</span>
+                      {(() => {
+                        const b = classifyPm25(stn.pm25)
+                        return (
+                          <span
+                            className="min-w-[40px] shrink-0 rounded-full px-2.5 py-0.5 text-center text-xs font-semibold tabular-nums"
+                            style={{ background: b.color, color: LIGHT_TEXT_BANDS.has(b.key) ? '#ffffff' : '#111827' }}
+                            title={b.label}
+                          >
+                            {Math.round(stn.pm25)}
+                          </span>
+                        )
+                      })()}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
-          </div>
-        </div>
-      )}
+          </section>
+        )
+      })()}
 
       {/* District hover tooltip removed — district name visible on click in sidebar */}
 
       {!mapLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100">
-          <Loader2 className="w-8 h-8 animate-spin text-blue-500" />
+          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
         </div>
       )}
     </div>

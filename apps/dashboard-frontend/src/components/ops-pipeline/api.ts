@@ -15,7 +15,7 @@ import type {
   StationDailyResponse,
 } from './types'
 
-export const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
 
 // The dashboard is a public read-only site: every route it calls is public and
 // rate-limited server-side. Never put a credential here; NEXT_PUBLIC_* values are

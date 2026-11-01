@@ -126,7 +126,7 @@ export function StationTrendPanel({
         </button>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-slate-800 truncate">{station.station_name}</p>
-          <p className="text-[10px] text-slate-400">{selectedHours <= 72 ? `${selectedHours}h` : `${selectedHours / 24}d`} PM2.5 Trend</p>
+          <p className="text-[11px] text-slate-500">{selectedHours <= 72 ? `${selectedHours}h` : `${selectedHours / 24}d`} PM2.5 Trend</p>
         </div>
       </div>
 
@@ -136,8 +136,8 @@ export function StationTrendPanel({
           <button
             key={opt.hours}
             onClick={() => setSelectedHours(opt.hours)}
-            className={`flex-1 px-2 py-1 rounded-md text-[10px] font-medium transition-colors ${
-              selectedHours === opt.hours
+            className={`flex-1 px-2 py-1 rounded-md text-[11px] font-medium transition-colors ${
+ selectedHours === opt.hours
                 ? 'bg-slate-800 text-white'
                 : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
             }`}
@@ -157,7 +157,7 @@ export function StationTrendPanel({
             ['Max', stats.max],
           ] as [string, number][]).map(([label, val]) => (
             <div key={label} className="rounded-md px-2 py-1.5 text-center" style={{ backgroundColor: getPM25Color(val) + '22' }}>
-              <div className="text-[10px] text-slate-500">{label}</div>
+              <div className="text-[11px] text-slate-500">{label}</div>
               <div className="text-sm font-bold" style={{ color: getPM25Color(val) }}>{Math.round(val)}</div>
             </div>
           ))}
@@ -166,11 +166,11 @@ export function StationTrendPanel({
 
       {/* Chart */}
       {loading ? (
-        <div className="h-[180px] flex items-center justify-center text-slate-400 text-xs">Loading...</div>
+        <div className="h-[180px] flex items-center justify-center text-slate-500 text-xs">Loading...</div>
       ) : error ? (
         <div className="h-[180px] flex items-center justify-center text-red-400 text-xs">{error}</div>
       ) : chartData.length === 0 ? (
-        <div className="h-[180px] flex items-center justify-center text-slate-400 text-xs">No readings found</div>
+        <div className="h-[180px] flex items-center justify-center text-slate-500 text-xs">No readings found</div>
       ) : (
         <div className="bg-white border border-slate-100 rounded-lg p-2">
           <div style={{ width: '100%', height: 180 }}>
@@ -284,7 +284,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
 
   if (stations.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full text-slate-400 text-xs">
+      <div className="flex items-center justify-center h-full text-slate-500 text-xs">
         No stations in current view
       </div>
     )
@@ -294,7 +294,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
     <div className="overflow-y-auto px-3 py-3 space-y-4">
       {/* PM2.5 Distribution */}
       <div>
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">PM2.5 Distribution</p>
+        <p className="text-[11px] font-semibold text-slate-500 mb-1.5">PM2.5 Distribution</p>
         <div style={{ height: 160 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={histogramData} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
@@ -316,7 +316,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
 
       {/* Risk Bands */}
       <div>
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Risk Bands</p>
+        <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Risk Bands</p>
         <div style={{ height: 180 }} className="relative">
           <ResponsiveContainer width="100%" height="100%">
             <PieChart>
@@ -341,7 +341,7 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
           <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div className="text-center">
               <div className="text-lg font-bold text-slate-800">{stations.length}</div>
-              <div className="text-[10px] text-slate-500">total</div>
+              <div className="text-[11px] text-slate-500">total</div>
             </div>
           </div>
         </div>
@@ -349,12 +349,12 @@ export function AnalystPanel({ stations }: { stations: TrayStation[] }) {
 
       {/* Top Cities */}
       <div>
-        <p className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider mb-1.5">Top Cities (Mean PM2.5)</p>
+        <p className="text-[11px] font-semibold text-slate-500 mb-1.5">Top Cities (Mean PM2.5)</p>
         <div style={{ height: 200 }}>
           <ResponsiveContainer width="100%" height="100%">
             <BarChart data={topCities} layout="vertical" margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
               <XAxis type="number" tick={{ fontSize: 10 }} />
-              <YAxis dataKey="city" type="category" width={70} tick={{ fontSize: 9 }} />
+              <YAxis dataKey="city" type="category" width={70} tick={{ fontSize: 11 }} />
               <Tooltip
                 formatter={(value?: number) => [`${value} µg/m³`, 'Mean PM2.5']}
                 contentStyle={{ fontSize: 12, borderRadius: 8 }}
@@ -413,13 +413,13 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
 
   return (
     <div
-      className={`absolute bottom-0 left-0 right-0 z-20 bg-white/95 backdrop-blur-md border-t border-slate-200 shadow-2xl transition-transform duration-300 ${
+      className={`absolute bottom-0 left-0 right-0 z-20 bg-white/95 backdrop-blur-md border-slate-200 shadow-lg transition-transform duration-300 ${
         visible ? 'translate-y-0' : 'translate-y-full'
       }`}
       style={{ height: '40%' }}
     >
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-slate-100">
+      <div className="flex items-center justify-between px-4 py-2 border-slate-100">
         <div className="flex items-center gap-2">
           <h3 className="text-sm font-semibold text-slate-800">Station Analytics</h3>
           <span className="text-xs text-slate-500 bg-slate-100 rounded-full px-2 py-0.5">
@@ -438,7 +438,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
 
       {/* Charts */}
       {stations.length === 0 ? (
-        <div className="flex items-center justify-center h-[calc(100%-44px)] text-slate-400 text-sm">
+        <div className="flex items-center justify-center h-[calc(100%-44px)] text-slate-500 text-sm">
           No stations in current view
         </div>
       ) : (
@@ -493,7 +493,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
                 <div className="text-center">
                   <div className="text-lg font-bold text-slate-800">{stations.length}</div>
-                  <div className="text-[10px] text-slate-500">total</div>
+                  <div className="text-[11px] text-slate-500">total</div>
                 </div>
               </div>
             </div>
@@ -506,7 +506,7 @@ export function AnalystTray({ visible, onClose, stations }: AnalystTrayProps) {
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topCities} layout="vertical" margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
                   <XAxis type="number" tick={{ fontSize: 10 }} />
-                  <YAxis dataKey="city" type="category" width={70} tick={{ fontSize: 9 }} />
+                  <YAxis dataKey="city" type="category" width={70} tick={{ fontSize: 11 }} />
                   <Tooltip
                     formatter={(value?: number) => [`${value} µg/m³`, 'Mean PM2.5']}
                     contentStyle={{ fontSize: 12, borderRadius: 8 }}

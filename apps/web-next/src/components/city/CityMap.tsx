@@ -21,7 +21,7 @@ interface CityMapProps {
 }
 
 export default function CityMap({ 
-  center = [78, 22], // South Asia center
+  center = [69.35, 30.0], // Pakistan center
   zoom = 11,
   className = "w-full h-full",
   cityName,
@@ -34,7 +34,7 @@ export default function CityMap({
   // Calculate center from stations if not provided or if using fallback coordinates
   const calculateCenterFromStations = (): [number, number] => {
     if (!stations || stations.length === 0) {
-      return [78, 22] // South Asia center fallback
+      return [69.35, 30.0] // Pakistan center fallback
     }
     
     const validStations = stations.filter(s => 
@@ -43,7 +43,7 @@ export default function CityMap({
     )
     
     if (validStations.length === 0) {
-      return [78, 22] // South Asia center fallback
+      return [69.35, 30.0] // Pakistan center fallback
     }
     
     // Calculate average coordinates

@@ -57,23 +57,19 @@ export function calculateBounds(coordinates: [number, number][]): {
 }
 
 /**
- * Check if a coordinate is within South Asia's approximate bounds
+ * Check if a coordinate is within Pakistan's approximate bounds
  */
-export function isWithinSouthAsia(lat: number, lng: number): boolean {
-  // Approximate bounds of South Asia (Pakistan, India, Bangladesh, Nepal, Sri Lanka)
+export function isWithinPakistan(lat: number, lng: number): boolean {
   const bounds = {
-    north: 37.1,
-    south: 5.9,
-    east: 92.7,
-    west: 60.9
+    north: 37.2,
+    south: 23.5,
+    east: 77.9,
+    west: 60.8
   }
 
   return lat >= bounds.south && lat <= bounds.north &&
          lng >= bounds.west && lng <= bounds.east
 }
-
-/** @deprecated Use isWithinSouthAsia instead */
-export const isWithinPakistan = isWithinSouthAsia
 
 /**
  * Normalize longitude to [-180, 180] range

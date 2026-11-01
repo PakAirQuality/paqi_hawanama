@@ -6,6 +6,7 @@ import type {
   SummaryResponse,
   CurrentStation,
 } from './types'
+import { filterToPakistan } from './pakistan'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
 
@@ -56,7 +57,8 @@ export async function fetchCurrentStations(): Promise<{ stations: CurrentStation
     cache: 'no-store',
   })
   if (!res.ok) throw new Error('Failed to load current stations')
-  return res.json()
+  const data = await res.json()
+  return { ...data, stations: await filterToPakistan<CurrentStation>(data.stations ?? []) }
 }
 
 export type FiresStatus = 'ok' | 'empty' | 'partial' | 'stale' | 'unavailable'

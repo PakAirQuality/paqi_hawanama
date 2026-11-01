@@ -1,10 +1,8 @@
-// Build-time data for static routes and SEO metadata.
+// Build-time data for static routes and SEO metadata. The site is Pakistan only.
 //
 // Writes, under src/static/:
 //   citySlugs.json  - unique city slugs (generateStaticParams for /city/[slug])
-//   stationIds.json - station hash ids (generateStaticParams for /station/[id]);
-//                     the union of the live map list and the previously committed list,
-//                     so existing station URLs never disappear
+//   stationIds.json - station hash ids (generateStaticParams for /station/[id])
 //   cities.json     - slug, name, state, country, station_count, lat, lon (centroid of its stations)
 //   stations.json   - id, name, city, state, country, lat, lon
 //
@@ -35,9 +33,27 @@ function round(n) {
   return typeof n === 'number' && Number.isFinite(n) ? Math.round(n * 1e5) / 1e5 : null
 }
 
+function pointInRing(lng, lat, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]
+    const [xj, yj] = ring[j]
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
+
+async function loadPakPolygons() {
+  const data = JSON.parse(await fs.readFile(path.join(process.cwd(), 'public', 'pak-boundary.json'), 'utf8'))
+  const geom = data.features[0].geometry
+  return geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates]
+}
+
 async function main() {
   await fs.mkdir(STATIC_DIR, { recursive: true })
-  const existingIds = (await readExisting('stationIds.json')) || []
+  const pakPolygons = await loadPakPolygons()
+  const insideBoundary = (lng, lat) =>
+    pakPolygons.some((p) => pointInRing(lng, lat, p[0]) && !p.slice(1).some((h) => pointInRing(lng, lat, h)))
 
   let citiesRaw, stationsRaw
   try {
@@ -64,12 +80,12 @@ async function main() {
   }
 
   // Stations first, so city centroids can be derived from them.
-  const stations = []
+  const allStations = []
   const seenStation = new Set()
   for (const s of stationList) {
     if (!s.id || seenStation.has(s.id)) continue
     seenStation.add(s.id)
-    stations.push({
+    allStations.push({
       id: s.id,
       name: s.name || `Station ${s.id}`,
       city: s.city || null,
@@ -79,8 +95,8 @@ async function main() {
   }
 
   const byCityName = new Map()
-  for (const s of stations) {
-    if (!s.city || s.lat == null || s.lon == null) continue
+  for (const s of allStations) {
+    if (!s.city || s.lat == null || s.lon == null || !insideBoundary(s.lon, s.lat)) continue
     const acc = byCityName.get(s.city) || { lat: 0, lon: 0, n: 0 }
     acc.lat += s.lat
     acc.lon += s.lon
@@ -114,24 +130,32 @@ async function main() {
   // Attach state/country to stations through the city name (first match wins).
   const cityByName = new Map()
   for (const c of cities) if (!cityByName.has(c.name)) cityByName.set(c.name, c)
-  for (const s of stations) {
+  for (const s of allStations) {
     const c = s.city ? cityByName.get(s.city) : null
     s.state = c?.state ?? null
     s.country = c?.country ?? null
     s.city_slug = c?.slug ?? null
   }
-  stations.sort((a, b) => a.name.localeCompare(b.name))
+
+  // A name match can give the wrong country in either direction (Hyderabad exists in Sindh and
+  // in Telangana), so coordinates decide. The bounding box keeps coastal Karachi stations that
+  // fall just outside the polygon.
+  const inBoundingBox = (s) => s.lat >= 23.5 && s.lat <= 37.2 && s.lon >= 60.8 && s.lon <= 77.9
+  const inPakistan = (s) => s.lat != null && s.lon != null && (insideBoundary(s.lon, s.lat) || (s.country === 'Pakistan' && inBoundingBox(s)))
+  const asPakistani = (s) => (s.country === 'Pakistan' ? s : { ...s, state: null, country: 'Pakistan', city_slug: null })
+  const stations = allStations.filter(inPakistan).map(asPakistani)
 
   // Keep metadata for stations that are not in this hour's live feed (they may have dropped
-  // out temporarily); only brand-new ids are appended, and nothing is ever removed here.
+  // out temporarily); only brand-new ids are appended.
   const existingStations = (await readExisting('stations.json')) || []
   const freshIds = new Set(stations.map((s) => s.id))
   for (const s of existingStations) {
-    if (!freshIds.has(s.id)) stations.push(s)
+    if (!freshIds.has(s.id) && inPakistan(s)) stations.push(asPakistani(s))
   }
   stations.sort((a, b) => a.name.localeCompare(b.name))
-  const stationIds = Array.from(new Set([...stations.map((s) => s.id), ...existingIds])).sort()
-  const citySlugs = cities.map((c) => c.slug)
+  const stationIds = stations.map((s) => s.id).sort()
+  const pakCities = cities.filter((c) => c.country === 'Pakistan')
+  const citySlugs = pakCities.map((c) => c.slug)
 
   const write = async (file, data) => {
     await fs.writeFile(path.join(STATIC_DIR, file), JSON.stringify(data, null, 2) + '\n')
@@ -139,10 +163,10 @@ async function main() {
   }
   await write('citySlugs.json', citySlugs)
   await write('stationIds.json', stationIds)
-  await write('cities.json', cities)
+  await write('cities.json', pakCities)
   await write('stations.json', stations)
 
-  console.log(`ℹ️  ${duplicates} duplicate city slug(s) skipped; ${stationIds.length - stations.length} station id(s) kept from the previous list.`)
+  console.log(`ℹ️  ${duplicates} duplicate city slug(s) skipped.`)
 }
 
 main().catch((err) => {

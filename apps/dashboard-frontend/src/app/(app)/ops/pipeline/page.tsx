@@ -2,13 +2,16 @@
 
 import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronLeft, ChevronRight, Calendar } from 'lucide-react'
+import { m, useDragControls } from 'motion/react'
+import { useIsMobile } from '@/lib/useMediaQuery'
+import { haversineKm } from '@/lib/geo'
+import { ChevronLeft, ChevronRight, Calendar, LocateFixed } from 'lucide-react'
 
 import { fetchTileDates, fetchStationDaily, fetchPredictionData, fetchRunReport, fetchStationDirectory } from '@/components/ops-pipeline'
 import { PredictionMap } from '@/components/ops-pipeline/PredictionMap'
 import { OpsContextPanel } from '@/components/ops-pipeline/ContextPanel'
+import { DatePicker } from '@/components/ops-pipeline/DatePicker'
 import { StructuresTab, type IndustryCategory, type IndustryItem, type KilnItem } from '@/components/ops-pipeline/StructuresTab'
-import { FiresPanel } from '@/components/ops-pipeline/FiresPanel'
 import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
 import { fetchFires } from '@/components/analyst-desk/api'
@@ -26,20 +29,30 @@ export default function OpsPipelinePage() {
 
   // Side channel state
   const [railTab, setRailTab] = useState<RailTab | null>(null)
+  const isMobile = useIsMobile()
+  const sheetDrag = useDragControls()
   const [isStreaming, setIsStreaming] = useState(false)
 
   // Layer toggles
-  const [showKilns, setShowKilns] = useState(true)
-  const [showIndustry, setShowIndustry] = useState(true)
+  const [showKilns, setShowKilns] = useState(false)
+  const [showIndustry, setShowIndustry] = useState(false)
   const [showFires, setShowFires] = useState(false)
 
   // Map flyTo callback + static data
-  const [flyTo, setFlyTo] = useState<((lng: number, lat: number, zoom?: number) => void) | null>(null)
+  const [flyTo, setFlyTo] = useState<((lng: number, lat: number, zoom?: number) => Promise<void>) | null>(null)
   const [kilnsData, setKilnsData] = useState<KilnItem[]>([])
   const [industryData, setIndustryData] = useState<IndustryCategory[]>([])
 
-  // Static inventories for the Sources panel: same cached loads the map uses (parsed once)
+  // Static inventories for the Sources panel: same cached loads the map uses (parsed once).
+  // Low priority: fetched the first time the panel is opened, not on page load.
+  const sourcesWanted = railTab === 'sources'
+  // Kilns and industry are shown on the map only while the Sources panel is open
   useEffect(() => {
+    setShowKilns(railTab === 'sources')
+    setShowIndustry(railTab === 'sources')
+  }, [railTab])
+  useEffect(() => {
+    if (!sourcesWanted) return
     loadKilnsGeoJSON()
       .then(data => {
         setKilnsData(data.features.map(f => ({
@@ -62,7 +75,7 @@ export default function OpsPipelinePage() {
         })))
       })
       .catch(() => {})
-  }, [])
+  }, [sourcesWanted])
 
   // Map availability: a map failure stays inside the map area (nav, panels, reports keep working)
   const [mapUnavailable, setMapUnavailable] = useState<MapUnavailableReason | null>(null)
@@ -93,24 +106,19 @@ export default function OpsPipelinePage() {
     window.history.replaceState(null, '', `${window.location.pathname}?${q}`)
   }, [selectedPredDate, model, showKilns, showIndustry, showFires])
 
-  // Force map resize when panel opens/closes
+  // Tell mapbox about container changes only when the size actually changes
   const mapWrapperRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    // Dispatch a resize event so mapbox-gl picks up the container change
-    let raf: number
-    const tick = () => {
-      window.dispatchEvent(new Event('resize'))
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    const stop = setTimeout(() => cancelAnimationFrame(raf), 350)
-    return () => { cancelAnimationFrame(raf); clearTimeout(stop) }
-  }, [railTab])
-
-  // Auto-show fires on map when fires tab is active
-  useEffect(() => {
-    setShowFires(railTab === 'fires')
-  }, [railTab])
+    const el = mapWrapperRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let raf = 0
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => window.dispatchEvent(new Event('resize')))
+    })
+    ro.observe(el)
+    return () => { ro.disconnect(); cancelAnimationFrame(raf) }
+  }, [])
 
   const { data: tileDates, isLoading: tileDatesLoading } = useQuery({
     queryKey: ["ops-pipeline-tile-dates"],
@@ -141,7 +149,7 @@ export default function OpsPipelinePage() {
   // Satellite fire detections — fetched for the selected Pakistan day, filtered to Pakistan.
   // The response carries an explicit status (ok/empty/partial/stale/unavailable); the panel
   // shows it, so a stale or missing day is never disguised as "no fires".
-  const { data: firesGeoJSON, isLoading: firesLoading, isFetching: firesFetching, isError: firesError, error: firesErrorObj } = useQuery({
+  const { data: firesGeoJSON } = useQuery({
     queryKey: ['ops-fires', selectedPredDate],
     queryFn: async () => {
       await loadPakBoundary()
@@ -200,6 +208,67 @@ export default function OpsPipelinePage() {
       .filter(s => s.pm25 != null)
   }, [stationData, stationIdLookup, providerMap])
 
+  // ── Where the visitor is: inside Pakistan, fly there and show the nearest monitor ──
+  const NEARBY_RADIUS_KM = 50
+  const [userLoc, setUserLoc] = useState<{ lng: number; lat: number } | null>(null)
+  const [locNote, setLocNote] = useState<string | null>(null)
+  const [locating, setLocating] = useState(false)
+
+  const nearby = useMemo(() => {
+    if (!userLoc) return null
+    let best: { s: (typeof enrichedStations)[number]; d: number } | null = null
+    for (const s of enrichedStations) {
+      if (s.lat == null || s.lon == null) continue
+      const d = haversineKm(userLoc.lat, userLoc.lng, s.lat, s.lon)
+      if (!best || d < best.d) best = { s, d }
+    }
+    return best && best.d <= NEARBY_RADIUS_KM
+      ? { station: { name: best.s.name, city: best.s.city, pm25: best.s.pm25 }, distKm: best.d, radiusKm: NEARBY_RADIUS_KM }
+      : { station: null, distKm: null, radiusKm: NEARBY_RADIUS_KM }
+  }, [userLoc, enrichedStations])
+
+  const locate = () => {
+    if (!navigator.geolocation) { setLocNote('Location is not available in this browser.'); return }
+    setLocating(true)
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        setLocating(false)
+        const { latitude: lat, longitude: lng } = pos.coords
+        await loadPakBoundary()
+        if (!isInsidePakistan(lng, lat)) { setLocNote('You appear to be outside Pakistan, so there is no air quality to show here.'); return }
+        await flyTo?.(lng, lat, 10.5) // let the fly-in finish before the card and puck appear
+        setUserLoc({ lng, lat })
+      },
+      (err) => { setLocating(false); setLocNote(err.code === 1 ? 'Location permission was declined.' : 'Could not find your location.') },
+      { timeout: 10000, maximumAge: 5 * 60 * 1000 },
+    )
+  }
+
+  // Ask once per visit, as soon as the map and stations are ready
+  const askedRef = useRef(false)
+  useEffect(() => {
+    if (askedRef.current || !flyTo || enrichedStations.length === 0) return
+    askedRef.current = true
+    try { if (sessionStorage.getItem('paqi-located')) return; sessionStorage.setItem('paqi-located', '1') } catch { /* storage unavailable */ }
+    locate()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [flyTo, enrichedStations.length])
+
+  useEffect(() => {
+    if (!locNote) return
+    const t = setTimeout(() => setLocNote(null), 6000)
+    return () => clearTimeout(t)
+  }, [locNote])
+
+  // Clicking a station marker opens the Stations panel on that station's charts and analysis
+  const [focusStation, setFocusStation] = useState<{ station: (typeof enrichedStations)[number]; nonce: number } | null>(null)
+  const handleStationClick = (clicked: { name: string; city: string }) => {
+    const match = enrichedStations.find(e => e.name === clicked.name && e.city === clicked.city)
+    if (!match) return
+    setFocusStation({ station: match, nonce: Date.now() })
+    setRailTab('stations')
+  }
+
   // Only days whose Pakistan calendar day has ended (station daily aggregation can exist).
   // The API says which (details[].complete); fall back to the PKT date, never the browser's UTC date.
   const dates = useMemo(() => {
@@ -252,28 +321,39 @@ export default function OpsPipelinePage() {
   if (!selectedPredDate) return null
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Icon rail */}
+    <div className="relative flex flex-1 min-h-0 overflow-hidden max-md:flex-col-reverse">
+      {/* Icon rail (bottom bar on phones) */}
       <IconRail
         activeTab={railTab}
         onTabChange={setRailTab}
         isStreaming={isStreaming}
-        tabs={['chat', 'analytics', 'stations', 'sources', 'fires']}
+        tabs={['chat', 'analytics', 'sources']}
       />
 
-      {/* Sliding panel */}
-      <div
-        style={{
-          width: railTab ? 370 : 0,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: '#fff',
-          borderRight: railTab ? '1px solid #e2e8f0' : 'none',
-          overflow: 'hidden',
-          transition: 'width 250ms cubic-bezier(0.4, 0, 0.2, 1)',
-        }}
+      {/* Sliding panel: width springs open, content stays 370px wide so it never reflows mid-animation */}
+      <m.div
+        initial={false}
+        animate={isMobile ? { height: railTab ? '72%' : 0 } : { width: railTab ? 370 : 0 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 40 }}
+        className={isMobile ? 'absolute inset-x-0 bottom-14 z-30 flex flex-col rounded-t-2xl shadow-[0_-8px_32px_rgba(15,23,42,0.18)]' : ''}
+        style={{ flexShrink: 0, background: '#fff', overflow: 'hidden' }}
+        drag={isMobile ? 'y' : false}
+        dragControls={sheetDrag}
+        dragListener={false}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info) => { if (info.offset.y > 90 || info.velocity.y > 600) setRailTab(null) }}
       >
+        {isMobile && (
+          <div
+            className="flex shrink-0 cursor-grab touch-none justify-center py-2.5"
+            onPointerDown={e => sheetDrag.start(e)}
+            aria-hidden
+          >
+            <span className="h-1 w-10 rounded-full bg-slate-300" />
+          </div>
+        )}
+        <div style={{ width: isMobile ? '100%' : 370, ...(isMobile ? { flex: '1 1 0', minHeight: 0 } : { height: '100%' }), display: 'flex', flexDirection: 'column' }}>
         {/* Chat / Analytics panel */}
         <div style={{
           display: railTab === 'chat' || railTab === 'analytics' ? 'flex' : 'none',
@@ -297,6 +377,8 @@ export default function OpsPipelinePage() {
             selectedDate={selectedPredDate}
             onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
             initialView="stations"
+            focusStation={focusStation}
+            onClose={() => setRailTab(null)}
           />
         </div>
 
@@ -312,20 +394,8 @@ export default function OpsPipelinePage() {
           />
         </div>
 
-        {/* Fires panel */}
-        <div style={{ display: railTab === 'fires' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
-          <FiresPanel
-            firesData={firesGeoJSON ?? null}
-            onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
-            selectedDate={selectedPredDate}
-            isLoading={firesLoading}
-            isFetching={firesFetching}
-            isError={firesError}
-            errorMessage={firesErrorObj instanceof Error ? firesErrorObj.message : null}
-          />
         </div>
-
-      </div>
+      </m.div>
 
       {/* Map — fills remaining space */}
       <div ref={mapWrapperRef} className="flex-1 relative min-h-0 flex flex-col">
@@ -358,12 +428,16 @@ export default function OpsPipelinePage() {
             firesData={firesGeoJSON ?? null}
             stations={stationData?.stations ?? []}
             onMapUnavailable={setMapUnavailable}
+            onStationClick={handleStationClick}
+            userLocation={userLoc}
             onMapReady={(fn) => setFlyTo(() => fn)}
           />
         </MapErrorBoundary>
 
         {/* Floating assessment card — upper right (Gaza CausePanel pattern) */}
         <OpsContextPanel
+          onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
+          nearby={nearby}
           selectedDate={selectedPredDate}
           model={model}
           onModelChange={setModel}
@@ -372,36 +446,106 @@ export default function OpsPipelinePage() {
           runReport={runReport ?? null}
         />
 
-        {/* Timeline bar — slim, floating at bottom of map */}
-        <div className="absolute bottom-3 left-4 right-4 z-10 flex items-center gap-3">
+        {/* Find me */}
+        <button
+          onClick={locate}
+          disabled={locating}
+          aria-label="Show air quality where I am"
+          className="absolute bottom-[152px] right-3 md:bottom-[124px] md:right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-colors hover:text-slate-950 disabled:opacity-60"
+          style={{
+            background: 'rgba(255,255,255,0.82)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            border: '1px solid rgba(15,23,42,0.08)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+          }}
+        >
+          <LocateFixed size={20} className={locating ? 'animate-pulse' : ''} />
+        </button>
+        {locNote && (
+          <div
+            role="status"
+            className="absolute bottom-[152px] right-16 md:bottom-[128px] md:right-[68px] z-10 max-w-[260px] rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-lg"
+          >
+            {locNote}
+          </div>
+        )}
+
+        {/* Fires layer switch */}
+        <label
+          className="absolute bottom-[104px] right-3 md:bottom-[76px] md:right-4 z-10 flex cursor-pointer items-center gap-2.5 rounded-full py-1.5 pl-3.5 pr-2 text-[13px] font-medium text-slate-900"
+          style={{
+            background: 'rgba(255,255,255,0.82)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            border: '1px solid rgba(15,23,42,0.08)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+          }}
+        >
+          Fires
+          <button
+            role="switch"
+            aria-checked={showFires}
+            aria-label="Show satellite fire detections"
+            onClick={() => setShowFires(v => !v)}
+            className={`relative h-6 w-10 rounded-full transition-colors ${showFires ? 'bg-slate-900' : 'bg-slate-300'}`}
+          >
+            <m.span
+              className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
+              animate={{ left: showFires ? 18 : 2 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 34 }}
+            />
+          </button>
+        </label>
+
+        {/* Timeline — one glass pill floating at the bottom of the map */}
+        <div
+          className="absolute bottom-12 left-3 right-3 md:bottom-4 md:left-4 md:right-4 z-10 flex items-center gap-2 rounded-full px-2 py-1.5"
+          style={{
+            background: 'rgba(255,255,255,0.82)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            border: '1px solid rgba(15,23,42,0.08)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+          }}
+          role="group"
+          aria-label="Date"
+        >
           <button
             onClick={() => { if (currentIndex > 0) setSelectedPredDate(dates[currentIndex - 1]) }}
             disabled={currentIndex <= 0}
-            className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors"
+            aria-label="Previous day"
+            className="h-8 w-8 shrink-0 flex items-center justify-center rounded-full text-slate-700 hover:bg-slate-900/[0.06] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
           >
-            <ChevronLeft className="w-4 h-4 text-white" />
+            <ChevronLeft className="w-4 h-4" />
           </button>
 
-          <div className="text-center min-w-[110px] text-sm font-semibold text-slate-800 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 shadow-sm">
-            {formatDisplayDate(selectedPredDate)}
-          </div>
+          <DatePicker
+            dates={dates}
+            value={selectedPredDate}
+            onChange={setSelectedPredDate}
+            label={formatDisplayDate(selectedPredDate)}
+          />
 
           <button
             onClick={() => { if (currentIndex < dates.length - 1) setSelectedPredDate(dates[currentIndex + 1]) }}
             disabled={currentIndex >= dates.length - 1}
-            className="p-1.5 rounded-full bg-slate-800/80 hover:bg-slate-700/80 disabled:opacity-30 transition-colors"
+            aria-label="Next day"
+            className="h-8 w-8 shrink-0 flex items-center justify-center rounded-full text-slate-700 hover:bg-slate-900/[0.06] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
           >
-            <ChevronRight className="w-4 h-4 text-white" />
+            <ChevronRight className="w-4 h-4" />
           </button>
 
-          <div className="flex-1 relative flex items-center h-6">
-            <div className="absolute left-0 right-0 h-[5px] rounded-full bg-slate-300/60" />
+          <div className="flex-1 relative flex items-center h-6 mx-1 max-md:hidden">
+            <div className="absolute left-0 right-0 h-1 rounded-full bg-slate-300/70" />
             <div
-              className="absolute left-0 h-[5px] rounded-full bg-slate-700"
-              style={{ width: dates.length > 1 ? `${(currentIndex / (dates.length - 1)) * 100}%` : '0%' }}
+              className="absolute left-0 h-1 rounded-full bg-slate-800"
+              style={{ width: dates.length > 1 ? `${(Math.max(currentIndex, 0) / (dates.length - 1)) * 100}%` : '0%' }}
             />
             <input
               type="range"
+              aria-label="Select date"
+              aria-valuetext={formatDisplayDate(selectedPredDate)}
               min={0}
               max={dates.length - 1}
               value={currentIndex >= 0 ? currentIndex : 0}
@@ -409,11 +553,11 @@ export default function OpsPipelinePage() {
                 const idx = parseInt(e.target.value, 10)
                 if (dates[idx]) setSelectedPredDate(dates[idx])
               }}
-              className="relative z-10 w-full h-[5px] appearance-none cursor-pointer bg-transparent
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5
-                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-emerald-400
-                [&::-webkit-slider-thumb]:shadow-lg [&::-webkit-slider-thumb]:cursor-grab
-                [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white"
+              className="relative z-10 w-full h-1 appearance-none cursor-pointer bg-transparent
+ [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5
+                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+                [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab
+                [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-slate-300"
             />
           </div>
         </div>

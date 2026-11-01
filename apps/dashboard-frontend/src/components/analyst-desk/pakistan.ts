@@ -12,7 +12,7 @@ export async function loadPakBoundary(): Promise<void> {
   if (loadPromise) return loadPromise
   loadPromise = (async () => {
     try {
-      const res = await fetch('/pakistan_country.geojson')
+      const res = await fetch('/PAK_adm0.json')
       const data = await res.json()
       const geom = data.features[0].geometry
       pakMultiPoly = geom.type === 'MultiPolygon'
@@ -53,4 +53,11 @@ export function isInsidePakistan(lng: number, lat: number): boolean {
 
 export function isPakBoundaryLoaded(): boolean {
   return pakMultiPoly != null && pakMultiPoly.length > 0
+}
+
+/** Pakistan-only filter for station lists; falls back to a rough bounding box if the boundary failed to load. */
+export async function filterToPakistan<T extends { latitude: number; longitude: number }>(items: T[]): Promise<T[]> {
+  await loadPakBoundary()
+  if (isPakBoundaryLoaded()) return items.filter(s => isInsidePakistan(s.longitude, s.latitude))
+  return items.filter(s => s.latitude >= 23.5 && s.latitude <= 37.2 && s.longitude >= 60.8 && s.longitude <= 77.9)
 }

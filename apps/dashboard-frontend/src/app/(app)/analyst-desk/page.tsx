@@ -4,6 +4,8 @@ import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { bandKey, normalizeBand } from '@/lib/aqi'
 import { useSelection } from '@/lib/selection'
 import { useQuery } from '@tanstack/react-query'
+import { m, useDragControls } from 'motion/react'
+import { useIsMobile } from '@/lib/useMediaQuery'
 import {
   fetchForecast,
   fetchWatchlist,
@@ -30,29 +32,33 @@ export default function AnalystDeskPage() {
 
   // Sidebar state
   const [railTab, setRailTab] = useState<RailTab | null>(null)
+  const isMobile = useIsMobile()
+  const sheetDrag = useDragControls()
   const [isStreaming, setIsStreaming] = useState(false)
 
   // Layer toggles (lifted from ForecastMap so LayersPanel can control them)
   const [showStations, setShowStations] = useState(true)
   const [showSatellite, setShowSatellite] = useState(true)
-  const [showFires, setShowFires] = useState(true)
+  const [showFires, setShowFires] = useState(false)
   const [showWind, setShowWind] = useState(true)
   const [showPopulation, setShowPopulation] = useState(false)
 
   // Map ref for resize during panel animation
   const mapRef = useRef<{ resize: () => void } | null>(null)
 
-  // Smooth map resize during panel transition
+  // Resize the map only when its container actually changes size (one call per frame at most)
+  const mapWrapRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    let raf: number
-    const tick = () => {
-      mapRef.current?.resize()
-      raf = requestAnimationFrame(tick)
-    }
-    raf = requestAnimationFrame(tick)
-    const stop = setTimeout(() => cancelAnimationFrame(raf), 350)
-    return () => { cancelAnimationFrame(raf); clearTimeout(stop) }
-  }, [railTab])
+    const el = mapWrapRef.current
+    if (!el || typeof ResizeObserver === 'undefined') return
+    let raf = 0
+    const ro = new ResizeObserver(() => {
+      cancelAnimationFrame(raf)
+      raf = requestAnimationFrame(() => mapRef.current?.resize())
+    })
+    ro.observe(el)
+    return () => { ro.disconnect(); cancelAnimationFrame(raf) }
+  }, [])
 
   // Fetch available dates and auto-select the latest
   const { data: availableDates } = useQuery({
@@ -167,8 +173,8 @@ export default function AnalystDeskPage() {
   const isLoading = !forecast && !currentStations
 
   return (
-    <div className="flex flex-1 min-h-0 overflow-hidden">
-      {/* Icon rail */}
+    <div className="relative flex flex-1 min-h-0 overflow-hidden max-md:flex-col-reverse">
+      {/* Icon rail (bottom bar on phones) */}
       <IconRail
         activeTab={railTab}
         onTabChange={setRailTab}
@@ -176,19 +182,30 @@ export default function AnalystDeskPage() {
         tabs={['chat', 'analytics', 'layers']}
       />
 
-      {/* Sliding panel */}
-      <div
-        style={{
-          width: railTab ? 370 : 0,
-          flexShrink: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          background: '#fff',
-          borderRight: railTab ? '1px solid #e2e8f0' : 'none',
-          overflow: 'hidden',
-          transition: 'width 250ms cubic-bezier(0.4, 0, 0.2, 1)',
-        }}
+      {/* Sliding panel: width springs open, content stays 370px wide so it never reflows mid-animation */}
+      <m.div
+        initial={false}
+        animate={isMobile ? { height: railTab ? '72%' : 0 } : { width: railTab ? 370 : 0 }}
+        transition={{ type: 'spring', stiffness: 380, damping: 40 }}
+        className={isMobile ? 'absolute inset-x-0 bottom-14 z-30 flex flex-col rounded-t-2xl shadow-[0_-8px_32px_rgba(15,23,42,0.18)]' : ''}
+        style={{ flexShrink: 0, background: '#fff', overflow: 'hidden' }}
+        drag={isMobile ? 'y' : false}
+        dragControls={sheetDrag}
+        dragListener={false}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0, bottom: 0.6 }}
+        onDragEnd={(_, info) => { if (info.offset.y > 90 || info.velocity.y > 600) setRailTab(null) }}
       >
+        {isMobile && (
+          <div
+            className="flex shrink-0 cursor-grab touch-none justify-center py-2.5"
+            onPointerDown={e => sheetDrag.start(e)}
+            aria-hidden
+          >
+            <span className="h-1 w-10 rounded-full bg-slate-300" />
+          </div>
+        )}
+        <div style={{ width: isMobile ? '100%' : 370, ...(isMobile ? { flex: '1 1 0', minHeight: 0 } : { height: '100%' }), display: 'flex', flexDirection: 'column' }}>
         {/* Chat / Analytics panel (single instance) */}
         <div style={{
           display: railTab === 'chat' || railTab === 'analytics' ? 'flex' : 'none',
@@ -222,10 +239,11 @@ export default function AnalystDeskPage() {
             onTogglePopulation={() => setShowPopulation(v => !v)}
           />
         </div>
-      </div>
+        </div>
+      </m.div>
 
       {/* Map — always rendered, data loads on top */}
-      <div className="flex-1 relative">
+      <div ref={mapWrapRef} className="flex-1 relative">
         <ForecastMap
           forecasts={forecast?.forecasts ?? []}
           currentStations={currentStations?.stations ?? []}
@@ -261,7 +279,7 @@ export default function AnalystDeskPage() {
       </div>
 
       {/* Right context panel — persistent daily brief */}
-      <div className="w-[260px] shrink-0 bg-white border-l border-slate-100 overflow-hidden">
+      <div className="hidden lg:block w-[300px] shrink-0 bg-white overflow-hidden">
         <ContextPanel
           currentStations={currentStations?.stations ?? []}
           forecasts={forecast?.forecasts ?? []}

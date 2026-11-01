@@ -58,7 +58,7 @@ export function ChatMessage({ message, knownCities, onCityClick }: ChatMessagePr
             {message.actions.map((action, i) => (
               <span
                 key={i}
-                className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full bg-blue-50 text-blue-600 text-[9px] font-medium"
+                className="inline-flex items-center gap-0.5 px-1.5 py-px rounded-full bg-blue-50 text-blue-600 text-[11px] font-medium"
               >
                 {action.type === 'zoom_to_city' && (
                   <>{'\u{1F4CD}'} {action.city}</>
@@ -82,11 +82,7 @@ export function ChatMessage({ message, knownCities, onCityClick }: ChatMessagePr
 
         {/* Streaming indicator */}
         {message.streaming && (
-          <span className="inline-flex gap-0.5 ml-1">
-            <span className="w-1 h-1 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-1 h-1 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-1 h-1 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }} />
-          </span>
+          <span className="ml-1 text-xs text-slate-500">Thinking…</span>
         )}
       </div>
     </div>

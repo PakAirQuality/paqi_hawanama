@@ -9,7 +9,7 @@ import { UptimePanel } from "@/components/stations/panels/UptimePanel"
 import { DiurnalPanel } from "@/components/stations/panels/DiurnalPanel"
 import { EpisodesPanel } from "@/components/stations/panels/EpisodesPanel"
 
-const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
 
 // ── Types ──
 
@@ -320,7 +320,7 @@ export function StationProfileClient() {
   return (
     <div className="flex-1 overflow-y-auto bg-slate-50">
       {/* ── Top bar ── */}
-      <div className="bg-white border-b border-slate-200 sticky top-0 z-10">
+      <div className="bg-white border-slate-200 sticky top-0 z-10">
         <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-4">
           <button
             onClick={() => router.back()}
@@ -332,7 +332,7 @@ export function StationProfileClient() {
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-slate-900 truncate">{station.name}</h1>
               <span
-                className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase"
+                className="shrink-0 px-2 py-0.5 rounded-full text-[11px] font-semibold"
                 style={{ color: status.color, background: status.color + "18" }}
               >
                 {status.label}
@@ -340,11 +340,10 @@ export function StationProfileClient() {
             </div>
             <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
               <MapPin size={11} />
-              <span>{[station.city, station.state, station.country].filter(Boolean).join(" · ")}</span>
+              <span>{[station.city, station.state, station.country].filter(Boolean).join(", ")}</span>
               {station.provider && (
                 <>
-                  <span className="text-slate-300">·</span>
-                  <span>{station.provider}</span>
+                  <span className="text-slate-500">Source: {station.provider}</span>
                 </>
               )}
             </div>
@@ -357,12 +356,12 @@ export function StationProfileClient() {
                 <div className="text-2xl font-bold tabular-nums" style={{ color: band.color }}>
                   {Math.round(currentPM25)}
                 </div>
-                <div className="text-[10px] text-slate-500">µg/m³</div>
+                <div className="text-[11px] text-slate-500">µg/m³</div>
               </div>
               <div className="text-right">
                 <div className="text-xs font-semibold" style={{ color: band.color }}>{band.label}</div>
                 {poll?.last_value_ts && (
-                  <div className="text-[10px] text-slate-400">{timeAgo(poll.last_value_ts)}</div>
+                  <div className="text-[11px] text-slate-500">{timeAgo(poll.last_value_ts)}</div>
                 )}
               </div>
             </div>
@@ -398,7 +397,7 @@ export function StationProfileClient() {
             label="Trend vs 7d"
             value={trend ? `${trend.diff > 0 ? "+" : ""}${Math.round(trend.diff)}` : "—"}
             unit="µg/m³"
-            icon={trend?.dir === "up" ? <TrendingUp size={14} className="text-red-500" /> : trend?.dir === "down" ? <TrendingDown size={14} className="text-green-500" /> : <Minus size={14} className="text-slate-400" />}
+            icon={trend?.dir === "up" ? <TrendingUp size={14} className="text-red-500" /> : trend?.dir === "down" ? <TrendingDown size={14} className="text-green-500" /> : <Minus size={14} className="text-slate-500" />}
           />
           <StatCard
             label="Completeness"
@@ -409,7 +408,7 @@ export function StationProfileClient() {
 
         {/* ── Trend chart ── */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+          <div className="px-5 py-3 border-slate-100 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-slate-800">PM2.5 Trend</h2>
             <div className="flex gap-1">
               {[
@@ -421,7 +420,7 @@ export function StationProfileClient() {
                   key={opt.h}
                   onClick={() => setHistoryHours(opt.h)}
                   className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
-                    historyHours === opt.h
+ historyHours === opt.h
                       ? "bg-slate-800 text-white"
                       : "text-slate-500 hover:bg-slate-100"
                   }`}
@@ -433,13 +432,13 @@ export function StationProfileClient() {
           </div>
           <div className="p-4">
             {historyLoading ? (
-              <div className="h-[240px] flex items-center justify-center text-sm text-slate-400">
+              <div className="h-[240px] flex items-center justify-center text-sm text-slate-500">
                 Loading...
               </div>
             ) : history?.length ? (
               <PM25Chart data={history} hours={historyHours} />
             ) : (
-              <div className="h-[240px] flex items-center justify-center text-sm text-slate-400">
+              <div className="h-[240px] flex items-center justify-center text-sm text-slate-500">
                 No history data available
               </div>
             )}
@@ -448,16 +447,16 @@ export function StationProfileClient() {
 
         {/* ── Tabbed panels ── */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="border-b border-slate-200 px-5">
+          <div className=" border-slate-200 px-5">
             <div className="flex gap-5">
               {TABS.map(({ key, label }) => (
                 <button
                   key={key}
                   onClick={() => setActiveTab(key)}
                   className={`py-3 text-sm font-medium border-b-2 transition-colors ${
-                    activeTab === key
+ activeTab === key
                       ? "border-slate-800 text-slate-800"
-                      : "border-transparent text-slate-400 hover:text-slate-600"
+                      : "border-transparent text-slate-500 hover:text-slate-600"
                   }`}
                 >
                   {label}
@@ -475,7 +474,7 @@ export function StationProfileClient() {
 
         {/* ── Metadata ── */}
         <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="px-5 py-3 border-b border-slate-100">
+          <div className="px-5 py-3 border-slate-100">
             <h2 className="text-sm font-semibold text-slate-800">Metadata</h2>
           </div>
           <div className="p-5 grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-y-4 gap-x-8 text-sm">
@@ -507,11 +506,11 @@ export function StationProfileClient() {
 function StatCard({ label, value, unit, color, icon }: { label: string; value: string; unit?: string; color?: string; icon?: React.ReactNode }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 px-4 py-3">
-      <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wide">{label}</div>
+      <div className="text-[11px] font-medium text-slate-500 tracking-wide">{label}</div>
       <div className="mt-1 flex items-baseline gap-1">
         {icon && <span className="mr-0.5">{icon}</span>}
         <span className="text-xl font-bold tabular-nums" style={{ color: color ?? "#1e293b" }}>{value}</span>
-        {unit && value !== "—" && <span className="text-xs text-slate-400">{unit}</span>}
+        {unit && value !== "—" && <span className="text-xs text-slate-500">{unit}</span>}
       </div>
     </div>
   )
@@ -520,7 +519,7 @@ function StatCard({ label, value, unit, color, icon }: { label: string; value: s
 function MetaField({ label, value }: { label: string; value: string | null | undefined }) {
   return (
     <div>
-      <div className="text-xs text-slate-400">{label}</div>
+      <div className="text-xs text-slate-500">{label}</div>
       <div className="text-sm font-medium text-slate-700 mt-0.5">{value ?? "—"}</div>
     </div>
   )

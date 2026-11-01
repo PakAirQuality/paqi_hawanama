@@ -1,9 +1,10 @@
 // API client for internal station endpoints
-const API_BASE = 'https://hawanama-152782825429.asia-south1.run.app/api/v1';
+const API_BASE = (process.env.NEXT_PUBLIC_API_URL || 'https://hawanama-152782825429.asia-south1.run.app') + '/api/v1';
 
 export interface Station {
   station_id: string;
   name: string;
+  display_name?: string;
   city: string;
   provider: string;
   active: boolean;
@@ -78,13 +79,16 @@ export interface StationEpisodes {
   episodes: PollutionEpisode[];
 }
 
+/** /meta/stations lists every country; its display_name ends with the country. */
+export const isPakistanStation = (s: { display_name?: string }) => s.display_name?.endsWith(', Pakistan') ?? false;
+
 // API functions
 export const stationsApi = {
-  // List all stations
+  // List Pakistan's stations
   getStations: async (): Promise<Station[]> => {
     const response = await fetch(`${API_BASE}/meta/stations`);
     if (!response.ok) throw new Error('Failed to fetch stations');
-    return response.json();
+    return ((await response.json()) as Station[]).filter(isPakistanStation);
   },
 
   // Get station overview
