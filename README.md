@@ -98,10 +98,12 @@ hawanama/
 
 ## Getting Started
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full setup, tests and pull request flow.
+
 ### Prerequisites
 
 - Python 3.11+
-- Node.js 20+
+- Node.js 22+
 - PostgreSQL with TimescaleDB and PostGIS extensions
 - Google Cloud SDK (`gcloud`)
 - Access to GCP project `hawanama-2`
@@ -134,7 +136,7 @@ The API serves at `http://localhost:8000/api/v1/`. Interactive docs at `/api/v1/
 ```bash
 cd apps/dashboard-frontend
 npm install
-npm run dev    # http://localhost:3000
+npm run dev    # http://localhost:3001
 ```
 
 ### Public Website
@@ -151,7 +153,8 @@ npm run dev    # http://localhost:3000
 
 ```bash
 # Build and deploy via Cloud Build
-gcloud builds submit --config cloudbuild.yaml --project hawanama-2 --timeout=10m
+gcloud builds submit --config cloudbuild.yaml --project hawanama-2 --timeout=10m \
+  --substitutions=_GIT_SHA=$(git rev-parse --short HEAD)
 
 # Verify
 curl https://hawanama-152782825429.asia-south1.run.app/api/v1/health
@@ -164,7 +167,7 @@ The `cloudbuild.yaml` pipeline: **build** Docker image, **push** to Artifact Reg
 ```bash
 cd apps/dashboard-frontend
 npm run build
-npx firebase deploy --only hosting  # → hawanama-dashboard.web.app
+npx firebase deploy --only hosting  # → hawanama.org (Firebase site hawanama-2)
 ```
 
 ### Public Website (Firebase)
@@ -172,7 +175,7 @@ npx firebase deploy --only hosting  # → hawanama-dashboard.web.app
 ```bash
 cd apps/web-next
 npm run build
-# Deploy to hawanama-2.web.app → hawanama.org
+npx firebase deploy --only hosting  # → hawanama-dashboard.web.app (Firebase site hawanama-dashboard)
 ```
 
 ## Environment Variables
