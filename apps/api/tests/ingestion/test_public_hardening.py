@@ -106,3 +106,15 @@ def test_settings_strip_trailing_newline_from_secrets(monkeypatch):
     s = Settings(POSTGRES_SERVER="x", POSTGRES_USER="x", POSTGRES_PASSWORD="x", POSTGRES_DB="x", POSTGRES_PORT=1)
     assert s.TASKS_API_SECRET == "abc123"
     assert s.FIRMS_MAP_KEY == "key"
+
+
+def test_usage_tokens_accepts_property_or_method_usage():
+    from types import SimpleNamespace
+
+    from app.services.copilot.budget import usage_tokens
+
+    usage = SimpleNamespace(input_tokens=120, output_tokens=45)
+    assert usage_tokens(usage) == (120, 45)            # RunUsage property (newer pydantic-ai)
+    assert usage_tokens(lambda: usage) == (120, 45)    # usage() method (older pydantic-ai)
+    assert usage_tokens(SimpleNamespace(request_tokens=7, response_tokens=3)) == (7, 3)
+    assert usage_tokens(None) == (0, 0)

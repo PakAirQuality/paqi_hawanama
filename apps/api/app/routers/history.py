@@ -188,7 +188,7 @@ async def city_average_history(
         ...,
         description="Select city from dropdown list",
         example="Lahore",
-        enum=[
+        json_schema_extra={"enum": [
             "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan",
             "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur",
             "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau",
@@ -198,7 +198,7 @@ async def city_average_history(
             "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar",
             "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind",
             "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
-        ],
+        ]},
     ),
     hours: int = Query(24, description="Number of hours to include (1–168)"),
     db: AsyncSession = Depends(get_database),

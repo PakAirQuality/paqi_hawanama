@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { bandKey, normalizeBand } from '@/lib/aqi'
 import { useSelection } from '@/lib/selection'
+import { pktToday } from '@/lib/time'
 import { useQuery } from '@tanstack/react-query'
 import { m, useDragControls } from 'motion/react'
 import { useIsMobile } from '@/lib/useMediaQuery'
@@ -112,12 +113,14 @@ export default function AnalystDeskPage() {
     enabled: !!selectedDate,
   })
 
+  // Fires describe the same day as the live station readings on the map and brief, not the
+  // forecast issue date (which lags when the forecast job has not run).
+  const observationDay = pktToday()
   const { data: firesGeoJSON } = useQuery({
-    queryKey: ['analyst-fires', selectedDate],
-    queryFn: () => fetchFires(selectedDate),
+    queryKey: ['analyst-fires', observationDay],
+    queryFn: () => fetchFires(observationDay),
     staleTime: 15 * 60 * 1000,
     retry: 1,
-    enabled: !!selectedDate,
   })
 
   const handleStationClick = useCallback((mention: StationMention) => {

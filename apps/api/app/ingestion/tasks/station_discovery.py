@@ -19,7 +19,7 @@ from sqlalchemy import text
 
 from app.services.ingestion.iqair_service import IQAirClient
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
-from app.ingestion.manifests import finalize_union_manifest, upload_manifest_to_gcs
+from app.ingestion.manifests import ManifestUnavailable, finalize_union_manifest, upload_manifest_to_gcs
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunOutcome, RunRecorder, new_run_id
@@ -445,6 +445,8 @@ class StationDiscoveryTask:
             )
             logger.info("📦 Wrote union station manifest: %d total stations (%d discovered this run)",
                        len(final_union_rows), len(rows))
+        except ManifestUnavailable:
+            raise  # the fallback below would upload only this run's rows over the full manifest
         except Exception as e:
             logger.error("Failed to write union manifest: %s", e)
             # Fallback to simple write if union fails

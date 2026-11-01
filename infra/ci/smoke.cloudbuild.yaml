@@ -1,0 +1,10 @@
+# No-op build: proves the deployer can submit a build and read its status, and deploys nothing.
+steps:
+  - name: ubuntu
+    args: ['echo', 'deploy credentials work']
+
+substitutions:
+  _GIT_SHA: 'unknown'
+
+options:
+  substitution_option: ALLOW_LOOSE

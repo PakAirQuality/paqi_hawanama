@@ -10,7 +10,7 @@ import {
 } from "recharts";
 import { isPakistanStation } from "@/lib/api";
 
-const API_BASE =process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 // ── Types matching the real API responses ──
 

@@ -2,7 +2,7 @@
 
 export const SITE = {
   name: 'Hawanama',
-  url: 'https://hawanama.org',
+  url: 'https://hawanama-dashboard.web.app',
   org: 'Pakistan Air Quality Initiative',
   orgShort: 'PAQI',
   description:

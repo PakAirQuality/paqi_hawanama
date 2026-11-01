@@ -112,3 +112,39 @@ def test_ensure_latest_is_gcs_first(tmp_path, gcs):
     (tmp_path / "latest.parquet").write_text("stale-local")
     p = m.ensure_latest_from_gcs(tmp_path, "parquet", "manifests/station_manifests")
     assert p.read_text() == "v7-bytes"
+
+
+class _BrokenClient:
+    def bucket(self, name):
+        raise RuntimeError("gcs down")
+
+
+def test_union_refuses_when_the_previous_manifest_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr(m, "_gcs_client", lambda: _BrokenClient())
+    monkeypatch.setattr(settings, "MANIFEST_GCS_BUCKET", "b")
+    with pytest.raises(m.ManifestUnavailable):
+        m.finalize_union_manifest(tmp_path, tmp_path, "jsonl", [{"source_station_id": "s1"}], gcs_prefix="manifests/x")
+    assert not (tmp_path / "latest.jsonl").exists()
+
+
+def test_union_starts_empty_without_a_bucket(tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "MANIFEST_GCS_BUCKET", None)
+    rows = m.finalize_union_manifest(tmp_path, tmp_path, "jsonl", [{"source_station_id": "s1"}], gcs_prefix="manifests/x")
+    assert len(rows) == 1
+
+
+def test_discovery_does_not_upload_this_runs_rows_over_the_manifest(tmp_path, monkeypatch):
+    from app.ingestion.tasks import station_discovery as sd
+
+    monkeypatch.setattr(m, "_gcs_client", lambda: _BrokenClient())
+    monkeypatch.setattr(settings, "MANIFEST_GCS_BUCKET", "b")
+    uploads = []
+    monkeypatch.setattr(sd, "upload_manifest_to_gcs", lambda *a: uploads.append(a))
+    monkeypatch.setattr(m, "upload_manifest_to_gcs", lambda *a: uploads.append(a))
+    task = object.__new__(sd.StationDiscoveryTask)
+    task.manifest_root = tmp_path
+    task.manifest_format = "jsonl"
+    with pytest.raises(m.ManifestUnavailable):
+        task._write_union_manifest_and_summary("run", [{"source_station_id": "s1"}], {}, set())
+    assert uploads == []
+    assert not (tmp_path / "latest.jsonl").exists()

@@ -5,7 +5,7 @@
 
 import { pktLocalToIso } from '@/lib/time'
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://hawanama-152782825429.asia-south1.run.app'
+export const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
 
 export const LIMITS = { maxStations: 25, maxDays: 31 }
 

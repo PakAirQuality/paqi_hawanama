@@ -78,7 +78,7 @@ iqair_device_apis.csv
 gb_stations_*.csv
 
 # Local data dumps for comparison plots (CSVs only — plots PNGs are kept)
-data/
+/data/
 
 # local verification runs (scripts/verify_iqair_match.py)
 verify/
@@ -96,5 +96,6 @@ apps/*/artifacts/
 apps/*/tasks/artifacts/
 apps/worker/tasks/city_raw_api_data/
 apps/worker/tasks/raw_api_data/
+*.tsbuildinfo
 debug-gap.txt
 external_data/

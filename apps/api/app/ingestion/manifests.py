@@ -190,6 +190,10 @@ def ensure_latest_from_gcs(path_root: Path, fmt: str, gcs_prefix: str) -> Option
 
 ManifestRow = Dict[str, Any]
 
+class ManifestUnavailable(RuntimeError):
+    """The previous manifest cannot be read, so a union would drop every station not seen this run."""
+
+
 def _key(row: ManifestRow) -> Tuple[str, str]:
     """
     Primary identity: (provider_code, provider_uid) if available,
@@ -268,7 +272,10 @@ def finalize_union_manifest(
     """
     cities_successfully_fetched = cities_successfully_fetched or set()
 
-    ensure_latest_from_gcs(path_root, fmt, gcs_prefix)
+    if ensure_latest_from_gcs(path_root, fmt, gcs_prefix) is None and gcs_prefix and _bucket_name():
+        raise ManifestUnavailable(
+            f"No manifest in gs://{_bucket_name()}/{gcs_prefix} and no local copy; refusing to replace it"
+        )
     prev = load_latest_manifest(path_root, fmt)
     prev_by_key: Dict[Tuple[str,str], ManifestRow] = {_key(r): r for r in prev}
 

@@ -14,7 +14,8 @@ def _routes(monkeypatch, **env):
         monkeypatch.setenv(k, v)
     import app.main as m
     m = importlib.reload(m)
-    return {r.path for r in m.app.routes if hasattr(r, "path")}
+    # The OpenAPI paths, not app.routes: newer FastAPI keeps included routers nested.
+    return set(m.app.openapi()["paths"])
 
 
 def test_bam_role_mounts_only_bam_and_health(monkeypatch):

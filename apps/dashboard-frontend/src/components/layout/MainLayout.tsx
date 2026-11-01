@@ -66,6 +66,10 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
 
           <div className="ml-auto flex items-center gap-4 shrink-0 text-[13px]">
             <div className="hidden md:block"><FreshnessBadge /></div>
+            {/* Public site: link back to the main map */}
+            <a href="https://hawanama-dashboard.web.app" className="text-slate-600 hover:text-slate-900 hidden sm:block">
+              Public map
+            </a>
           </div>
         </div>
       </header>

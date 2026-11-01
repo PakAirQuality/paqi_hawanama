@@ -28,7 +28,7 @@ async def get_llm_data(
         ...,
         description="City name",
         example="Lahore",
-        enum=[
+        json_schema_extra={"enum": [
             "Abbottabad", "Bahawalpur", "Bhopalwala", "Chak Jhumra", "Daska Kalan", 
             "Dera Ismail Khan", "Eminabad", "Faisalabad", "Gujranwala", "Haripur", 
             "Hundal", "Hyderabad", "Islamabad", "Jhang", "Jhelum", "Kahna Nau", 
@@ -38,7 +38,7 @@ async def get_llm_data(
             "Mirpur Khas", "Multan", "Murree", "Pasrur", "Pattoki", "Peshawar", 
             "Pindi Bhattian", "Qadirpur Ran", "Quetta", "Rahim Yar Khan", "Raiwind", 
             "Rawalpindi", "Rojhan", "Sambrial", "Sheikhupura", "Sialkot", "Skardu", "Sukkur"
-        ]
+        ]}
     ),
     _auth=Depends(verify_tasks_token)
 ):
@@ -113,7 +113,7 @@ async def get_llm_prompt(
     prompt_type: str = Query(
         "master",
         description="Prompt type to use",
-        enum=["master", "airpocalypse"]
+        json_schema_extra={"enum": ["master", "airpocalypse"]}
     ),
     _auth=Depends(verify_tasks_token)
 ):
@@ -439,7 +439,7 @@ async def generate_llm_tweet(
     prompt_type: str = Query(
         "master",
         description="Prompt type to use",
-        enum=["master", "airpocalypse"]
+        json_schema_extra={"enum": ["master", "airpocalypse"]}
     ),
     _auth=Depends(verify_tasks_token),
 ):

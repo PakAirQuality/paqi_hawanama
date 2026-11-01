@@ -113,8 +113,8 @@ export interface StructuresTabProps {
   selectedDate: string | null
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
   initialView?: 'stations' | 'sources'
-  /** Opens this station's detail view (a new `nonce` re-opens it even for the same station) */
-  focusStation?: { station: StationItem; nonce: number } | null
+  /** Open this item's detail view (a map click). A new object each time, so a repeat click reopens it. */
+  focus?: StructuresFocus | null
   /** When given, leaving the station detail closes the panel instead of returning to the list */
   onClose?: () => void
 }
@@ -124,7 +124,7 @@ function pm25ToBandColor(pm25: number): string {
   return pm25Color(pm25)
 }
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
 
 // ── PM2.5 bar color (same categories as the markers) ──
 function pm25BarColor(v: number): string {
@@ -253,12 +253,17 @@ type View =
   | { type: 'industry'; categoryKey: string }
   | { type: 'industry-detail'; item: IndustryItem; categoryKey: string }
 
-export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focusStation, onClose }: StructuresTabProps) {
-  const [view, setView] = useState<View>(initialView === 'stations' ? { type: 'stations' } : initialView === 'sources' ? { type: 'categories' } : { type: 'categories' })
+export type StructuresFocus = Extract<View, { type: 'station-detail' | 'kiln-detail' | 'industry-detail' }>
+
+export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus, onClose }: StructuresTabProps) {
+  const [view, setView] = useState<View>(focus ?? (initialView === 'stations' ? { type: 'stations' } : { type: 'categories' }))
+  // Follow a new focus from the map (state adjusted during render, not in an effect)
+  const [prevFocus, setPrevFocus] = useState(focus)
+  if (focus !== prevFocus) {
+    setPrevFocus(focus)
+    if (focus) setView(focus)
+  }
   const [search, setSearch] = useState('')
-  useEffect(() => {
-    if (focusStation) setView({ type: 'station-detail', station: focusStation.station })
-  }, [focusStation])
   const [sortBy, setSortBy] = useState<'pm25' | 'name' | 'city' | 'network'>('pm25')
   const [kilnSort, setKilnSort] = useState<'province' | 'district' | 'id'>('province')
   const [kilnLimit, setKilnLimit] = useState(200)

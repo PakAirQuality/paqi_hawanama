@@ -8,10 +8,10 @@ import { haversineKm } from '@/lib/geo'
 import { ChevronLeft, ChevronRight, Calendar, LocateFixed } from 'lucide-react'
 
 import { fetchTileDates, fetchStationDaily, fetchPredictionData, fetchRunReport, fetchStationDirectory } from '@/components/ops-pipeline'
-import { PredictionMap } from '@/components/ops-pipeline/PredictionMap'
+import { PredictionMap, type MapFeatureClick } from '@/components/ops-pipeline/PredictionMap'
 import { OpsContextPanel } from '@/components/ops-pipeline/ContextPanel'
 import { DatePicker } from '@/components/ops-pipeline/DatePicker'
-import { StructuresTab, type IndustryCategory, type IndustryItem, type KilnItem } from '@/components/ops-pipeline/StructuresTab'
+import { StructuresTab, type IndustryCategory, type IndustryItem, type KilnItem, type StructuresFocus } from '@/components/ops-pipeline/StructuresTab'
 import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
 import { fetchFires } from '@/components/analyst-desk/api'
@@ -31,6 +31,8 @@ export default function OpsPipelinePage() {
   const [railTab, setRailTab] = useState<RailTab | null>(null)
   const isMobile = useIsMobile()
   const sheetDrag = useDragControls()
+  // Item a map click opened in the Stations or Sources panel
+  const [mapFocus, setMapFocus] = useState<StructuresFocus | null>(null)
   const [isStreaming, setIsStreaming] = useState(false)
 
   // Layer toggles
@@ -260,13 +262,34 @@ export default function OpsPipelinePage() {
     return () => clearTimeout(t)
   }, [locNote])
 
-  // Clicking a station marker opens the Stations panel on that station's charts and analysis
-  const [focusStation, setFocusStation] = useState<{ station: (typeof enrichedStations)[number]; nonce: number } | null>(null)
-  const handleStationClick = (clicked: { name: string; city: string }) => {
-    const match = enrichedStations.find(e => e.name === clicked.name && e.city === clicked.city)
-    if (!match) return
-    setFocusStation({ station: match, nonce: Date.now() })
-    setRailTab('stations')
+  // A click on a map station, kiln or industrial site opens it in the sidebar
+  const openFromMap = (f: MapFeatureClick) => {
+    if (f.kind === 'station') {
+      const s = f.station
+      const station = enrichedStations.find(e => e.name === s.name && e.city === s.city)
+        ?? { name: s.name, city: s.city, pm25: s.pm25, lat: s.lat ?? s.latitude, lon: s.lon ?? s.longitude, station_id: s.station_id }
+      setMapFocus({ type: 'station-detail', station })
+      setRailTab('stations')
+    } else if (f.kind === 'kiln') {
+      const kiln = kilnsData.find(k => String(k.id) === f.id)
+      if (!kiln) return
+      setMapFocus({ type: 'kiln-detail', kiln })
+      setRailTab('sources')
+    } else {
+      // Rendered-feature coordinates are tile-quantised: match by name, then take the nearest
+      const items = industryData.find(c => c.key === f.categoryKey)?.items ?? []
+      const named = f.name ? items.filter(i => i.name === f.name) : []
+      const pool = named.length ? named : items
+      let item: IndustryItem | undefined
+      let best = Infinity
+      for (const i of pool) {
+        const d = (i.lon - f.lng) ** 2 + (i.lat - f.lat) ** 2
+        if (d < best) { best = d; item = i }
+      }
+      if (!item) return
+      setMapFocus({ type: 'industry-detail', item, categoryKey: f.categoryKey })
+      setRailTab('sources')
+    }
   }
 
   // Only days whose Pakistan calendar day has ended (station daily aggregation can exist).
@@ -377,7 +400,7 @@ export default function OpsPipelinePage() {
             selectedDate={selectedPredDate}
             onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
             initialView="stations"
-            focusStation={focusStation}
+            focus={mapFocus?.type === 'station-detail' ? mapFocus : null}
             onClose={() => setRailTab(null)}
           />
         </div>
@@ -391,6 +414,7 @@ export default function OpsPipelinePage() {
             selectedDate={selectedPredDate}
             onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
             initialView="sources"
+            focus={mapFocus && mapFocus.type !== 'station-detail' ? mapFocus : null}
           />
         </div>
 
@@ -428,9 +452,9 @@ export default function OpsPipelinePage() {
             firesData={firesGeoJSON ?? null}
             stations={stationData?.stations ?? []}
             onMapUnavailable={setMapUnavailable}
-            onStationClick={handleStationClick}
             userLocation={userLoc}
             onMapReady={(fn) => setFlyTo(() => fn)}
+            onFeatureClick={openFromMap}
           />
         </MapErrorBoundary>
 

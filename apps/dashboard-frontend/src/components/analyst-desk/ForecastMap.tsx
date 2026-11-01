@@ -17,7 +17,7 @@ import { BAND_COLORS, BAND_LABELS, formatPM25 } from './utils'
 // (.env.production.local); the literal is the development fallback
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || ''
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'https://hawanama-152782825429.asia-south1.run.app'
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
 const MARKER_MIN_ZOOM = 4
 
 import { loadPakBoundary, isInsidePakistan } from './pakistan'

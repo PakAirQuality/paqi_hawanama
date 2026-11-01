@@ -5,15 +5,21 @@ import type { CurrentStation, ForecastEntry } from './types'
 import type { FiresGeoJSON } from './api'
 import { loadPakBoundary, isInsidePakistan, isPakBoundaryLoaded } from './pakistan'
 import { BAND_KEYS, BAND_SCALE_LABEL, bandColor, bandCounts, bandKey, bandLabel, unhealthyOrWorse } from '@/lib/aqi'
-import { formatDateOnly, formatPkt, pktToday } from '@/lib/time'
+import { formatDateOnly, formatPkt, pktDateOf, pktToday } from '@/lib/time'
 import { firesShortLabel, firesStatus } from '@/lib/fires'
+
+/** Milliseconds for a YYYY-MM-DD at UTC midnight, for whole-day differences. */
+function parseDay(d: string): number {
+  const [y, m, day] = d.split('-').map(Number)
+  return Date.UTC(y, m - 1, day)
+}
 
 interface ContextPanelProps {
   currentStations: CurrentStation[]
   forecasts: ForecastEntry[]
   firesGeoJSON: FiresGeoJSON | null
   selectedHorizon: number
-  /** the day the desk is describing (YYYY-MM-DD, Pakistan); defaults to today PKT */
+  /** issue date of the forecast the desk is showing (YYYY-MM-DD, Pakistan) */
   selectedDate?: string | null
 }
 
@@ -83,7 +89,13 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
     )
   }
 
-  const dayLabel = formatDateOnly(selectedDate || pktToday(), { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  // The brief describes live readings, so it is dated by their newest observation; the
+  // forecast issue date only appears when it lags behind (the forecast job did not run).
+  const obsDay = stats.latestObservation ? pktDateOf(stats.latestObservation) : pktToday()
+  const dayLabel = formatDateOnly(obsDay, { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
+  const forecastLagDays = selectedDate && selectedDate < obsDay
+    ? Math.round((parseDay(obsDay) - parseDay(selectedDate)) / 86_400_000)
+    : 0
   const bad = unhealthyOrWorse(stats.bands)
 
   return (
@@ -92,6 +104,11 @@ export function ContextPanel({ currentStations, forecasts, firesGeoJSON, selecte
       <div className="px-4 py-3 border-slate-100">
         <div className="text-[11px] text-slate-500 font-medium">Pakistan Daily Brief</div>
         <div className="text-sm font-semibold text-slate-800 mt-0.5">{dayLabel} <span className="text-[11px] font-normal text-slate-500">PKT</span></div>
+        {forecastLagDays > 0 && selectedDate && (
+          <div className="mt-1.5 rounded bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
+            Forecasts last issued {formatDateOnly(selectedDate, { weekday: 'short', month: 'short', day: 'numeric' })} · {forecastLagDays} day{forecastLagDays > 1 ? 's' : ''} old
+          </div>
+        )}
       </div>
 
       {/* Reporting-station mean */}

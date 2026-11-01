@@ -9,6 +9,8 @@ const AnalystPanel = dynamic(() => import('./AnalystTray').then(m => m.AnalystPa
 const StationTrendPanel = dynamic(() => import('./AnalystTray').then(m => m.StationTrendPanel), { ssr: false, loading: () => <div className="p-4 text-xs text-slate-500">Loading chart…</div> })
 import type { ChatMessage as ChatMessageType, CopilotAction, StationMention } from './types'
 import { useOptionalSelection } from '@/lib/selection'
+import { useQuery } from '@tanstack/react-query'
+import { fetchDailyBrief } from '@/components/ops-pipeline/api'
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app"
 const DESK_PREFIX = `${API_BASE}/api/v1/ops/analyst-desk`
@@ -297,12 +299,10 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
     if (!selectedDate) return
 
     if (trackerMode) {
-      // Re-brief whenever the selected date changes
+      // New conversation per date; it opens with that day's published brief (filled in below)
       if (trackerBriefedDate === selectedDate) return
       setTrackerBriefedDate(selectedDate)
-      const assistantId = crypto.randomUUID()
-      setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
-      streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate, context: selectionContext }, assistantId)
+      setMessages([{ id: `brief-${selectedDate}`, role: 'assistant', content: '', streaming: true }])
       return
     }
 
@@ -316,6 +316,21 @@ export function CopilotChat({ selectedDate, trackerMode = false, onAction, stati
     setMessages([{ id: assistantId, role: 'assistant', content: '', streaming: true }])
     streamResponse('/copilot/briefing', { session_id: sessionId, date: selectedDate, context: selectionContext }, assistantId)
   }, [selectedDate, trackerBriefedDate, briefingDone, sessionId, streamResponse, trackerMode])
+
+  // Tracker mode: the day's cached brief (same query as the BRIEF card), not a live model run;
+  // the model only runs when someone asks a question.
+  const { data: dailyBrief, isError: dailyBriefError } = useQuery({
+    queryKey: ['ops-brief', selectedDate],
+    queryFn: () => fetchDailyBrief(selectedDate!),
+    enabled: trackerMode && !!selectedDate,
+    staleTime: Infinity,
+    retry: 1,
+  })
+  useEffect(() => {
+    if (!trackerMode || (!dailyBrief && !dailyBriefError)) return
+    const content = dailyBrief?.narrative || `No daily brief has been published for ${selectedDate} yet. Ask a question below.`
+    setMessages(prev => prev.map(m => (m.id === `brief-${selectedDate}` ? { ...m, content, streaming: false } : m)))
+  }, [trackerMode, dailyBrief, dailyBriefError, selectedDate])
 
   // Send a message
   const sendMessage = useCallback(async (text: string) => {

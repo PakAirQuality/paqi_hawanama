@@ -24,7 +24,7 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: "episodes", label: "Episodes" },
 ];
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "https://hawanama-152782825429.asia-south1.run.app";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
 async function fetchStations(): Promise<StationListItem[]> {
   const res = await fetch(`${API_BASE}/api/v1/meta/stations`);

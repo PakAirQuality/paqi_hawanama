@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Pre-build script: fetch all Pakistan station IDs for static page generation
 
-import { readFileSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -37,13 +37,18 @@ async function main() {
     // The API does not apply ?country=, so the boundary decides.
     const stations = (data.stations || data).filter((s) => insidePakistan(s.longitude, s.latitude))
     const ids = stations.map((s) => s.id || s.station_id)
+    if (ids.length === 0) throw new Error('API returned no stations')
     mkdirSync(dirname(OUT_PATH), { recursive: true })
     writeFileSync(OUT_PATH, JSON.stringify(ids))
     console.log(`Wrote ${ids.length} station IDs to ${OUT_PATH}`)
   } catch (e) {
-    console.warn(`Failed to fetch stations: ${e.message}. Writing empty array.`)
-    mkdirSync(dirname(OUT_PATH), { recursive: true })
-    writeFileSync(OUT_PATH, '[]')
+    // An empty list would publish a build with no station pages.
+    if (existsSync(OUT_PATH) && JSON.parse(readFileSync(OUT_PATH, 'utf8')).length > 0) {
+      console.warn(`Failed to fetch stations: ${e.message}. Keeping the committed list.`)
+      return
+    }
+    console.error(`Failed to fetch stations: ${e.message}. No committed list to fall back on.`)
+    process.exit(1)
   }
 }
 

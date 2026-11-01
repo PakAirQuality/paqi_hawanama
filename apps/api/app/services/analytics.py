@@ -6,6 +6,7 @@ forecast-first for "alert/driver" queries.
 """
 
 from app.utils.timefmt import iso_z
+import asyncio
 import logging
 from datetime import date as date_cls, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
@@ -116,36 +117,27 @@ async def get_hotspots_daily(
     top_k: int = 5,
     country: str | None = None,
 ) -> dict:
-    """Current air quality hotspots based on actual station observations.
+    """Air quality hotspots based on actual station observations.
 
-    Queries the DB for the latest PM2.5 reading per station (last 24h),
-    groups by city/station/province, ranks by metric, and optionally
-    enriches with D+1 forecast outlook from GCS.
+    For a completed Pakistan day: the QA-filtered station daily means behind the map and
+    the daily brief (so the ranking matches the BRIEF card). For a day not aggregated yet:
+    the latest PM2.5 reading per station from the DB. Groups by city/station/province,
+    ranks by metric, and optionally enriches with D+1 forecast outlook from GCS.
     """
     dt = _resolve_date(date)
 
-    # Parse the target date for the observation window
-    try:
-        target_date = date_cls.fromisoformat(dt)
-    except ValueError:
-        target_date = date_cls.today()
-
-    window_end = datetime(
-        target_date.year, target_date.month, target_date.day,
-        23, 59, 59, tzinfo=timezone.utc,
-    )
-    window_start = window_end - timedelta(hours=24)
-
-    if geography == "station":
-        result = await _hotspots_station(db, window_start, window_end, metric, top_k, country)
-    elif geography == "province":
-        result = await _hotspots_grouped(
-            db, window_start, window_end, "state", metric, top_k, country,
+    daily = await _station_daily_safe(dt, country)
+    if daily:
+        result = await _hotspots_from_daily(db, daily, geography, metric, top_k)
+        observation_basis = (
+            "Pakistan-day daily mean of hourly PM2.5 per station (QA-filtered, at least 6 valid hours), "
+            "the same values as the map and the daily brief"
         )
+        observation_window = "pkt_day"
     else:
-        result = await _hotspots_grouped(
-            db, window_start, window_end, "city", metric, top_k, country,
-        )
+        result = await _hotspots_live(db, dt, geography, metric, top_k, country)
+        observation_basis = "Latest hourly PM2.5 reading per station (live; this day is not aggregated yet)"
+        observation_window = "latest_reading"
 
     national = result["national_summary"]
     hotspots = result["hotspots"]
@@ -197,11 +189,11 @@ async def get_hotspots_daily(
         data["forecast_outlook"] = forecast_outlook
 
     basis = {
-        "description": "Latest station observations (last 24h)"
+        "description": observation_basis
         + (", enriched with forecast outlook" if forecast_outlook else ""),
         "sources": ["station_observations"]
         + (["forecast_json"] if forecast_outlook else []),
-        "observation_window": "24h",
+        "observation_window": observation_window,
     }
     if forecast_outlook:
         basis["forecast_date"] = dt
@@ -215,6 +207,109 @@ async def get_hotspots_daily(
         target=geography,
         basis=basis,
     )
+
+
+async def _station_daily_safe(dt: str, country: str | None) -> list[dict] | None:
+    """Station daily means for ``dt`` (None when not aggregated yet, or for a country the
+    Pakistan station-daily files cannot be filtered to)."""
+    if country and country.lower() != "pakistan":
+        return None
+    from app.services.station_daily import load_station_daily
+
+    try:
+        data = await asyncio.to_thread(load_station_daily, dt, country)
+    except Exception as e:
+        logger.warning(f"Station daily load failed for {dt}: {e}")
+        return None
+    return (data or {}).get("stations") or None
+
+
+async def _hotspots_from_daily(
+    db: AsyncSession,
+    stations: list[dict],
+    geography: str,
+    metric: str,
+    top_k: int,
+) -> dict:
+    """Hotspots from station daily means; city ranking is the daily brief's own
+    (mean of station daily means per city)."""
+    vals = [s["pm25"] for s in stations]
+    national = _build_national_summary(vals, stations)
+    national["basis"] = "pkt_day_station_daily_mean"
+
+    if geography == "station":
+        ranked = sorted(stations, key=lambda s: s["pm25"], reverse=True)
+        hotspots = [{
+            "name": s.get("name") or "",
+            "station_id": s.get("station_id") or None,
+            "city": s.get("city") or "",
+            "pm25": _safe_round(s["pm25"]),
+            "risk_band": _classify_band(s["pm25"]),
+            "latitude": s.get("lat"),
+            "longitude": s.get("lon"),
+            "valid_hours": s.get("valid_hours"),
+        } for s in ranked[:top_k]]
+        return {"national_summary": national, "hotspots": hotspots}
+
+    if geography == "province":
+        ids = [s["station_id"] for s in stations if s.get("station_id")]
+        state_of: dict[str, str] = {}
+        if ids:
+            rows = (await db.execute(text("""
+                SELECT s.station_id, st.name AS state_name
+                FROM stations s LEFT JOIN states st ON s.state_id = st.id
+                WHERE s.station_id = ANY(:ids)
+            """), {"ids": ids})).mappings().all()
+            state_of = {r["station_id"]: r["state_name"] for r in rows if r["state_name"]}
+        key = lambda s: state_of.get(s.get("station_id") or "")
+    else:
+        key = lambda s: s.get("city") or None
+
+    groups: dict[str, list[float]] = {}
+    for s in stations:
+        g = key(s)
+        if g:
+            groups.setdefault(g, []).append(s["pm25"])
+    summary = [
+        {"name": g, "n_stations": len(v), "avg": sum(v) / len(v), "max": max(v)}
+        for g, v in groups.items()
+    ]
+    summary.sort(key=lambda r: r["avg"] if metric == "avg_pm25" else r["max"], reverse=True)
+    hotspots = [{
+        "name": r["name"],
+        "n_stations": r["n_stations"],
+        "avg_pm25": _safe_round(r["avg"]),
+        "max_pm25": _safe_round(r["max"]),
+        "worst_band": _classify_band(r["max"]),
+    } for r in summary[:top_k]]
+    return {"national_summary": national, "hotspots": hotspots}
+
+
+async def _hotspots_live(
+    db: AsyncSession,
+    dt: str,
+    geography: str,
+    metric: str,
+    top_k: int,
+    country: str | None,
+) -> dict:
+    """Latest reading per station inside the target date's window (DB, for days the
+    station-daily aggregation has not produced yet)."""
+    try:
+        target_date = date_cls.fromisoformat(dt)
+    except ValueError:
+        target_date = date_cls.today()
+
+    window_end = datetime(
+        target_date.year, target_date.month, target_date.day,
+        23, 59, 59, tzinfo=timezone.utc,
+    )
+    window_start = window_end - timedelta(hours=24)
+
+    if geography == "station":
+        return await _hotspots_station(db, window_start, window_end, metric, top_k, country)
+    group = "state" if geography == "province" else "city"
+    return await _hotspots_grouped(db, window_start, window_end, group, metric, top_k, country)
 
 
 async def _hotspots_station(

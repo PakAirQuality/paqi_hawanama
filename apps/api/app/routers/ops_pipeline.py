@@ -1115,17 +1115,30 @@ async def list_cog_dates(
         all_dates = sorted(backbone_dates)
 
     dates = all_dates[-limit:]
-    # A date is "complete" once the station daily aggregation for it can exist, i.e. the
-    # Pakistan calendar day has ended (the aggregation runs at 04:00 UTC). Clients must use
+    # A date is "complete" once its Pakistan calendar day has ended AND the station daily
+    # aggregation for it has been written (04:00 UTC next morning). The NRT prediction lands
+    # ~18:00 UTC the same day, so between midnight and 09:00 PKT the newest prediction has no
+    # station means or brief yet; clients open on the latest complete date. Clients must use
     # this flag rather than comparing against the browser's UTC date.
     from datetime import datetime as _dt
     from zoneinfo import ZoneInfo
+    from app.services.station_daily import RAW_DATA_BUCKET
     today_pkt = _dt.now(ZoneInfo("Asia/Karachi")).strftime("%Y-%m-%d")
+    # Only the newest ended days can still be waiting for aggregation; listing every
+    # partition takes seconds, so probe just those.
+    pending: set = set()
+    try:
+        raw_bucket = _gcs_client().bucket(RAW_DATA_BUCKET)
+        for d in [d for d in dates if d < today_pkt][-3:]:
+            if not any(True for _ in raw_bucket.list_blobs(prefix=f"raw/station_daily/date={d}/", max_results=1)):
+                pending.add(d)
+    except Exception as e:
+        logger.warning(f"Failed to check station daily aggregation, completeness falls back to the PKT day: {e}")
     details = [
         {
             "date": d,
             "models": [m for m, present in (("backbone", d in backbone_dates), ("support_aware", d in sa_dates)) if present],
-            "complete": d < today_pkt,
+            "complete": d < today_pkt and d not in pending,
         }
         for d in dates
     ]
@@ -1139,7 +1152,8 @@ async def list_cog_dates(
             "tilejson_url_template": "/api/v1/ops/pipeline/tiles/{date}/tilejson",
         },
         headers={
-            "Cache-Control": "public, max-age=300, s-maxage=3600, stale-while-revalidate=86400",
+            # Short edge TTL: "complete" flips when the morning aggregation lands.
+            "Cache-Control": "public, max-age=300, s-maxage=600, stale-while-revalidate=3600",
         },
     )
 
@@ -1758,121 +1772,23 @@ async def get_station_daily_observations(
     min_hours: int = Query(6, ge=1, le=24, description="Minimum valid hours to include a station"),
     country: Optional[str] = Query(None, description="Filter to a country (e.g. 'Pakistan') using exact boundary polygon"),
 ) -> Any:
-    """Serve QA-filtered station daily means. Uses pre-computed JSON (fast) with parquet fallback."""
+    """Serve QA-filtered station daily means (shared loader: map, brief and copilot agree)."""
     from fastapi.responses import JSONResponse
-
-    bucket_name = "paqi-raw-hawanama-data"
-    filter_pakistan = country and country.lower() == "pakistan"
+    from app.services.station_daily import load_station_daily
 
     try:
-        client = _gcs_client()
-        bucket = client.bucket(bucket_name)
-
-        # ── Fast path: pre-computed stations.json ──
-        json_path = f"raw/station_daily/date={obs_date}/stations.json"
-        json_blob = bucket.blob(json_path)
-        if json_blob.exists(client):
-            data = json.loads(json_blob.download_as_text())
-            # Apply min_hours filter if stricter than default (6)
-            if min_hours > 6:
-                data["stations"] = [
-                    s for s in data["stations"]
-                    if (s.get("valid_hours") or 0) >= min_hours
-                ]
-            # Apply country filter
-            if filter_pakistan:
-                data["stations"] = [
-                    s for s in data["stations"]
-                    if _point_in_pakistan(s.get("lat") or 0, s.get("lon") or 0)
-                ]
-            data["count"] = len(data["stations"])
-            return JSONResponse(
-                content=data,
-                headers={
-                    "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
-                },
-            )
-
-        # ── Slow fallback: parse parquets ──
-        import tempfile
-        import os
-        import shutil
-
-        prefix = f"raw/station_daily/date={obs_date}"
-        blobs = list(bucket.list_blobs(prefix=prefix))
-        parquet_blobs = [b for b in blobs if b.name.endswith(".parquet")]
-
-        if not parquet_blobs:
-            raise HTTPException(status_code=404, detail=f"No station daily data for {obs_date}")
-
-        import pandas as pd
-        tmp_dir = tempfile.mkdtemp()
-        try:
-            dfs = []
-            for blob in parquet_blobs:
-                tmp_path = os.path.join(tmp_dir, os.path.basename(blob.name))
-                blob.download_to_filename(tmp_path)
-                dfs.append(pd.read_parquet(tmp_path))
-
-            df = pd.concat(dfs, ignore_index=True)
-
-            # Apply country filter (parquets have country_name column)
-            if filter_pakistan:
-                if "country_name" in df.columns:
-                    df = df[df["country_name"].str.lower() == "pakistan"]
-                else:
-                    # Fallback to boundary polygon if no country column
-                    df = df[df.apply(
-                        lambda r: _point_in_pakistan(
-                            float(r.get("latitude") or r.get("lat") or 0),
-                            float(r.get("longitude") or r.get("lon") or 0),
-                        ), axis=1
-                    )]
-
-            hours_col = "pm25_ugm3_valid_hours" if "pm25_ugm3_valid_hours" in df.columns else None
-            if hours_col:
-                df = df[df[hours_col] >= min_hours]
-
-            pm25_col = "pm25_ugm3_mean" if "pm25_ugm3_mean" in df.columns else "pm25_daily_mean"
-            lat_col = next((c for c in ["latitude", "lat"] if c in df.columns), None)
-            lon_col = next((c for c in ["longitude", "lon"] if c in df.columns), None)
-
-            if pm25_col not in df.columns or lat_col is None or lon_col is None:
-                raise HTTPException(status_code=500, detail="Unexpected parquet schema")
-
-            df = df.dropna(subset=[pm25_col, lat_col, lon_col])
-
-            stations = []
-            for _, row in df.iterrows():
-                stations.append({
-                    "station_id": str(row.get("station_id", "")).strip(),
-                    "name": str(row.get("station_name", "")),
-                    "city": str(row.get("city_name", "")),
-                    "lat": round(float(row[lat_col]), 5),
-                    "lon": round(float(row[lon_col]), 5),
-                    "pm25": round(float(row[pm25_col]), 1),
-                    "valid_hours": int(row[hours_col]) if hours_col and pd.notna(row.get(hours_col)) else None,
-                    "complete": bool(row.get("pm25_ugm3_complete", 0)),
-                })
-
-            return JSONResponse(
-                content={
-                    "date": obs_date,
-                    "stations": stations,
-                    "count": len(stations),
-                },
-                headers={
-                    "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
-                },
-            )
-        finally:
-            shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    except HTTPException:
-        raise
+        data = load_station_daily(obs_date, country=country, min_hours=min_hours)
     except Exception as e:
         logger.error(f"Failed to load station daily for {obs_date}: {e}")
         raise HTTPException(status_code=500, detail="Internal error")
+    if data is None:
+        raise HTTPException(status_code=404, detail=f"No station daily data for {obs_date}")
+    return JSONResponse(
+        content=data,
+        headers={
+            "Cache-Control": "public, max-age=300, s-maxage=86400, stale-while-revalidate=86400",
+        },
+    )
 
 
 # =============================================================================
@@ -2235,48 +2151,9 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
     # ── Gather station observations ──
     stations: List[Dict] = []
     try:
-        client = _gcs_client()
-        bucket = client.bucket(RAW_DATA_BUCKET)
-
-        json_path = f"raw/station_daily/date={date}/stations.json"
-        json_blob = bucket.blob(json_path)
-        if json_blob.exists(client):
-            data = json.loads(json_blob.download_as_text())
-            all_stations = data.get("stations", [])
-            stations = [s for s in all_stations
-                        if _point_in_pakistan(s.get("lat") or 0, s.get("lon") or 0)]
-        else:
-            prefix = f"raw/station_daily/date={date}"
-            blobs = list(bucket.list_blobs(prefix=prefix))
-            parquet_blobs = [b for b in blobs if b.name.endswith(".parquet")]
-            if parquet_blobs:
-                import tempfile, os, shutil
-                import pandas as pd
-                tmp_dir = tempfile.mkdtemp()
-                try:
-                    dfs = []
-                    for blob in parquet_blobs:
-                        tmp_path = os.path.join(tmp_dir, os.path.basename(blob.name))
-                        blob.download_to_filename(tmp_path)
-                        dfs.append(pd.read_parquet(tmp_path))
-                    df = pd.concat(dfs, ignore_index=True)
-                    if "country_name" in df.columns:
-                        df = df[df["country_name"].str.lower() == "pakistan"]
-                    pm25_col = "pm25_ugm3_mean" if "pm25_ugm3_mean" in df.columns else "pm25_daily_mean"
-                    lat_col = next((c for c in ["latitude", "lat"] if c in df.columns), None)
-                    lon_col = next((c for c in ["longitude", "lon"] if c in df.columns), None)
-                    if pm25_col in df.columns and lat_col and lon_col:
-                        df = df.dropna(subset=[pm25_col, lat_col, lon_col])
-                        for _, row in df.iterrows():
-                            stations.append({
-                                "name": str(row.get("station_name", "")),
-                                "city": str(row.get("city_name", "")),
-                                "pm25": round(float(row[pm25_col]), 1),
-                                "lat": round(float(row[lat_col]), 5),
-                                "lon": round(float(row[lon_col]), 5),
-                            })
-                finally:
-                    shutil.rmtree(tmp_dir, ignore_errors=True)
+        from app.services.station_daily import load_station_daily
+        data = load_station_daily(date, country="Pakistan")
+        stations = data["stations"] if data else []
     except Exception as e:
         logger.warning(f"Brief: failed to load stations for {date}: {e}")
 
@@ -2369,8 +2246,8 @@ async def _generate_and_cache_brief(date: str, outputs_bucket: str) -> Dict[str,
             # This GET goes Cloud Run → Fastly → GCS, seeding the s-maxage=86400 response.
             try:
                 import httpx
-                brief_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/briefs/{date}"
-                stations_url = f"https://hawanama-2.web.app/api/v1/ops/pipeline/stations/daily/{date}?country=Pakistan&min_hours=6"
+                brief_url = f"https://hawanama.org/api/v1/ops/pipeline/briefs/{date}"
+                stations_url = f"https://hawanama.org/api/v1/ops/pipeline/stations/daily/{date}?country=Pakistan&min_hours=6"
                 async with httpx.AsyncClient(timeout=20.0) as warm_client:
                     brief_resp = await warm_client.get(brief_url)
                     stations_resp = await warm_client.get(stations_url)
