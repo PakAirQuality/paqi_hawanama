@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /apps/api
+    schedule:
+      interval: weekly
+    groups:
+      python:
+        update-types: [minor, patch]
+    ignore:
+      # pyarrow 21+ needs NumPy 2 and broke manifest reads on 2026-10-15; move them together.
+      - dependency-name: pyarrow
+        versions: [">=21"]
+      - dependency-name: numpy
+        versions: [">=2"]
+
+  - package-ecosystem: npm
+    directory: /apps/dashboard-frontend
+    schedule:
+      interval: weekly
+    groups:
+      dashboard:
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /apps/web-next
+    schedule:
+      interval: weekly
+    groups:
+      web:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

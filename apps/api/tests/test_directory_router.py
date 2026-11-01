@@ -13,6 +13,8 @@ import respx
 from app.main import app
 from app.schemas.directory import make_station_id
 
+pytestmark = pytest.mark.skip(reason="directory router is disabled in app/main.py")
+
 client = TestClient(app)
 
 

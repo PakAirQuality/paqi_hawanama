@@ -7,7 +7,7 @@
   },
   "scripts": {
     "dev": "next dev --port 3001",
-    "clean": "rm -rf .next out",
+    "clean": "node -e \"for (const d of ['.next', 'out']) require('fs').rmSync(d, { recursive: true, force: true })\"",
     "prebuild": "npm run clean && node scripts/fetch-station-ids.mjs",
     "build": "next build",
     "start": "next start",
