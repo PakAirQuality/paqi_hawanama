@@ -1,0 +1,59 @@
+name: Deploy API
+
+on:
+  workflow_dispatch:
+    inputs:
+      smoke:
+        description: Run the no-op build instead of deploying
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: deploy-api
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    timeout-minutes: 45
+    env:
+      PROJECT: hawanama-2
+      CONFIG: ${{ inputs.smoke && 'infra/ci/smoke.cloudbuild.yaml' || 'cloudbuild.yaml' }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          workload_identity_provider: projects/152782825429/locations/global/workloadIdentityPools/github/providers/paqi-hawanama
+          service_account: github-deployer@hawanama-2.iam.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@aa5489c8933f4cc7a4f7d45035b3b1440c9c10db # v3.0.1
+      # --async and a status poll: streaming logs from the CLI needs project Viewer.
+      - name: Build and deploy
+        run: |
+          id=$(gcloud builds submit --config "$CONFIG" --project "$PROJECT" --async --format='value(id)' \
+            --gcs-source-staging-dir=gs://hawanama-2-ci-builds/source \
+            --gcs-log-dir=gs://hawanama-2-ci-builds/logs \
+            --substitutions="_GIT_SHA=${GITHUB_SHA::7}")
+          echo "Build: https://console.cloud.google.com/cloud-build/builds/$id?project=$PROJECT"
+          while true; do
+            status=$(gcloud builds describe "$id" --project "$PROJECT" --format='value(status)')
+            case "$status" in
+              SUCCESS) break ;;
+              QUEUED|PENDING|WORKING) sleep 20 ;;
+              *) echo "Build ended with $status"; exit 1 ;;
+            esac
+          done
+      - name: Confirm the new revision is live
+        if: ${{ !inputs.smoke }}
+        run: |
+          for _ in $(seq 1 20); do
+            live=$(curl -fsSL https://hawanama-152782825429.asia-south1.run.app/api/v1/health/ \
+              | python3 -c "import json,sys; print(json.load(sys.stdin)['provenance']['git_sha'])" || true)
+            [ "$live" = "${GITHUB_SHA::7}" ] && exit 0
+            sleep 15
+          done
+          echo "Live revision reports $live, expected ${GITHUB_SHA::7}"
+          exit 1

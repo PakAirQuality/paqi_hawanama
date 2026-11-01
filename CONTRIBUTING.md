@@ -51,9 +51,9 @@ Both frontends need `NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN` in `.env.local` to draw ma
 
 ## Making a change
 
-1. Branch from `main`.
-2. Open a pull request. Direct pushes to `main` are blocked.
-3. Merge once CI is green.
+1. Fork the repo and branch from `main`.
+2. Open a pull request. CI runs on it, though a maintainer may need to approve your first run.
+3. A maintainer reviews and merges it. Direct pushes to `main` are blocked.
 
 | Check | What it does |
 |---|---|
