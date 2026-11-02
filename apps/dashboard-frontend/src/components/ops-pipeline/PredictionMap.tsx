@@ -7,6 +7,7 @@ import { formatPkt } from '@/lib/time'
 import { bandKey, normalizeBand, bandColor, classifyPm25 } from '@/lib/aqi'
 import { esc } from '@/lib/html'
 import { AqiCard } from '@/components/shared/AqiCard'
+import { WindParticleRenderer, type WindMetadata } from '@/components/analyst-desk/WindParticleLayer'
 import { Loader2 } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -69,6 +70,15 @@ interface PredictionMapProps {
   onFeatureClick?: (feature: MapFeatureClick) => void
   /** The visitor's position (only passed when it is inside Pakistan) */
   userLocation?: { lng: number; lat: number } | null
+  /** A side panel is taking width from the map (desktop only; on phones it floats over) */
+  panelOpen?: boolean
+  showStations?: boolean
+  /** The satellite PM2.5 surface. It only exists for past days, so forecast days turn it off. */
+  showSurface?: boolean
+  showWind?: boolean
+  showPopulation?: boolean
+  /** What a station's number means in this view, for the hover card */
+  stationCaption?: string
 }
 
 export type MapFeatureClick =
@@ -87,9 +97,6 @@ interface HoverPM25 {
 function pm25ToBand(pm25: number): string {
   return bandKey(pm25)
 }
-
-// Dark numerals on the light bands, white on the two darkest (contrast >= 4.5:1 on each fill)
-const LIGHT_TEXT_BANDS = new Set(['very_unhealthy', 'hazardous'])
 
 const BAND_COLORS: Record<string, string> = new Proxy({}, { get: (_t, k: string) => bandColor(k) })
 
@@ -113,7 +120,11 @@ function hitsStation(map: mapboxgl.Map, e: mapboxgl.MapMouseEvent): boolean {
 const MIN_ZOOM = 3.6
 const MAX_ZOOM = 16
 
-export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick, userLocation }: PredictionMapProps) {
+const PAKISTAN_BOUNDS: [[number, number], [number, number]] = [[60.8, 23.5], [77.9, 37.2]]
+const SUMMARY_CARD_PX = 380 // the floating card's width plus its margin
+const PANEL_SETTLE_MS = 350 // the side panel's spring has finished by then
+
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick, userLocation, panelOpen = false, showStations = true, showSurface = true, showWind = false, showPopulation = false, stationCaption }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -137,6 +148,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   // Click handlers are registered once at map creation; read the latest callback
   const onFeatureClickRef = useRef(onFeatureClick)
   onFeatureClickRef.current = onFeatureClick
+  const panelOpenRef = useRef(panelOpen)
+  const [wind, setWind] = useState<{ image: HTMLImageElement; meta: WindMetadata } | null>(null)
+  const viewChosenRef = useRef(false)
 
   // Refs for urban grid hover (same pattern as ForecastMap)
   const urbanGridsRef = useRef<Map<string, UrbanGrid>>(new Map())
@@ -172,6 +186,21 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     }
     fetchStations()
   }, [selectedDate, stationsProp])
+
+  // A side panel narrows the map: refit Pakistan into the space left beside the summary card,
+  // unless the visitor has already chosen their own view.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapLoaded || panelOpenRef.current === panelOpen) return
+    panelOpenRef.current = panelOpen
+    if (viewChosenRef.current) return
+    const timer = setTimeout(() => {
+      map.resize()
+      const right = Math.min(SUMMARY_CARD_PX, map.getContainer().clientWidth * 0.45)
+      map.fitBounds(PAKISTAN_BOUNDS, { padding: { top: 32, bottom: 96, left: 32, right }, duration: 500 })
+    }, PANEL_SETTLE_MS)
+    return () => clearTimeout(timer)
+  }, [panelOpen, mapLoaded])
 
   // Initialize map once
   useEffect(() => {
@@ -224,8 +253,12 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       onMapUnavailableRef.current?.(null)
     })
 
+    // Someone moving the map keeps their view; only drags, scrolls and pinches carry originalEvent
+    map.on('movestart', (e) => { if (e.originalEvent) viewChosenRef.current = true })
+
     // Expose flyTo callback to parent
     onMapReady?.((lng: number, lat: number, zoom?: number) => new Promise<void>((resolve) => {
+      viewChosenRef.current = true
       const done = () => { clearTimeout(timer); resolve() }
       const timer = setTimeout(() => { map.off('moveend', done); resolve() }, 4000) // already there: no move event
       map.once('moveend', done)
@@ -812,7 +845,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           pm25: stn.pm25,
           color: bandColor(band),
           band: normalizeBand(band),
-          text: LIGHT_TEXT_BANDS.has(normalizeBand(band)) ? '#ffffff' : '#111827',
+          text: '#0f172a',
         },
       })
     })
@@ -1028,6 +1061,85 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     setHoverPM25(null)
   }, [selectedDate, smoothed, model, mapLoaded])
 
+  // Declared after the tile effect, which re-creates these layers visible
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapLoaded) return
+    const vis = showSurface ? 'visible' : 'none'
+    for (const id of ['pm25-raster', ...URBAN_CITIES.map(c => `urban-${c.key}-layer`)]) {
+      if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', vis)
+    }
+    if (!showSurface) setHoverPM25(null)
+  }, [showSurface, selectedDate, smoothed, model, mapLoaded])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (map?.getLayer('stations-label')) map.setLayoutProperty('stations-label', 'visibility', showStations ? 'visible' : 'none')
+  }, [showStations, stations, mapLoaded])
+
+  // Population density
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapLoaded) return
+    if (map.getLayer('population-layer')) map.removeLayer('population-layer')
+    if (map.getSource('population')) map.removeSource('population')
+    if (!showPopulation) return
+    map.addSource('population', {
+      type: 'raster',
+      tiles: [`${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png?model=population`],
+      tileSize: 256,
+      minzoom: 4,
+      maxzoom: 14,
+      bounds: [60.8, 23.6, 77.9, 37.1],
+    })
+    map.addLayer({
+      id: 'population-layer',
+      type: 'raster',
+      source: 'population',
+      slot: 'middle',
+      paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 10, 0.6, 14, 0.5] },
+    })
+  }, [showPopulation, selectedDate, mapLoaded])
+
+  // Wind: the texture is fetched the first time it is turned on
+  useEffect(() => {
+    if (!showWind || wind) return
+    let mounted = true
+    ;(async () => {
+      try {
+        const [texture, metadata] = await Promise.all([
+          fetch(`${API_BASE}/api/v1/data-sources/wind/texture`),
+          fetch(`${API_BASE}/api/v1/data-sources/wind/metadata`),
+        ])
+        if (!texture.ok || !metadata.ok) return
+        const [blob, meta] = await Promise.all([texture.blob(), metadata.json()])
+        const image = new Image()
+        image.crossOrigin = 'anonymous'
+        await new Promise<void>((resolve, reject) => {
+          image.onload = () => resolve()
+          image.onerror = () => reject(new Error('Failed to decode wind texture'))
+          image.src = URL.createObjectURL(blob)
+        })
+        if (mounted) setWind({ image, meta })
+      } catch (err) {
+        console.warn('Wind data fetch failed:', err)
+      }
+    })()
+    return () => { mounted = false }
+  }, [showWind, wind])
+
+  useEffect(() => {
+    if (!mapRef.current || !mapLoaded || !wind || !showWind) return
+    let renderer: WindParticleRenderer | null = null
+    try {
+      renderer = new WindParticleRenderer(mapRef.current, wind.image, wind.meta)
+      renderer.start()
+    } catch (err) {
+      console.warn('Wind renderer failed:', err)
+    }
+    return () => renderer?.destroy()
+  }, [wind, showWind, mapLoaded])
+
   return (
     <div className="relative w-full h-full">
       <div ref={mapContainer} className="w-full h-full" />
@@ -1039,7 +1151,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
             pm25={hoveredStation.pm25}
             title={hoveredStation.name}
             subtitle={hoveredStation.city}
-            caption={hoveredStation.valid_hours != null ? `${hoveredStation.valid_hours}-hour mean PM2.5` : 'Daily mean PM2.5'}
+            caption={stationCaption ?? (hoveredStation.valid_hours != null ? `${hoveredStation.valid_hours}-hour mean PM2.5` : 'Daily mean PM2.5')}
           />
         </div>
       )}

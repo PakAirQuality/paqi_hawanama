@@ -6,8 +6,8 @@ import { Radio, ChevronUp, ChevronDown } from 'lucide-react'
 import { fetchDailyStations, fetchDailyBrief } from '@/lib/api'
 
 const BAND_COLORS: Record<string, string> = {
-  good: '#6ecc39', moderate: '#f0c20c', unhealthy: '#f18017',
-  very_unhealthy: '#a070b5', severe: '#ef4444',
+  good: '#a8e05f', moderate: '#fdd64b', unhealthy: '#fe6a69',
+  very_unhealthy: '#a97abc', severe: '#a87383',
 }
 const BAND_LABELS: Record<string, string> = {
   good: 'good', moderate: 'moderate', unhealthy: 'unhealthy',

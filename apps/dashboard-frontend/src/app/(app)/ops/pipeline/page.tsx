@@ -1,11 +1,11 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { m, useDragControls } from 'motion/react'
 import { useIsMobile } from '@/lib/useMediaQuery'
 import { haversineKm } from '@/lib/geo'
-import { ChevronLeft, ChevronRight, Calendar, LocateFixed } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar, LocateFixed, X } from 'lucide-react'
 
 import { fetchTileDates, fetchStationDaily, fetchPredictionData, fetchRunReport, fetchStationDirectory } from '@/components/ops-pipeline'
 import { PredictionMap, type MapFeatureClick } from '@/components/ops-pipeline/PredictionMap'
@@ -14,18 +14,31 @@ import { DatePicker } from '@/components/ops-pipeline/DatePicker'
 import { StructuresTab, type IndustryCategory, type IndustryItem, type KilnItem, type StructuresFocus } from '@/components/ops-pipeline/StructuresTab'
 import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
-import { fetchFires } from '@/components/analyst-desk/api'
+import type { CopilotAction } from '@/components/analyst-desk/types'
+import { LayersPanel } from '@/components/analyst-desk/LayersPanel'
+import { fetchAvailableDates, fetchCurrentStations, fetchFires, fetchForecast } from '@/components/analyst-desk/api'
+import { bandKey } from '@/lib/aqi'
+import { cityCentre } from '@/lib/chat/actions'
+import { firesShortLabel, firesStatus } from '@/lib/fires'
+import { availableLeads, daysBetween, forecastReadings, isForecastLead, latestReading, leadForDaysAhead, liveReadings, rampCount, targetDate, type ForecastLead, type FutureStep, type TimelineStep } from '@/lib/timeline'
 import { loadPakBoundary, isInsidePakistan } from '@/components/analyst-desk/pakistan'
 import { useSelection } from '@/lib/selection'
-import { formatDateOnly, pktToday } from '@/lib/time'
+import { formatDateOnly, formatPkt, pktToday } from '@/lib/time'
+import type { StationReading } from '@/components/ops-pipeline/types'
 import { INDUSTRY_CATEGORIES, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
 import { MapErrorBoundary, MapUnavailableNotice } from '@/components/MapErrorBoundary'
 import type { MapUnavailableReason } from '@/lib/webgl'
 
 export default function OpsPipelinePage() {
   const selection = useSelection()
+  // The newest finished day unless a past day is chosen: its satellite surface sits under today's readings
   const [selectedPredDate, setSelectedPredDate] = useState<string | null>(null)
+  // Today or a forecast day; null means a past day
+  const [futureStep, setFutureStep] = useState<FutureStep | null>('now')
+  // Days ahead asked for by a shared link, until the forecast it needs has loaded
+  const [linkedDaysAhead, setLinkedDaysAhead] = useState<number | null>(null)
   const [model, setModel] = useState<'backbone' | 'support_aware'>('backbone')
+  const [networkFilter, setNetworkFilter] = useState<string | null>(null)
 
   // Side channel state
   const [railTab, setRailTab] = useState<RailTab | null>(null)
@@ -39,6 +52,10 @@ export default function OpsPipelinePage() {
   const [showKilns, setShowKilns] = useState(false)
   const [showIndustry, setShowIndustry] = useState(false)
   const [showFires, setShowFires] = useState(false)
+  const [showStations, setShowStations] = useState(true)
+  const [showSurface, setShowSurface] = useState(true)
+  const [showWind, setShowWind] = useState(false)
+  const [showPopulation, setShowPopulation] = useState(false)
 
   // Map flyTo callback + static data
   const [flyTo, setFlyTo] = useState<((lng: number, lat: number, zoom?: number) => Promise<void>) | null>(null)
@@ -84,29 +101,23 @@ export default function OpsPipelinePage() {
   const [mapKey, setMapKey] = useState(0)
   const retryMap = () => { setMapUnavailable(null); setMapKey(k => k + 1) }
 
-  // Shareable URLs: ?date=YYYY-MM-DD&model=support_aware&layers=kilns,industry,fires
+  // Shareable URLs: ?date=YYYY-MM-DD or ?view=today|1|2|3, &model=support_aware&layers=kilns,industry,fires
   const urlApplied = useRef(false)
   useEffect(() => {
     if (urlApplied.current || typeof window === 'undefined') return
     urlApplied.current = true
     const q = new URLSearchParams(window.location.search)
-    const d = q.get('date'); if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) setSelectedPredDate(d)
+    const d = q.get('date')
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setSelectedPredDate(d); setFutureStep(null) }
+    const v = q.get('view'); if (v === '1' || v === '2' || v === '3') setLinkedDaysAhead(Number(v))
     const m = q.get('model'); if (m === 'support_aware' || m === 'backbone') setModel(m)
     const layers = q.get('layers')
     if (layers != null) {
       const on = new Set(layers.split(',').filter(Boolean))
       setShowKilns(on.has('kilns')); setShowIndustry(on.has('industry')); setShowFires(on.has('fires'))
+      setShowWind(on.has('wind')); setShowPopulation(on.has('population'))
     }
   }, [])
-  useEffect(() => {
-    if (!selectedPredDate || typeof window === 'undefined') return
-    const q = new URLSearchParams()
-    q.set('date', selectedPredDate)
-    if (model !== 'backbone') q.set('model', model)
-    const layers = [showKilns && 'kilns', showIndustry && 'industry', showFires && 'fires'].filter(Boolean).join(',')
-    q.set('layers', layers)
-    window.history.replaceState(null, '', `${window.location.pathname}?${q}`)
-  }, [selectedPredDate, model, showKilns, showIndustry, showFires])
 
   // Tell mapbox about container changes only when the size actually changes
   const mapWrapperRef = useRef<HTMLDivElement>(null)
@@ -132,8 +143,70 @@ export default function OpsPipelinePage() {
   const { data: stationData } = useQuery({
     queryKey: ['ops-station-daily', selectedPredDate, 6],
     queryFn: () => fetchStationDaily(selectedPredDate!, 'Pakistan', 6),
-    enabled: !!selectedPredDate,
+    enabled: !!selectedPredDate && futureStep === null,
   })
+
+  const today = pktToday()
+
+  // Latest hourly readings, for Today
+  const { data: liveData, isError: liveFailed } = useQuery({
+    queryKey: ['current-stations'],
+    queryFn: fetchCurrentStations,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 2,
+  })
+
+  // The newest forecast run, for the days ahead
+  const { data: forecastDates } = useQuery({
+    queryKey: ['forecast-dates'],
+    queryFn: fetchAvailableDates,
+    staleTime: 10 * 60 * 1000,
+  })
+  const forecastIssue = forecastDates?.dates?.[0] ?? null
+  const { data: forecastData } = useQuery({
+    queryKey: ['forecast', forecastIssue],
+    queryFn: () => fetchForecast(forecastIssue as string),
+    enabled: !!forecastIssue,
+    staleTime: 5 * 60 * 1000,
+    retry: 2,
+  })
+  const forecasts = useMemo(() => forecastData?.forecasts ?? [], [forecastData])
+  const daysAheadOf = (lead: ForecastLead) => {
+    const date = targetDate(forecasts, lead)
+    return date ? daysBetween(today, date) : lead
+  }
+  const leads = useMemo(() => availableLeads(forecasts, today), [forecasts, today])
+  useEffect(() => {
+    if (linkedDaysAhead == null || !forecastData) return
+    setLinkedDaysAhead(null)
+    const lead = leadForDaysAhead(forecasts, today, linkedDaysAhead)
+    if (lead) setFutureStep(lead)
+  }, [linkedDaysAhead, forecastData, forecasts, today])
+  useEffect(() => {
+    if (!selectedPredDate || typeof window === 'undefined') return
+    const q = new URLSearchParams()
+    if (futureStep === null) q.set('date', selectedPredDate)
+    else if (futureStep === 'now') q.set('view', 'today')
+    else q.set('view', String(daysAheadOf(futureStep)))
+    if (model !== 'backbone') q.set('model', model)
+    const layers = [showKilns && 'kilns', showIndustry && 'industry', showFires && 'fires', showWind && 'wind', showPopulation && 'population'].filter(Boolean).join(',')
+    q.set('layers', layers)
+    window.history.replaceState(null, '', `${window.location.pathname}?${q}`)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPredDate, futureStep, forecastData, model, showKilns, showIndustry, showFires, showWind, showPopulation])
+
+  // Never leave the page empty: fall back if today's readings fail or a forecast day is not available
+  useEffect(() => { if (futureStep === 'now' && liveFailed) setFutureStep(null) }, [futureStep, liveFailed])
+  useEffect(() => {
+    if (isForecastLead(futureStep) && forecastData && !leads.includes(futureStep)) setFutureStep('now')
+  }, [futureStep, forecastData, leads])
+
+  const readings = useMemo<StationReading[]>(() => {
+    if (futureStep === 'now') return liveReadings(liveData?.stations ?? [])
+    if (isForecastLead(futureStep)) return forecastReadings(forecasts, futureStep)
+    return stationData?.stations ?? []
+  }, [futureStep, liveData, forecasts, stationData])
 
   // Grid stats for the model the map is showing (area average over the model domain)
   const { data: predictionData } = useQuery({
@@ -148,14 +221,15 @@ export default function OpsPipelinePage() {
     enabled: !!selectedPredDate,
   })
 
-  // Satellite fire detections — fetched for the selected Pakistan day, filtered to Pakistan.
+  // Satellite fire detections — fetched for the Pakistan day in view, filtered to Pakistan.
   // The response carries an explicit status (ok/empty/partial/stale/unavailable); the panel
   // shows it, so a stale or missing day is never disguised as "no fires".
+  const fireDay = futureStep === null ? selectedPredDate : today
   const { data: firesGeoJSON } = useQuery({
-    queryKey: ['ops-fires', selectedPredDate],
+    queryKey: ['ops-fires', fireDay],
     queryFn: async () => {
       await loadPakBoundary()
-      const data = await fetchFires(selectedPredDate!)
+      const data = await fetchFires(fireDay as string)
       return {
         ...data,
         features: data.features.filter(f => {
@@ -164,7 +238,7 @@ export default function OpsPipelinePage() {
         }),
       }
     },
-    enabled: !!selectedPredDate,
+    enabled: !!fireDay,
     retry: 1,
   })
 
@@ -194,7 +268,7 @@ export default function OpsPipelinePage() {
 
   // Enrich daily stations with station_ids + network from directory
   const enrichedStations = useMemo(() => {
-    return (stationData?.stations ?? [])
+    return readings
       .map(s => {
         const sid = s.station_id?.trim() || stationIdLookup.get(`${s.name}|${s.city}`)
         return {
@@ -204,11 +278,18 @@ export default function OpsPipelinePage() {
           lat: s.lat ?? s.latitude,
           lon: s.lon ?? s.longitude,
           station_id: sid ?? undefined,
+          valid_hours: s.valid_hours,
           network: providerMap?.by_name_city?.[`${s.name}|${s.city}`] || (sid && providerMap?.by_station_id?.[sid]) || providerMap?.by_name?.[s.name] || undefined,
         }
       })
       .filter(s => s.pm25 != null)
-  }, [stationData, stationIdLookup, providerMap])
+  }, [readings, stationIdLookup, providerMap])
+
+  const shownStations = useMemo(() => {
+    if (!networkFilter) return enrichedStations
+    const wanted = networkFilter.toLowerCase()
+    return enrichedStations.filter(s => s.network?.toLowerCase().includes(wanted))
+  }, [enrichedStations, networkFilter])
 
   // ── Where the visitor is: inside Pakistan, fly there and show the nearest monitor ──
   const NEARBY_RADIUS_KM = 50
@@ -262,6 +343,20 @@ export default function OpsPipelinePage() {
     return () => clearTimeout(t)
   }, [locNote])
 
+  // The open station follows the day in view; one with no reading on that day closes
+  const followedStation = mapFocus?.type === 'station-detail'
+    ? enrichedStations.find(s => s.name === mapFocus.station.name && s.city === mapFocus.station.city)
+    : undefined
+  const stationFocus = useMemo(
+    () => (mapFocus?.type === 'station-detail' && followedStation ? { ...mapFocus, station: followedStation } : null),
+    [mapFocus, followedStation],
+  )
+  useEffect(() => {
+    if (mapFocus?.type !== 'station-detail' || followedStation || !enrichedStations.length) return
+    setMapFocus(null)
+    setRailTab(tab => (tab === 'stations' ? null : tab))
+  }, [mapFocus, followedStation, enrichedStations.length])
+
   // A click on a map station, kiln or industrial site opens it in the sidebar
   const openFromMap = (f: MapFeatureClick) => {
     if (f.kind === 'station') {
@@ -292,6 +387,43 @@ export default function OpsPipelinePage() {
     }
   }
 
+  // Stations for the Analytics charts and for recognising city names in chat answers
+  const chatStations = useMemo(() => enrichedStations.map(s => ({
+    pm25: s.pm25,
+    band: bandKey(s.pm25 as number),
+    city: s.city || '',
+  })), [enrichedStations])
+
+  const handleCopilotAction = useCallback((action: CopilotAction, fromClick: boolean) => {
+    if (action.type === 'show_station_trend') {
+      setRailTab('analytics')
+      return
+    }
+    if (action.type === 'filter_network') {
+      setNetworkFilter(action.network ?? null)
+      return
+    }
+    if (action.type === 'set_horizon') {
+      if (action.horizon === 0) { setFutureStep('now'); return }
+      const lead = leadForDaysAhead(forecasts, today, action.horizon ?? 0)
+      if (lead) setFutureStep(lead)
+      return
+    }
+    let place: { lng: number; lat: number } | null = null
+    if (action.type === 'zoom_to_city' && action.city) {
+      place = cityCentre(enrichedStations, action.city)
+    } else if (action.type === 'zoom_to_station') {
+      const station = enrichedStations.find(s => s.station_id === action.station_id)
+      const lng = action.lng ?? station?.lon
+      const lat = action.lat ?? station?.lat
+      if (lng != null && lat != null) place = { lng, lat }
+    }
+    if (!place) return
+    flyTo?.(place.lng, place.lat, action.type === 'zoom_to_city' ? 10 : 12)
+    // On phones the chat covers the map: close it when the person asked to see the place
+    if (fromClick && isMobile) setRailTab(null)
+  }, [enrichedStations, flyTo, isMobile, forecasts, today])
+
   // Only days whose Pakistan calendar day has ended (station daily aggregation can exist).
   // The API says which (details[].complete); fall back to the PKT date, never the browser's UTC date.
   const dates = useMemo(() => {
@@ -299,8 +431,23 @@ export default function OpsPipelinePage() {
     if (details?.length) return details.filter(d => d.complete).map(d => d.date)
     const today = pktToday()
     return (tileDates?.dates || []).filter((d: string) => d < today)
-  }, [tileDates])
+  }, [tileDates, today])
   const currentIndex = selectedPredDate ? dates.indexOf(selectedPredDate) : -1
+
+  // One timeline: past days, today, then the forecast days
+  const steps = useMemo<TimelineStep[]>(() => [...dates, 'now', ...leads], [dates, leads])
+  const stepIndex = steps.indexOf(futureStep ?? selectedPredDate ?? '')
+  const goToStep = (step: TimelineStep | undefined) => {
+    if (step === undefined) return
+    if (step === 'now' || isForecastLead(step)) { setFutureStep(step); return }
+    setFutureStep(null)
+    setSelectedPredDate(step)
+  }
+
+  // Today and forecast days sit on the newest finished day's surface and model data
+  useEffect(() => {
+    if (futureStep !== null && dates.length) setSelectedPredDate(dates[dates.length - 1])
+  }, [futureStep, dates])
 
   useEffect(() => {
     if (dates.length > 0 && !selectedPredDate) {
@@ -308,16 +455,55 @@ export default function OpsPipelinePage() {
     }
   }, [dates, selectedPredDate])
 
+  const viewDay = futureStep === null ? selectedPredDate
+    : futureStep === 'now' ? today
+    : targetDate(forecasts, futureStep)
+
   // Mirror the page's choices into the shared selection (map, cards, chat all read it)
   useEffect(() => {
-    selection.setDate(selectedPredDate, !!selectedPredDate && selectedPredDate === dates[dates.length - 1])
-  }, [selectedPredDate, dates]) // eslint-disable-line react-hooks/exhaustive-deps
+    selection.setDate(viewDay, futureStep === 'now')
+  }, [viewDay, futureStep]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { selection.setModel(model) }, [model]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     selection.setLayer('kilns', showKilns); selection.setLayer('industry', showIndustry); selection.setLayer('fires', showFires)
   }, [showKilns, showIndustry, showFires]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const formatDisplayDate = (dateStr: string) => formatDateOnly(dateStr)
+
+  // ── How the page words the day in view ──
+  const mode = futureStep === null ? 'day' : futureStep === 'now' ? 'now' : 'forecast'
+  const longDay = (d: string | null) => d ? formatDateOnly(d, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : ''
+  const timelineLabel = mode === 'day' ? (selectedPredDate ? formatDisplayDate(selectedPredDate) : '')
+    : mode === 'now' ? 'Today'
+    : viewDay ? formatDateOnly(viewDay, { weekday: 'short', month: 'short', day: 'numeric' }) : ''
+  const dayLabel = mode === 'now' ? `Today, ${longDay(today)}` : mode === 'forecast' ? `Forecast for ${longDay(viewDay)}` : undefined
+  const readingLabel = mode === 'now' ? 'Latest hourly PM2.5' : mode === 'forecast' ? 'Forecast PM2.5' : 'PM2.5 daily mean'
+
+  // Today's run lands in the afternoon, so yesterday's is normal until then; two days means one was missed
+  const issueLag = forecastIssue ? daysBetween(forecastIssue, today) : 0
+  const forecastNotice = mode !== 'day' && issueLag > 1 && forecastIssue
+    ? `Forecasts last issued ${formatDateOnly(forecastIssue, { month: 'short', day: 'numeric' })}, ${issueLag} days old`
+    : null
+
+  const lastReading = latestReading(liveData?.stations ?? [])
+  const viewDetail = mode === 'now'
+    ? `${lastReading ? `Latest hourly readings, last observation ${formatPkt(lastReading)}.` : 'Latest hourly readings.'}${selectedPredDate ? ` Map shading is the satellite estimate for ${formatDisplayDate(selectedPredDate)}.` : ''}`
+    : mode === 'forecast' ? 'Station forecasts only: there is no satellite estimate for days ahead.' : null
+
+  const fireCount = firesGeoJSON?.features?.length ?? 0
+  const fireStatus = firesStatus(firesGeoJSON ?? null)
+  const fireLabel = firesShortLabel(firesGeoJSON ?? null, fireCount)
+  const evidence = mode === 'day' ? null : {
+    fires: fireStatus === 'unavailable' ? '—' : String(fireCount),
+    firesLabel: fireStatus === 'unavailable' ? 'Fire data unavailable'
+      : fireStatus === 'stale' ? `Fire detections (${firesGeoJSON?.date})`
+      : `${mode === 'forecast' ? 'Fire detections today' : 'Satellite fire detections'}${fireLabel.warn ? `, ${fireLabel.text.split(', ').slice(1).join(', ')}` : ''}`,
+    firesWarn: fireLabel.warn,
+    ramps: rampCount(forecasts, isForecastLead(futureStep) ? futureStep : 1),
+  }
+
+  // Questions on today or the days ahead belong to the newest forecast run
+  const chatDate = futureStep === null ? selectedPredDate : forecastIssue ?? selectedPredDate
 
   if (tileDatesLoading) {
     return (
@@ -341,7 +527,7 @@ export default function OpsPipelinePage() {
     )
   }
 
-  if (!selectedPredDate) return null
+  if (!selectedPredDate || !chatDate) return null
 
   return (
     <div className="relative flex flex-1 min-h-0 overflow-hidden max-md:flex-col-reverse">
@@ -350,7 +536,7 @@ export default function OpsPipelinePage() {
         activeTab={railTab}
         onTabChange={setRailTab}
         isStreaming={isStreaming}
-        tabs={['chat', 'analytics', 'sources']}
+        tabs={['chat', 'layers', 'sources']}
       />
 
       {/* Sliding panel: width springs open, content stays 370px wide so it never reflows mid-animation */}
@@ -384,24 +570,45 @@ export default function OpsPipelinePage() {
           height: '100%',
         }}>
           <CopilotChat
-            selectedDate={selectedPredDate}
-            trackerMode={true}
+            selectedDate={chatDate}
+            briefDate={selectedPredDate}
+            onAction={handleCopilotAction}
+            stations={chatStations}
             onStreamingChange={setIsStreaming}
             activeTab={railTab === 'analytics' ? 'analytics' : 'chat'}
+            onCloseTrend={() => setRailTab('chat')}
           />
         </div>
 
         {/* Stations panel */}
         <div style={{ display: railTab === 'stations' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
           <StructuresTab
-            stations={enrichedStations}
+            stations={shownStations}
             kilns={[]}
             industryCategories={[]}
-            selectedDate={selectedPredDate}
+            selectedDate={futureStep === null ? selectedPredDate : today}
             onFlyTo={(lng, lat, zoom) => flyTo?.(lng, lat, zoom)}
             initialView="stations"
-            focus={mapFocus?.type === 'station-detail' ? mapFocus : null}
+            focus={stationFocus}
             onClose={() => setRailTab(null)}
+            stationCaption={readingLabel}
+            stationForecast={mode === 'forecast' ? { forecasts, today, date: viewDay } : undefined}
+          />
+        </div>
+
+        {/* Layers panel */}
+        <div style={{ display: railTab === 'layers' ? 'flex' : 'none', flexDirection: 'column', height: '100%' }}>
+          <LayersPanel
+            showStations={showStations}
+            onToggleStations={() => setShowStations(v => !v)}
+            showSatellite={showSurface}
+            onToggleSatellite={() => setShowSurface(v => !v)}
+            showFires={showFires}
+            onToggleFires={() => setShowFires(v => !v)}
+            showWind={showWind}
+            onToggleWind={() => setShowWind(v => !v)}
+            showPopulation={showPopulation}
+            onTogglePopulation={() => setShowPopulation(v => !v)}
           />
         </div>
 
@@ -430,7 +637,7 @@ export default function OpsPipelinePage() {
             <MapUnavailableNotice message={message} retry={retry}>
               <div className="h-full rounded-xl border bg-white overflow-hidden">
                 <StructuresTab
-                  stations={enrichedStations}
+                  stations={shownStations}
                   kilns={[]}
                   industryCategories={[]}
                   selectedDate={selectedPredDate}
@@ -450,11 +657,17 @@ export default function OpsPipelinePage() {
             showIndustry={showIndustry}
             showFires={showFires}
             firesData={firesGeoJSON ?? null}
-            stations={stationData?.stations ?? []}
+            stations={shownStations as StationReading[]}
             onMapUnavailable={setMapUnavailable}
             userLocation={userLoc}
             onMapReady={(fn) => setFlyTo(() => fn)}
             onFeatureClick={openFromMap}
+            panelOpen={!!railTab && !isMobile}
+            showStations={showStations}
+            showSurface={showSurface && mode !== 'forecast'}
+            showWind={showWind}
+            showPopulation={showPopulation}
+            stationCaption={mode === 'day' ? undefined : readingLabel}
           />
         </MapErrorBoundary>
 
@@ -465,17 +678,35 @@ export default function OpsPipelinePage() {
           selectedDate={selectedPredDate}
           model={model}
           onModelChange={setModel}
-          stations={stationData?.stations ?? []}
+          stations={shownStations as StationReading[]}
           predictionStats={predictionData?.stats ?? null}
           runReport={runReport ?? null}
+          mode={mode}
+          dayLabel={dayLabel}
+          readingLabel={readingLabel}
+          notice={forecastNotice}
+          detail={viewDetail}
+          evidence={evidence}
         />
+
+        {/* Network filter set from the chat */}
+        {networkFilter && (
+          <button
+            onClick={() => setNetworkFilter(null)}
+            aria-label={`Stop showing only ${networkFilter} stations`}
+            className="absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-full bg-slate-900 px-3 py-1.5 text-xs font-medium text-white shadow-lg max-md:top-14"
+          >
+            {networkFilter} stations only
+            <X size={13} />
+          </button>
+        )}
 
         {/* Find me */}
         <button
           onClick={locate}
           disabled={locating}
           aria-label="Show air quality where I am"
-          className="absolute bottom-[152px] right-3 md:bottom-[124px] md:right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-colors hover:text-slate-950 disabled:opacity-60"
+          className="absolute bottom-[104px] right-3 md:bottom-[76px] md:right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-colors hover:text-slate-950 disabled:opacity-60"
           style={{
             background: 'rgba(255,255,255,0.82)',
             backdropFilter: 'blur(20px) saturate(180%)',
@@ -489,42 +720,15 @@ export default function OpsPipelinePage() {
         {locNote && (
           <div
             role="status"
-            className="absolute bottom-[152px] right-16 md:bottom-[128px] md:right-[68px] z-10 max-w-[260px] rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-lg"
+            className="absolute bottom-[104px] right-16 md:bottom-[80px] md:right-[68px] z-10 max-w-[260px] rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-lg"
           >
             {locNote}
           </div>
         )}
 
-        {/* Fires layer switch */}
-        <label
-          className="absolute bottom-[104px] right-3 md:bottom-[76px] md:right-4 z-10 flex cursor-pointer items-center gap-2.5 rounded-full py-1.5 pl-3.5 pr-2 text-[13px] font-medium text-slate-900"
-          style={{
-            background: 'rgba(255,255,255,0.82)',
-            backdropFilter: 'blur(20px) saturate(180%)',
-            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
-            border: '1px solid rgba(15,23,42,0.08)',
-            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
-          }}
-        >
-          Fires
-          <button
-            role="switch"
-            aria-checked={showFires}
-            aria-label="Show satellite fire detections"
-            onClick={() => setShowFires(v => !v)}
-            className={`relative h-6 w-10 rounded-full transition-colors ${showFires ? 'bg-slate-900' : 'bg-slate-300'}`}
-          >
-            <m.span
-              className="absolute top-0.5 h-5 w-5 rounded-full bg-white shadow-sm"
-              animate={{ left: showFires ? 18 : 2 }}
-              transition={{ type: 'spring', stiffness: 500, damping: 34 }}
-            />
-          </button>
-        </label>
-
         {/* Timeline — one glass pill floating at the bottom of the map */}
         <div
-          className="absolute bottom-12 left-3 right-3 md:bottom-4 md:left-4 md:right-4 z-10 flex items-center gap-2 rounded-full px-2 py-1.5"
+          className="absolute bottom-12 left-3 right-3 md:bottom-4 md:left-4 md:right-4 z-10 flex items-center gap-1 rounded-full px-2 py-1.5 lg:gap-2"
           style={{
             background: 'rgba(255,255,255,0.82)',
             backdropFilter: 'blur(20px) saturate(180%)',
@@ -536,8 +740,8 @@ export default function OpsPipelinePage() {
           aria-label="Date"
         >
           <button
-            onClick={() => { if (currentIndex > 0) setSelectedPredDate(dates[currentIndex - 1]) }}
-            disabled={currentIndex <= 0}
+            onClick={() => goToStep(steps[stepIndex - 1])}
+            disabled={stepIndex <= 0}
             aria-label="Previous day"
             className="h-8 w-8 shrink-0 flex items-center justify-center rounded-full text-slate-700 hover:bg-slate-900/[0.06] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
           >
@@ -547,20 +751,20 @@ export default function OpsPipelinePage() {
           <DatePicker
             dates={dates}
             value={selectedPredDate}
-            onChange={setSelectedPredDate}
-            label={formatDisplayDate(selectedPredDate)}
+            onChange={goToStep}
+            label={timelineLabel}
           />
 
           <button
-            onClick={() => { if (currentIndex < dates.length - 1) setSelectedPredDate(dates[currentIndex + 1]) }}
-            disabled={currentIndex >= dates.length - 1}
+            onClick={() => goToStep(steps[stepIndex + 1])}
+            disabled={stepIndex >= steps.length - 1}
             aria-label="Next day"
             className="h-8 w-8 shrink-0 flex items-center justify-center rounded-full text-slate-700 hover:bg-slate-900/[0.06] disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
           >
             <ChevronRight className="w-4 h-4" />
           </button>
 
-          <div className="flex-1 relative flex items-center h-6 mx-1 max-md:hidden">
+          <div className="flex-1 relative flex items-center h-6 mx-1 max-lg:hidden">
             <div className="absolute left-0 right-0 h-1 rounded-full bg-slate-300/70" />
             <div
               className="absolute left-0 h-1 rounded-full bg-slate-800"
@@ -575,7 +779,7 @@ export default function OpsPipelinePage() {
               value={currentIndex >= 0 ? currentIndex : 0}
               onChange={(e) => {
                 const idx = parseInt(e.target.value, 10)
-                if (dates[idx]) setSelectedPredDate(dates[idx])
+                goToStep(dates[idx])
               }}
               className="relative z-10 w-full h-1 appearance-none cursor-pointer bg-transparent
  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-5 [&::-webkit-slider-thumb]:h-5
@@ -583,6 +787,26 @@ export default function OpsPipelinePage() {
                 [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab
                 [&::-webkit-slider-thumb]:border [&::-webkit-slider-thumb]:border-slate-300"
             />
+          </div>
+
+          {/* Today and the forecast days */}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-slate-900/[0.06] p-0.5" role="group" aria-label="Today and forecast days">
+            {(['now', ...leads] as FutureStep[]).map(step => {
+              const active = futureStep === step
+              const date = isForecastLead(step) ? targetDate(forecasts, step) : null
+              return (
+                <button
+                  key={step}
+                  onClick={() => goToStep(step)}
+                  aria-pressed={active}
+                  aria-label={step === 'now' ? 'Today' : `Forecast for ${longDay(date)}`}
+                  title={step === 'now' ? 'Latest readings' : `Forecast for ${longDay(date)}`}
+                  className={`rounded-full px-2 py-2 text-xs font-medium tabular-nums transition-colors md:px-2.5 md:py-1 ${active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-900/[0.06]'}`}
+                >
+                  {step === 'now' ? 'Today' : `+${daysAheadOf(step)}`}
+                </button>
+              )
+            })}
           </div>
         </div>
       </div>

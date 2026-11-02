@@ -9,6 +9,7 @@ const nextConfig: NextConfig = {
   // Dev-only: proxy /api/** to Cloud Run so local pages are same-origin (the API's CORS
   // only allows the production origins). Ignored by the static export build.
   ...(isDev ? {
+    compress: false, // gzip would hold a streamed chat answer back until it had finished
     async rewrites() {
       return [{
         source: "/api/:path*",

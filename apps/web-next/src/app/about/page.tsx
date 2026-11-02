@@ -46,14 +46,14 @@ export default function AboutPage() {
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: jsonLd(datasetJsonLd) }} />
       <header className="border-b">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <div>
               <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-              <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+              <p className="hidden sm:block text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
             </div>
             <nav className="flex items-center space-x-4">
-              <Link href="/" className="text-sm hover:underline">Dashboard</Link>
-              <Link href="/city/" className="text-sm hover:underline">Cities</Link>
+              <Link href="/" className="py-1.5 text-sm hover:underline">Dashboard</Link>
+              <Link href="/city/" className="py-1.5 text-sm hover:underline">Cities</Link>
               <Link href="/about/" className="text-sm font-medium">About</Link>
             </nav>
           </div>

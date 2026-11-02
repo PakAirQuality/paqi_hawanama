@@ -42,15 +42,15 @@ export default function CitiesPage() {
       {/* Header */}
       <header className="border-b">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <div>
               <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-              <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
+              <p className="hidden sm:block text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
             </div>
             <nav className="flex items-center space-x-4">
-              <Link href="/" className="text-sm hover:underline">Dashboard</Link>
-              <Link href="/city/" className="text-sm font-medium">Cities</Link>
-              <Link href="/about/" className="text-sm hover:underline">About</Link>
+              <Link href="/" className="py-1.5 text-sm hover:underline">Dashboard</Link>
+              <Link href="/city/" className="py-1.5 text-sm font-medium">Cities</Link>
+              <Link href="/about/" className="py-1.5 text-sm hover:underline">About</Link>
             </nav>
           </div>
         </div>
@@ -77,7 +77,7 @@ export default function CitiesPage() {
               <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
                 {s.cities.map((c) => (
                   <li key={c.slug}>
-                    <Link href={cityPath(c.slug)} className="hover:underline text-foreground">
+                    <Link href={cityPath(c.slug)} className="inline-block py-1 sm:py-0 hover:underline text-foreground">
                       {c.name}
                     </Link>
                     {c.station_count > 1 && (

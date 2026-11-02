@@ -25,7 +25,7 @@ const LAYER_ITEMS: {
   { key: 'showStations', label: 'Stations', description: 'Air quality monitoring stations', icon: MapPin, activeColor: 'text-amber-600' },
   { key: 'showSatellite', label: 'PM2.5 Estimation', description: 'ML model prediction heatmap', icon: Satellite, activeColor: 'text-indigo-600' },
   { key: 'showFires', label: 'Active Fires', description: 'FIRMS VIIRS fire detections', icon: Flame, activeColor: 'text-orange-500' },
-  { key: 'showWind', label: 'Wind Field', description: 'Surface wind speed & direction', icon: Wind, activeColor: 'text-sky-500' },
+  { key: 'showWind', label: 'Wind Field', description: 'Latest surface wind speed & direction', icon: Wind, activeColor: 'text-sky-500' },
   { key: 'showPopulation', label: 'Population', description: 'WorldPop 2025 constrained 100m', icon: Users, activeColor: 'text-purple-500' },
 ]
 

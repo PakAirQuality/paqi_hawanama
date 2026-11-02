@@ -67,12 +67,12 @@ export default function CityMap({
 
   // AQI colors - match main map exactly
   const AQI_COLORS = {
-    good: 'rgba(110, 204, 57, 1)',             // Green from cluster-small div
-    moderate: 'rgba(240, 194, 12, 1)',         // Yellow from cluster-medium div  
-    unhealthy_sensitive: 'rgba(241, 128, 23, 1)', // Orange from cluster-large div
-    unhealthy: 'rgba(239, 120, 85, 1)',        // More red, slightly darker shade
-    very_unhealthy: '#a070b5',                  // Purple for very unhealthy
-    hazardous: '#991b1b',                       // Dark red for hazardous
+    good: 'rgba(168, 224, 95, 1)',             // Green from cluster-small div
+    moderate: 'rgba(253, 214, 75, 1)',         // Yellow from cluster-medium div  
+    unhealthy_sensitive: 'rgba(255, 155, 87, 1)', // Orange from cluster-large div
+    unhealthy: 'rgba(254, 106, 105, 1)',        // More red, slightly darker shade
+    very_unhealthy: '#a97abc',                  // Purple for very unhealthy
+    hazardous: '#a87383',                       // Dark red for hazardous
     fallback: '#6b7280'                         // Gray
   }
 

@@ -1,13 +1,15 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react'
 import { AqiCard } from '@/components/shared/AqiCard'
 import { Skeleton } from '@/components/shared/Skeleton'
-import { relativeAge } from '@/lib/time'
+import { formatDateOnly, relativeAge } from '@/lib/time'
 import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, ChevronLeft, ChevronDown, Search, MapPin } from 'lucide-react'
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
+import { stationForecastDays, type StationForecastDay } from '@/lib/timeline'
+import type { ForecastEntry } from '@/components/analyst-desk/types'
 
 // ── Category icons (Google Material Symbols, weight 300, filled) ──
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -117,6 +119,10 @@ export interface StructuresTabProps {
   focus?: StructuresFocus | null
   /** When given, leaving the station detail closes the panel instead of returning to the list */
   onClose?: () => void
+  /** What a station's number means in this view */
+  stationCaption?: string
+  /** Set on a forecast day: the run, today, and the day in view */
+  stationForecast?: { forecasts: ForecastEntry[]; today: string; date: string | null }
 }
 
 // Health classification: one implementation for the whole dashboard (lib/aqi)
@@ -136,6 +142,12 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [active, setActive] = useState<number | null>(null)
+  const tipRef = useRef<HTMLDivElement>(null)
+  const [tipWidth, setTipWidth] = useState(0)
+
+  useLayoutEffect(() => {
+    if (tipRef.current) setTipWidth(tipRef.current.offsetWidth)
+  }, [active])
 
   useEffect(() => {
     const el = wrapRef.current
@@ -174,7 +186,7 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
   const tip = a && a.pm25 != null ? (() => {
     const band = classifyPm25(a.pm25)
     const cx = pad.left + (active as number) * slot + slot / 2
-    const left = Math.min(Math.max(cx, 62), Math.max(62, width - 62))
+    const left = Math.max(0, Math.min(cx - tipWidth / 2, width - tipWidth))
     return { left, label: `${a.hour}:00`, value: Math.round(a.pm25), band }
   })() : null
 
@@ -228,7 +240,8 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
 
       {tip && (
         <div
-          className="pointer-events-none absolute top-0 -translate-x-1/2 whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs text-white shadow-lg"
+          ref={tipRef}
+          className="pointer-events-none absolute top-0 max-w-full truncate whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs text-white shadow-lg"
           style={{ left: tip.left }}
           role="status"
         >
@@ -255,7 +268,7 @@ type View =
 
 export type StructuresFocus = Extract<View, { type: 'station-detail' | 'kiln-detail' | 'industry-detail' }>
 
-export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus, onClose }: StructuresTabProps) {
+export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus, onClose, stationCaption, stationForecast }: StructuresTabProps) {
   const [view, setView] = useState<View>(focus ?? (initialView === 'stations' ? { type: 'stations' } : { type: 'categories' }))
   // Follow a new focus from the map (state adjusted during render, not in an effect)
   const [prevFocus, setPrevFocus] = useState(focus)
@@ -481,6 +494,8 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
       <StationDetailView
         station={view.station}
         selectedDate={selectedDate}
+        caption={stationCaption}
+        forecast={stationForecast}
         onBack={() => (onClose ? onClose() : setView({ type: 'stations' }))}
         onFlyTo={onFlyTo}
       />
@@ -886,11 +901,13 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
 interface StationDetailProps {
   station: StationItem
   selectedDate: string | null
+  caption?: string
+  forecast?: StructuresTabProps['stationForecast']
   onBack: () => void
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
 }
 
-function StationDetailView({ station, selectedDate, onBack }: StationDetailProps) {
+function StationDetailView({ station, selectedDate, caption, forecast, onBack }: StationDetailProps) {
   const { data: hourlyData, isLoading: hourlyLoading } = useQuery({
     queryKey: ['station-hourly', station.station_id, selectedDate],
     queryFn: async () => {
@@ -926,6 +943,11 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
       }
     })
   }, [hourlyData])
+
+  const forecastDays = useMemo(
+    () => (forecast ? stationForecastDays(forecast.forecasts, forecast.today, station.name, station.city) : []),
+    [forecast, station.name, station.city],
+  )
 
   const poll = overview?.pollutant_summary
   const avail = overview?.data_availability
@@ -1003,8 +1025,10 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
         <AqiCard
           className="mt-4 shadow-none"
           pm25={station.pm25}
-          caption={selectedDate ? 'PM2.5 daily mean' : 'PM2.5'}
+          caption={caption ?? (selectedDate ? 'PM2.5 daily mean' : 'PM2.5')}
         />
+
+        {forecastDays.length > 0 && <ForecastDays days={forecastDays} current={forecast?.date ?? null} />}
 
         {/* Key numbers */}
         <div className="mt-5 grid grid-cols-3 gap-3">
@@ -1053,6 +1077,32 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
 }
 
 // ── Subcomponents ──
+
+function ForecastDays({ days, current }: { days: StationForecastDay[]; current: string | null }) {
+  return (
+    <>
+      <h3 className="mt-5 text-[13px] font-semibold text-slate-900">Forecast</h3>
+      <ul className="mt-1.5 -mx-2">
+        {days.map(d => {
+          const band = classifyPm25(d.pm25)
+          return (
+            <li
+              key={d.date}
+              aria-current={d.date === current ? 'date' : undefined}
+              className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] ${d.date === current ? 'bg-slate-100' : ''}`}
+            >
+              <span className="w-[86px] shrink-0 text-slate-700">{formatDateOnly(d.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+              <span className="w-10 shrink-0 rounded-md py-0.5 text-center font-semibold tabular-nums" style={{ background: band.color, color: band.textColor }}>{Math.round(d.pm25)}</span>
+              <span className="min-w-0 flex-1 truncate text-slate-700">{band.label}</span>
+              {d.high != null && d.high > d.pm25 && <span className="shrink-0 text-xs tabular-nums text-slate-600">up to {Math.round(d.high)}</span>}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-1.5 text-xs leading-relaxed text-slate-600">Daily average PM2.5 in µg/m³. &ldquo;Up to&rdquo; is the 90th percentile of the forecast.</p>
+    </>
+  )
+}
 
 function Figure({ label, value }: { label: string; value: number | null }) {
   return (

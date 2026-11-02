@@ -163,7 +163,9 @@
 .map-page {
   overflow: hidden;
   height: 100vh;
+  height: 100dvh;
   max-height: 100vh;
+  max-height: 100dvh;
 }
 
 .map-page body {
@@ -212,7 +214,7 @@
 
 /* The new circular marker style */
 .aqi-marker {
-  color: white;
+  color: #0f172a;
   font-size: 14px;
   font-weight: normal;
   box-shadow: 0 0 0 3px var(--glow-color, rgba(255, 255, 255, 0.4)), 0 0 12px var(--glow-color, rgba(255, 255, 255, 0.6)), 0 2px 4px rgba(0, 0, 0, 0.3);
@@ -236,29 +238,29 @@
   --glow-color: rgba(255, 255, 255, 0.4);
 } 
 .bg-good { 
-  background-color: rgba(110, 204, 57, 1); 
-  --glow-color: rgba(110, 204, 57, 0.4);
+  background-color: rgba(168, 224, 95, 1); 
+  --glow-color: rgba(168, 224, 95, 0.4);
 } 
 .bg-moderate { 
-  background-color: rgba(240, 194, 12, 1); 
+  background-color: rgba(253, 214, 75, 1); 
   color: #333; 
-  --glow-color: rgba(240, 194, 12, 0.4);
+  --glow-color: rgba(253, 214, 75, 0.4);
 } 
 .bg-unhealthy-sensitive { 
-  background-color: rgba(241, 128, 23, 1); 
-  --glow-color: rgba(241, 128, 23, 0.4);
+  background-color: rgba(255, 155, 87, 1); 
+  --glow-color: rgba(255, 155, 87, 0.4);
 } 
 .bg-unhealthy { 
-  background-color: rgba(239, 120, 85, 1); 
-  --glow-color: rgba(239, 120, 85, 0.4);
+  background-color: rgba(254, 106, 105, 1); 
+  --glow-color: rgba(254, 106, 105, 0.4);
 } 
 .bg-very-unhealthy { 
-  background-color: #a070b5; 
-  --glow-color: rgba(160, 112, 181, 0.4);
+  background-color: #a97abc; 
+  --glow-color: rgba(169, 122, 188, 0.4);
 }
 .bg-hazardous { 
-  background-color: #991b1b; 
-  --glow-color: rgba(153, 27, 27, 0.4);
+  background-color: #a87383; 
+  --glow-color: rgba(168, 115, 131, 0.4);
 }
 
 /* Individual station markers only */
@@ -327,40 +329,40 @@
 /* AQI Colors - Override dark mode to maintain health standard colors */
 :root, .dark {
   /* Ensure AQI marker colors remain consistent regardless of theme */
-  --aqi-good: rgba(110, 204, 57, 1);
-  --aqi-moderate: rgba(240, 194, 12, 1); 
-  --aqi-unhealthy-sensitive: rgba(241, 128, 23, 1);
-  --aqi-unhealthy: rgba(239, 120, 85, 1);
-  --aqi-very-unhealthy: #a070b5;
-  --aqi-hazardous: #991b1b;
+  --aqi-good: rgba(168, 224, 95, 1);
+  --aqi-moderate: rgba(253, 214, 75, 1); 
+  --aqi-unhealthy-sensitive: rgba(255, 155, 87, 1);
+  --aqi-unhealthy: rgba(254, 106, 105, 1);
+  --aqi-very-unhealthy: #a97abc;
+  --aqi-hazardous: #a87383;
   --aqi-no-reading: #FFFFFFE6;
 }
 
 /* Force AQI colors to remain consistent in both light and dark modes */
 .bg-good, .dark .bg-good { 
   background-color: var(--aqi-good) !important; 
-  --glow-color: rgba(110, 204, 57, 0.4) !important;
+  --glow-color: rgba(168, 224, 95, 0.4) !important;
 } 
 .bg-moderate, .dark .bg-moderate { 
   background-color: var(--aqi-moderate) !important; 
   color: #333 !important; 
-  --glow-color: rgba(240, 194, 12, 0.4) !important;
+  --glow-color: rgba(253, 214, 75, 0.4) !important;
 } 
 .bg-unhealthy-sensitive, .dark .bg-unhealthy-sensitive { 
   background-color: var(--aqi-unhealthy-sensitive) !important; 
-  --glow-color: rgba(241, 128, 23, 0.4) !important;
+  --glow-color: rgba(255, 155, 87, 0.4) !important;
 } 
 .bg-unhealthy, .dark .bg-unhealthy { 
   background-color: var(--aqi-unhealthy) !important; 
-  --glow-color: rgba(239, 120, 85, 0.4) !important;
+  --glow-color: rgba(254, 106, 105, 0.4) !important;
 } 
 .bg-very-unhealthy, .dark .bg-very-unhealthy { 
   background-color: var(--aqi-very-unhealthy) !important; 
-  --glow-color: rgba(160, 112, 181, 0.4) !important;
+  --glow-color: rgba(169, 122, 188, 0.4) !important;
 }
 .bg-hazardous, .dark .bg-hazardous { 
   background-color: var(--aqi-hazardous) !important; 
-  --glow-color: rgba(153, 27, 27, 0.4) !important;
+  --glow-color: rgba(168, 115, 131, 0.4) !important;
 }
 .bg-no-reading, .dark .bg-no-reading { 
   background-color: var(--aqi-no-reading) !important; 
@@ -383,3 +385,14 @@
 .bg-red-100, .dark .bg-red-100 { background-color: #fee2e2 !important; }
 .bg-purple-100, .dark .bg-purple-100 { background-color: #f3e8ff !important; }
 .bg-red-200, .dark .bg-red-200 { background-color: #fecaca !important; }
+
+/* iOS zooms the page when a field under 16px is focused */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px; }
+}
+
+/* Lists of links: comfortable to tap */
+@media (max-width: 767px) {
+  li > a:only-child { display: inline-block; padding-block: 5px; }
+  a { overflow-wrap: anywhere; }
+}

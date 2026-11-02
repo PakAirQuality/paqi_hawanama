@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 
-function MarkerPin({ size = 14, color = '#f18017' }: { size?: number; color?: string }) {
+function MarkerPin({ size = 14, color = '#ff9b57' }: { size?: number; color?: string }) {
   return (
     <div
       className="rounded-full"
@@ -17,7 +17,7 @@ function MarkerPin({ size = 14, color = '#f18017' }: { size?: number; color?: st
   )
 }
 
-function AqiBadge({ size = 24, color = '#f18017', value }: { size?: number; color?: string; value: number }) {
+function AqiBadge({ size = 24, color = '#ff9b57', value }: { size?: number; color?: string; value: number }) {
   return (
     <div
       className="rounded-full flex items-center justify-center font-semibold text-white"
@@ -69,7 +69,7 @@ export function SatelliteImage({ lat, lon, name, markerColor, zoom = 'normal', l
   aqiValue?: number
 }) {
   const [showModal, setShowModal] = useState(false)
-  const mColor = markerColor || '#f18017'
+  const mColor = markerColor || '#ff9b57'
 
   const t = zoom === 'close' ? { dx: 0.0008, dy: 0.0006 } : { dx: 0.003, dy: 0.002 }
   const l = zoom === 'close' ? { dx: 0.003, dy: 0.002 } : { dx: 0.008, dy: 0.006 }

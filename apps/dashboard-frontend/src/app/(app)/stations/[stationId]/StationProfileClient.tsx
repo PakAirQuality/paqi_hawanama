@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useEffect, useState, useMemo } from "react"
+import { classifyPm25 } from "@/lib/aqi"
 import { useRouter, useParams } from "next/navigation"
 import { useQuery } from "@tanstack/react-query"
 import { ArrowLeft, MapPin, TrendingUp, TrendingDown, Minus } from "lucide-react"
@@ -56,13 +57,9 @@ interface HistoryPoint {
 
 // ── Helpers ──
 
-function pm25Band(v: number): { label: string; color: string; bg: string } {
-  if (v <= 12) return { label: "Good", color: "#16a34a", bg: "#dcfce7" }
-  if (v <= 35) return { label: "Moderate", color: "#ca8a04", bg: "#fef9c3" }
-  if (v <= 55) return { label: "USG", color: "#ea580c", bg: "#ffedd5" }
-  if (v <= 150) return { label: "Unhealthy", color: "#dc2626", bg: "#fee2e2" }
-  if (v <= 250) return { label: "Very Unhealthy", color: "#7c3aed", bg: "#ede9fe" }
-  return { label: "Hazardous", color: "#991b1b", bg: "#fecaca" }
+function pm25Band(v: number): { label: string; color: string; bg: string; text: string } {
+  const band = classifyPm25(v)
+  return { label: band.label, color: band.color, bg: band.color, text: band.textColor }
 }
 
 function timeAgo(ts: string): string {
@@ -321,14 +318,15 @@ export function StationProfileClient() {
     <div className="flex-1 overflow-y-auto bg-slate-50">
       {/* ── Top bar ── */}
       <div className="bg-white border-slate-200 sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center gap-4">
+        <div className="max-w-6xl mx-auto px-4 sm:px-6 py-3 flex flex-wrap items-center gap-x-3 sm:gap-x-4 gap-y-2">
           <button
             onClick={() => router.back()}
-            className="p-1.5 rounded-lg hover:bg-slate-100 transition-colors"
+            aria-label="Back"
+            className="p-2 rounded-lg hover:bg-slate-100 transition-colors"
           >
             <ArrowLeft size={18} className="text-slate-500" />
           </button>
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 grow basis-[calc(100%-3rem)] sm:basis-0">
             <div className="flex items-center gap-2">
               <h1 className="text-lg font-bold text-slate-900 truncate">{station.name}</h1>
               <span
@@ -338,7 +336,7 @@ export function StationProfileClient() {
                 {status.label}
               </span>
             </div>
-            <div className="flex items-center gap-2 text-xs text-slate-500 mt-0.5">
+            <div className="flex flex-wrap items-center gap-x-2 text-xs text-slate-500 mt-0.5">
               <MapPin size={11} />
               <span>{[station.city, station.state, station.country].filter(Boolean).join(", ")}</span>
               {station.provider && (
@@ -351,17 +349,17 @@ export function StationProfileClient() {
 
           {/* Current reading badge */}
           {band && currentPM25 != null && (
-            <div className="shrink-0 flex items-center gap-3 px-4 py-2 rounded-xl" style={{ background: band.bg }}>
+            <div className="shrink-0 flex items-center gap-3 px-4 py-2 rounded-xl max-sm:w-full max-sm:justify-between" style={{ background: band.bg }}>
               <div>
-                <div className="text-2xl font-bold tabular-nums" style={{ color: band.color }}>
+                <div className="text-2xl font-bold tabular-nums" style={{ color: band.text }}>
                   {Math.round(currentPM25)}
                 </div>
-                <div className="text-[11px] text-slate-500">µg/m³</div>
+                <div className="text-[11px]" style={{ color: band.text }}>µg/m³</div>
               </div>
               <div className="text-right">
-                <div className="text-xs font-semibold" style={{ color: band.color }}>{band.label}</div>
+                <div className="text-xs font-semibold" style={{ color: band.text }}>{band.label}</div>
                 {poll?.last_value_ts && (
-                  <div className="text-[11px] text-slate-500">{timeAgo(poll.last_value_ts)}</div>
+                  <div className="text-[11px]" style={{ color: band.text }}>{timeAgo(poll.last_value_ts)}</div>
                 )}
               </div>
             </div>
@@ -419,7 +417,7 @@ export function StationProfileClient() {
                 <button
                   key={opt.h}
                   onClick={() => setHistoryHours(opt.h)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors ${
+                  className={`px-2.5 py-1 max-md:py-2 rounded-md text-xs font-medium transition-colors ${
  historyHours === opt.h
                       ? "bg-slate-800 text-white"
                       : "text-slate-500 hover:bg-slate-100"

@@ -61,13 +61,13 @@ export function DatePicker({ dates, value, onChange, label }: DatePickerProps) {
   const monthLabel = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
   return (
-    <div ref={rootRef} className="relative min-w-[116px] max-md:flex-1">
+    <div ref={rootRef} className="relative min-w-0 lg:min-w-[116px] max-lg:flex-1">
       <button
         onClick={() => setOpen(v => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Date, ${label}. Change date`}
-        className="w-full rounded-full px-3 py-1.5 text-center text-[13px] font-semibold tabular-nums text-slate-900 transition-colors hover:bg-slate-900/[0.06]"
+        className="w-full truncate rounded-full px-1 py-2 md:py-1.5 lg:px-3 text-center text-[13px] font-semibold tabular-nums text-slate-900 transition-colors hover:bg-slate-900/[0.06] md:px-3"
       >
         {label}
       </button>

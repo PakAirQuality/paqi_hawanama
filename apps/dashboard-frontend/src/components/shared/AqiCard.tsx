@@ -68,7 +68,7 @@ function GaugeIcon({ band, aqi, color }: { band: BandKey; aqi: number | null; co
 export function AqiCard({ pm25, title, subtitle, caption = 'Main pollutant: PM2.5', weather, className = '' }: AqiCardProps) {
   const band = classifyPm25(pm25)
   const aqi = pm25ToAqi(pm25)
-  const fg = band.key === 'very_unhealthy' || band.key === 'hazardous' ? '#ffffff' : '#111827'
+  const fg = band.textColor
   const hasWeather = weather && (weather.tempC != null || weather.windKmh != null || weather.humidity != null)
 
   return (

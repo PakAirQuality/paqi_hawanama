@@ -52,7 +52,6 @@ export default function Home() {
 
   return (
     <div className="map-page relative w-full h-full overflow-hidden" style={{
-      height: '100vh',
       width: '100vw',
       maxWidth: '100vw'
     }}>

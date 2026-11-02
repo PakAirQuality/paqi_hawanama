@@ -91,12 +91,12 @@
 }
 
 /* AQI Color Standards - consistent across light/dark modes */
-.aqi-good { background-color: #6ecc39; color: white; }
-.aqi-moderate { background-color: #f0c20c; color: black; }
-.aqi-unhealthy-sensitive { background-color: #f18017; color: white; }
-.aqi-unhealthy { background-color: #ef7855; color: white; }
-.aqi-very-unhealthy { background-color: #a070b5; color: white; }
-.aqi-hazardous { background-color: #991b1b; color: white; }
+.aqi-good { background-color: #a8e05f; color: #0f172a; }
+.aqi-moderate { background-color: #fdd64b; color: #0f172a; }
+.aqi-unhealthy-sensitive { background-color: #ff9b57; color: #0f172a; }
+.aqi-unhealthy { background-color: #fe6a69; color: #0f172a; }
+.aqi-very-unhealthy { background-color: #a97abc; color: #0f172a; }
+.aqi-hazardous { background-color: #a87383; color: #0f172a; }
 
 /* ── Station map markers (matching public app) ── */
 
@@ -105,7 +105,7 @@
 }
 
 .aqi-marker {
-  color: #111827;
+  color: #0f172a;
   font-size: 12px;
   font-weight: 400;
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
@@ -131,24 +131,40 @@
   color: #666;
 }
 .aqi-marker.bg-good {
-  background-color: rgba(110, 204, 57, 1);
+  background-color: rgba(168, 224, 95, 1);
 }
 .aqi-marker.bg-moderate {
-  background-color: rgba(240, 194, 12, 1);
+  background-color: rgba(253, 214, 75, 1);
 }
 .aqi-marker.bg-unhealthy-sensitive {
-  background-color: rgba(241, 128, 23, 1);
+  background-color: rgba(255, 155, 87, 1);
 }
 .aqi-marker.bg-unhealthy {
-  background-color: rgba(239, 120, 85, 1);
+  background-color: rgba(254, 106, 105, 1);
 }
 .aqi-marker.bg-very-unhealthy {
-  color: #ffffff;
-  background-color: #a070b5;
+  background-color: #a97abc;
 }
 .aqi-marker.bg-hazardous {
-  color: #ffffff;
-  background-color: #991b1b;
+  background-color: #a87383;
+}
+
+/* ── Assistant chat: a caret at the end of an answer while it is being written ── */
+.chat-prose .chat-caret,
+.chat-writing .chat-prose > p:last-child::after,
+.chat-writing .chat-prose > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: #475569;
+  animation: chat-caret 1s steps(2, start) infinite;
+}
+
+@keyframes chat-caret {
+  to { visibility: hidden; }
 }
 
 /* ── Accessibility ── */
@@ -193,4 +209,17 @@
 @keyframes bar-grow {
   from { transform: scaleY(0); }
   to { transform: scaleY(1); }
+}
+
+/* The station panels use the app's shared cards; on the Stations page they sit smaller and quieter */
+.station-panels { font-size: 13px; }
+.station-panels .rounded-lg.border { border-radius: 14px; border-color: rgb(226 232 240 / 0.7); box-shadow: none; }
+.station-panels .flex-col.p-6 { padding: 14px 16px 6px; }
+.station-panels .p-6.pt-0 { padding: 0 16px 14px; }
+.station-panels .text-2xl, .station-panels .text-3xl { font-size: 22px; font-weight: 600; }
+.station-panels .text-2xl.leading-none { font-size: 14px; letter-spacing: normal; }
+
+/* iOS zooms the page when a field under 16px is focused */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px; }
 }

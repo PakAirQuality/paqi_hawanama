@@ -259,7 +259,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                 <YAxis
                   tick={{ fontSize: 12 }}
                   label={{
-                    value: "PM2.5 (ug/m3)",
+                    value: "PM2.5 (µg/m³)",
                     angle: -90,
                     position: "insideLeft",
                   }}
@@ -278,7 +278,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                         : name === "season_mean"
                         ? SEASON_LABELS[selectedSeason as SeasonKey] ?? "Season"
                         : name;
-                    return [`${Number(value).toFixed(1)} ug/m3`, label];
+                    return [`${Number(value).toFixed(1)} µg/m³`, label];
                   }}
                 />
                 {/* p10-p90 shaded band */}
@@ -373,7 +373,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                   </span>
                   <span className="font-medium">
                     {maxWeekday !== null
-                      ? `${maxWeekday.toFixed(1)} ug/m3`
+                      ? `${maxWeekday.toFixed(1)} µg/m³`
                       : "No data"}
                   </span>
                 </div>
@@ -383,7 +383,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                   </span>
                   <span className="font-medium">
                     {maxWeekend !== null
-                      ? `${maxWeekend.toFixed(1)} ug/m3`
+                      ? `${maxWeekend.toFixed(1)} µg/m³`
                       : "No data"}
                   </span>
                 </div>
@@ -393,7 +393,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                       Difference
                     </span>
                     <span className="font-medium">
-                      {Math.abs(maxWeekday - maxWeekend).toFixed(1)} ug/m3
+                      {Math.abs(maxWeekday - maxWeekend).toFixed(1)} µg/m³
                       {maxWeekday > maxWeekend
                         ? " higher weekdays"
                         : " higher weekends"}
@@ -412,7 +412,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                       Weekday Range
                     </span>
                     <span className="font-medium">
-                      {(maxWeekday - minWeekday).toFixed(1)} ug/m3
+                      {(maxWeekday - minWeekday).toFixed(1)} µg/m³
                     </span>
                   </div>
                 )}
@@ -422,7 +422,7 @@ export function DiurnalPanel({ stationId }: { stationId: string }) {
                       Weekend Range
                     </span>
                     <span className="font-medium">
-                      {(maxWeekend - minWeekend).toFixed(1)} ug/m3
+                      {(maxWeekend - minWeekend).toFixed(1)} µg/m³
                     </span>
                   </div>
                 )}

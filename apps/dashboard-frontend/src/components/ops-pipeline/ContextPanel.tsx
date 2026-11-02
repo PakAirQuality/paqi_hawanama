@@ -10,6 +10,7 @@ import { Skeleton } from '@/components/shared/Skeleton'
 import type { StationReading, PredictionData, RunReport } from './types'
 import { fetchDailyBrief } from './api'
 import { BAND_KEYS, bandColor, bandCounts, bandKey, bandLabel, classifyPm25, unhealthyOrWorse, BAND_SCALE_LABEL } from '@/lib/aqi'
+import { MIN_CITY_MONITORS, worstRankedCities } from '@/lib/cityRanking'
 import { formatDateOnly } from '@/lib/time'
 import { useIsMobile } from '@/lib/useMediaQuery'
 import { MODEL_HELP, MODEL_LABELS, type ModelKey } from '@/lib/selection'
@@ -24,6 +25,18 @@ interface OpsContextPanelProps {
   runReport: RunReport | null
   /** fly the map to a place (lng, lat, zoom) */
   onFlyTo?: (lng: number, lat: number, zoom?: number) => void
+  /** Which part of the timeline the card describes */
+  mode?: 'day' | 'now' | 'forecast'
+  /** Replaces the date line, for today and forecast days */
+  dayLabel?: string
+  /** What a station's number means in this view */
+  readingLabel?: string
+  /** A warning under the date, such as a forecast that has fallen behind */
+  notice?: string | null
+  /** A line about the data behind the view, for today and forecast days */
+  detail?: string | null
+  /** Fires and forecast ramps, for today and forecast days */
+  evidence?: { fires: string; firesLabel: string; firesWarn: boolean; ramps: number } | null
   /** Air quality where the visitor is: the nearest monitor, or none within range */
   nearby?: { station: { name: string; city: string; pm25: number } | null; distKm: number | null; radiusKm: number } | null
 }
@@ -37,7 +50,7 @@ interface Obs {
   worstCities: { city: string; avg: number; count: number; lat: number; lon: number }[]
 }
 
-export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport, onFlyTo, nearby }: OpsContextPanelProps) {
+export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport, onFlyTo, nearby, mode = 'day', dayLabel, readingLabel = 'PM2.5 daily mean', notice, detail, evidence }: OpsContextPanelProps) {
   const isMobile = useIsMobile()
   const [hidden, setHidden] = useState(false)
   const [seenMobile, setSeenMobile] = useState(false)
@@ -64,6 +77,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
       .sort((a, b) => b.avg - a.avg)
     return { count: valid.length, mean, max: Math.round(max), band: bandKey(mean), bands: bandCounts(values), worstCities }
   }, [stations])
+  const rankedCities = worstRankedCities(obs?.worstCities ?? [])
 
   const coverage = predictionStats?.n_total
     ? Math.round((predictionStats.n_valid / predictionStats.n_total) * 100) : null
@@ -80,9 +94,10 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
   const matched = brief?.matched_bias?.[model] ?? null
   const modelLabel = MODEL_LABELS[model]
 
-  const formattedDate = selectedDate
+  const formattedDate = dayLabel ?? (selectedDate
     ? formatDateOnly(selectedDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-    : '—'
+    : '—')
+  const forecast = mode === 'forecast'
 
   const unhealthyCount = obs ? unhealthyOrWorse(obs.bands) : 0
 
@@ -102,7 +117,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
       animate={{ opacity: 1, y: 0, x: 0 }}
       exit={{ opacity: 0, x: '110%' }}
       transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
-      className="absolute top-3 left-3 right-3 md:left-auto md:right-4 md:w-[352px] z-10 flex flex-col rounded-2xl overflow-y-auto overflow-x-hidden overscroll-contain max-h-[calc(100%-236px)] md:max-h-[calc(100%-200px)] text-slate-900"
+      className="absolute top-3 left-3 right-3 md:left-auto md:right-4 md:w-[352px] md:max-w-[calc(100%-2rem)] z-10 flex flex-col rounded-2xl overflow-y-auto overflow-x-hidden overscroll-contain max-h-[calc(100%-236px)] md:max-h-[calc(100%-200px)] text-slate-900"
       style={{
         background: 'rgba(255,255,255,0.82)',
         backdropFilter: 'blur(20px) saturate(180%)',
@@ -115,7 +130,8 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
       <div className="flex items-start justify-between gap-2 px-4 pt-3.5">
         <div className="min-w-0">
           <div className="text-[15px] font-semibold tracking-tight">Pakistan</div>
-          <div className="mt-0.5 text-xs text-slate-600" title="Daily means of hourly PM2.5, Pakistan time">{formattedDate}</div>
+          <div className="mt-0.5 text-xs text-slate-600" title={mode === 'day' ? 'Daily means of hourly PM2.5, Pakistan time' : undefined}>{formattedDate}</div>
+          {notice && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{notice}</div>}
         </div>
         <button
           onClick={() => setHidden(true)}
@@ -136,7 +152,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
               pm25={nearby.station.pm25}
               title={nearby.station.name}
               subtitle={`${nearby.station.city}, ${nearby.distKm != null ? (nearby.distKm < 1 ? 'under 1' : Math.round(nearby.distKm)) : ''} km away`}
-              caption="PM2.5 daily mean"
+              caption={readingLabel}
             />
           ) : (
             <p className="text-[13px] text-slate-700">No monitor within {nearby.radiusKm} km of your location.</p>
@@ -155,9 +171,9 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
 
       {obs && (
         <div className="px-4 pt-3 pb-3.5">
-          <div className="flex items-baseline gap-2">
+          <div className="flex items-center gap-2.5">
             <AnimatedNumber value={unhealthyCount} className="text-[40px] leading-none font-semibold tabular-nums tracking-tight" />
-            <span className="text-sm text-slate-700">of {obs.count} stations are Unhealthy or worse</span>
+            <span className="text-sm leading-snug text-slate-700">of {obs.count} stations {forecast ? 'forecast' : 'are'} Unhealthy or worse</span>
           </div>
 
           {/* Composition at a glance: same colours as the map markers; hover a segment for its count */}
@@ -176,9 +192,15 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
           </div>
 
           {/* Five worst cities, each flies the map to the city */}
-          <div className="mt-4 text-xs font-semibold text-slate-600">Worst five cities</div>
+          <div className="mt-4 text-xs font-semibold text-slate-600">
+            Worst {rankedCities.length === 5 ? 'five ' : ''}cities
+          </div>
+          <div className="text-xs text-slate-500">With more than {MIN_CITY_MONITORS - 1} monitors {forecast ? 'forecast' : 'reporting'}</div>
+          {rankedCities.length === 0 && (
+            <p className="mt-1 text-[13px] text-slate-600">No city has that many monitors {forecast ? 'forecast' : 'reporting'} for this day.</p>
+          )}
           <ul className="mt-1 -mx-2">
-            {obs.worstCities.slice(0, 5).map(c => {
+            {rankedCities.map(c => {
               const b = classifyPm25(c.avg)
               return (
                 <li key={c.city}>
@@ -190,7 +212,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
                   >
                     <span
                       className="min-w-[44px] shrink-0 rounded-full px-2.5 py-0.5 text-center text-xs font-semibold tabular-nums"
-                      style={{ background: b.color, color: b.key === 'very_unhealthy' || b.key === 'hazardous' ? '#ffffff' : '#111827' }}
+                      style={{ background: b.color, color: b.textColor }}
                       title={b.label}
                     >
                       <AnimatedNumber value={Math.round(c.avg)} />
@@ -209,8 +231,8 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
       )}
 
       <div>
-            {/* ── Model switch ── */}
-            <div className="px-4 pt-3">
+            {/* ── Model switch: the satellite models describe past days, not forecasts ── */}
+            {!forecast && <div className="px-4 pt-3">
               <div className="flex items-center gap-1 rounded-xl bg-slate-900/[0.06] p-1" role="group" aria-label="Prediction model">
                 {([['backbone', 'Satellite'], ['support_aware', 'Enhanced']] as const).map(([key, label]) => (
                   <button
@@ -244,16 +266,29 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
                   <div><span className="font-semibold">Enhanced:</span> {MODEL_HELP.support_aware}</div>
                 </div>
               )}
-            </div>
+            </div>}
 
             <div className="pb-1 pt-3">
               <div>
                   {obs && (
                     <div className="px-4 pb-2 text-xs text-slate-600">
-                      Station mean {Math.round(obs.mean)} µg/m³ across {obs.count} stations (unweighted, not an area or population average).
+                      Station mean {Math.round(obs.mean)} µg/m³ across {obs.count} stations (unweighted, not an area or population average){mode === 'day' ? '' : `, peak ${obs.max} µg/m³`}.
+                      {detail && <span className="mt-1 block">{detail}</span>}
                     </div>
                   )}
-            <div className="grid grid-cols-2 gap-2 px-4 pt-3">
+            {evidence && (
+              <div className="grid grid-cols-2 gap-2 px-4 pt-1">
+                <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                  <div className="text-base font-semibold tabular-nums">{evidence.fires}</div>
+                  <div className={`text-xs ${evidence.firesWarn ? 'text-amber-700' : 'text-slate-600'}`}>{evidence.firesLabel}</div>
+                </div>
+                <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                  <div className="text-base font-semibold tabular-nums">{evidence.ramps}</div>
+                  <div className="text-xs text-slate-600">Forecast ramp events</div>
+                </div>
+              </div>
+            )}
+            {!forecast && <div className="grid grid-cols-2 gap-2 px-4 pt-3">
               <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
                 <div className="text-xs text-slate-600">Modelled area average</div>
                 <div className="mt-0.5 text-base font-semibold tabular-nums">
@@ -269,10 +304,10 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
                 </div>
                 <div className="text-xs text-slate-600">{matched ? `MAE ${matched.mae.toFixed(1)} across ${matched.n} stations` : 'no matched comparison'}</div>
               </div>
-            </div>
+            </div>}
 
             <div className="px-4 py-3 text-xs text-slate-500">
-              {runReport?.model_version ? `Model ${runReport.model_version}. ` : ''}{BAND_SCALE_LABEL}.
+              {!forecast && runReport?.model_version ? `Model ${runReport.model_version}. ` : ''}{BAND_SCALE_LABEL}.
             </div>
               </div>
             </div>
