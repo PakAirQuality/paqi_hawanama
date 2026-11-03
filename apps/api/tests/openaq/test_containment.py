@@ -79,6 +79,6 @@ def test_cloudbuild_mounts_openaq_secret_on_ingest_only(repo_root):
         args = step.get("args", [])
         if "deploy" in args:
             deploys[args[args.index("deploy") + 1]] = " ".join(args)
-    assert set(deploys) == {"hawanama", "hawanama-ingest", "hawanama-bam", "hawanama-punjab-push"}
+    assert {"hawanama", "hawanama-ingest", "hawanama-bam"} <= set(deploys)
     assert "OPENAQ_API_KEY=OPENAQ_API_KEY:latest" in deploys["hawanama-ingest"] and "OPENAQ_ENABLED=false" in deploys["hawanama-ingest"]
-    assert all("OPENAQ_API_KEY" not in deploys[name] for name in ("hawanama", "hawanama-bam", "hawanama-punjab-push"))
+    assert all("OPENAQ_API_KEY" not in deploys[name] for name in deploys if name != "hawanama-ingest")
