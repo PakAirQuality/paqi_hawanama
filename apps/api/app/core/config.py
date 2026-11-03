@@ -181,7 +181,7 @@ class Settings(BaseSettings):
     # "fires" is judged from the last ingest-fires run (3-hourly; 540 min = three missed runs).
     # "bam" has no threshold while the SFL push feed is silent (shown as no_threshold); add it back
     # here when that feed resumes.
-    FRESHNESS_MAX_AGE_MIN: str = '{"airvisual": 180, "punjab": 180, "fires": 540, "default": 360}'
+    FRESHNESS_MAX_AGE_MIN: str = '{"airvisual": 180, "punjab": 180, "fires": 540, "forecast": 1680, "default": 360}'
     LOG_LEVEL: str = "INFO"
     
     @property

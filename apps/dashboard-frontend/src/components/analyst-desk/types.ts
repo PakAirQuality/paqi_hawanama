@@ -23,6 +23,24 @@ export interface ForecastEntry {
   episode_state: string
   confidence: string
   priority: string
+  /** Observation availability behind this row (pipeline ≥ Nov 2026; absent in older files) */
+  obs_available?: boolean
+  obs_age_days?: number | null
+  obs_last_date?: string | null
+  obs_t0_source?: string | null
+  obs_stale?: boolean
+  /** model = station had an observation; neighbours = estimated from nearby observed stations; prior = model value with no station signal */
+  forecast_basis?: 'model' | 'neighbours' | 'prior' | string
+  in_live_map?: boolean | null
+  last_reading_utc?: string | null
+}
+
+export type ForecastBasis = 'model' | 'neighbours' | 'prior'
+
+export const BASIS_LABEL: Record<string, string> = {
+  model: 'From station observations',
+  neighbours: 'Estimated from nearby stations (no live data here)',
+  prior: 'Model estimate only (no live data nearby)',
 }
 
 export interface ForecastResponse {

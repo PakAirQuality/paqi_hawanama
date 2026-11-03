@@ -365,7 +365,7 @@ resource "google_cloud_scheduler_job" "station_daily_aggregation" {
 
   http_target {
     http_method = "POST"
-    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-daily/parquet?start_date=2024-01-01&end_date=2026-12-31&only_missing=true&apply_qc=true"
+    uri         = "${local.ingest_base_url}/api/v1/exports/publish/station-daily/parquet?days_back=7&only_missing=true&apply_qc=true"
 
     headers = {
       "Content-Type" = "application/json"

@@ -9,8 +9,12 @@ interface FreshnessSource {
   source: string
   scope_type: string
   latest_ts: string | null
+  latest_ingested_at?: string | null
   age_min: number | null
   threshold_min: number | null
+  status?: string
+  last_run_status?: string | null
+  last_run_error?: string | null
 }
 
 async function fetchFreshness(): Promise<{ status: string; sources: FreshnessSource[] }> {
@@ -28,12 +32,23 @@ export function FreshnessBadge() {
   if (stations?.age_min == null) return null
 
   const overdue = stations.age_min > (stations.threshold_min ?? 180)
+  // Daily forecast job, judged by the API from its last recorded run; shown only when late or degraded
+  const forecast = data?.sources?.find(s => s.source === 'forecast')
+  const forecastLate = !!forecast && forecast.status !== 'ok'
   return (
     <span
       className={overdue ? 'text-amber-700' : 'text-slate-600'}
       title={stations.latest_ts ? `Latest station observation ${formatPkt(stations.latest_ts)}` : undefined}
     >
       {updatedAgo(stations.latest_ts)}
+      {forecastLate && (
+        <span
+          className="ml-1 text-amber-700"
+          title={`Daily forecast late or degraded; last run ${forecast?.latest_ingested_at ? formatPkt(forecast.latest_ingested_at) : 'not recorded'}${forecast?.last_run_status ? ` (${forecast.last_run_status}${forecast.last_run_error ? `: ${forecast.last_run_error}` : ''})` : ''}`}
+        >
+          · Forecast late
+        </span>
+      )}
     </span>
   )
 }

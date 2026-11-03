@@ -1288,6 +1288,7 @@ async def publish_station_daily_parquet(
     end_date: Optional[str] = Query(None, description="End date YYYY-MM-DD (for range)"),
     overwrite: bool = Query(False, description="Overwrite existing partitions"),
     only_missing: bool = Query(True, description="Skip dates with existing _SUCCESS markers"),
+    days_back: Optional[int] = Query(None, description="Aggregate the last N complete days (ending yesterday UTC); replaces start/end"),
     min_hours: int = Query(DEFAULT_MIN_HOURS, description="Minimum hours for complete day"),
     apply_qc: bool = Query(True, description="Apply station anomaly QA filters"),
     gcs_bucket: Optional[str] = Query(None, description="Override GCS bucket"),
@@ -1322,10 +1323,21 @@ async def publish_station_daily_parquet(
     _check_target(bucket_name, hourly_pfx)
     _check_target(bucket_name, daily_pfx)
 
-    # Determine date range
+    # Determine date range. A day's hourly partition is only complete after the
+    # day ends, so every mode is clamped to yesterday (UTC).
+    yesterday = (datetime.now(timezone.utc) - timedelta(days=1)).date()
     dates_to_process = []
 
-    if date:
+    if days_back is not None:
+        if days_back < 1:
+            raise HTTPException(status_code=400, detail="days_back must be >= 1")
+        start_d = yesterday - timedelta(days=days_back - 1)
+        cur = start_d
+        while cur <= yesterday:
+            dates_to_process.append(cur)
+            cur = cur + timedelta(days=1)
+
+    elif date:
         # Single date mode
         try:
             target_date = parse_date_yyyy_mm_dd(date).date()
@@ -1337,10 +1349,10 @@ async def publish_station_daily_parquet(
         # Range mode
         try:
             start_d = parse_date_yyyy_mm_dd(start_date).date()
-            end_d = parse_date_yyyy_mm_dd(end_date).date()
+            end_d = min(parse_date_yyyy_mm_dd(end_date).date(), yesterday)
 
             if start_d > end_d:
-                raise HTTPException(status_code=400, detail="start_date must be <= end_date")
+                raise HTTPException(status_code=400, detail="start_date must be <= end_date (and not in the future)")
 
             # Generate date range
             cur = start_d
@@ -1354,7 +1366,7 @@ async def publish_station_daily_parquet(
     else:
         raise HTTPException(
             status_code=400,
-            detail="Must provide either 'date' or 'start_date' + 'end_date'"
+            detail="Must provide 'days_back', 'date', or 'start_date' + 'end_date'"
         )
 
     if not dates_to_process:

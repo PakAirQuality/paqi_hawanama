@@ -45,7 +45,12 @@ export function forecastReadings(forecasts: ForecastEntry[], lead: ForecastLead)
     const key = `${f.station_name}|${f.city_name}`
     if (seen.has(key)) continue
     seen.add(key)
-    out.push({ name: f.station_name, city: f.city_name, pm25: f.pm25_forecast, lat: f.latitude, lon: f.longitude, station_id: f.station_id ?? undefined })
+    out.push({
+      name: f.station_name, city: f.city_name, pm25: f.pm25_forecast, lat: f.latitude, lon: f.longitude,
+      station_id: f.station_id ?? undefined,
+      basis: f.forecast_basis ?? undefined,
+      obs_available: f.obs_available ?? undefined,
+    })
   }
   return out
 }
@@ -56,6 +61,20 @@ export interface StationForecastDay {
   pm25: number
   /** 90th percentile of the forecast */
   high: number | null
+  /** model | neighbours | prior (absent for forecasts made before Nov 2026) */
+  basis?: string
+}
+
+/** Stations in a forecast day with and without a live observation behind them. */
+export function obsCoverage(forecasts: ForecastEntry[], lead: ForecastLead): { total: number; withObs: number; known: boolean } {
+  let total = 0, withObs = 0, known = false
+  for (const f of forecasts) {
+    if (f.lead_days !== lead || f.pm25_forecast == null) continue
+    total++
+    if (f.obs_available != null) known = true
+    if (f.obs_available === true) withObs++
+  }
+  return { total, withObs, known }
 }
 
 /** One station's forecast days still ahead of `today`, soonest first. */
@@ -64,7 +83,7 @@ export function stationForecastDays(forecasts: ForecastEntry[], today: string, n
   for (const f of forecasts) {
     if (f.station_name !== name || f.city_name !== city || f.pm25_forecast == null || f.target_date <= today) continue
     if (!isLead(f.lead_days) || days.has(f.lead_days)) continue
-    days.set(f.lead_days, { date: f.target_date, lead: f.lead_days, pm25: f.pm25_forecast, high: f.pm25_q90 })
+    days.set(f.lead_days, { date: f.target_date, lead: f.lead_days, pm25: f.pm25_forecast, high: f.pm25_q90, basis: f.forecast_basis ?? undefined })
   }
   return [...days.values()].sort((a, b) => a.lead - b.lead)
 }

@@ -11,6 +11,10 @@ export interface StationReading {
   valid_hours?: number | null
   complete?: boolean
   station_id?: string
+  /** Forecast readings only: how the value was obtained (see analyst-desk/types ForecastBasis) */
+  basis?: string
+  /** Forecast readings only: the station had a usable observation at run time */
+  obs_available?: boolean
 }
 
 export interface StationDailyResponse {

@@ -74,6 +74,9 @@ interface StationItem {
   lon: number
   station_id?: string
   network?: string
+  /** forecast readings: model | neighbours | prior */
+  basis?: string
+  obs_available?: boolean
 }
 
 export interface KilnItem {
@@ -405,7 +408,11 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
         {initialView === 'stations' && (
           <div className="px-5 pt-5 pb-1">
             <h3 className="text-[13px] font-semibold text-[#1e293b] tracking-[-0.01em]">Monitoring Stations</h3>
-            <p className="text-[11px] text-[#94a3b8] mt-0.5">{stations.length} stations reporting</p>
+            <p className="text-[11px] text-[#94a3b8] mt-0.5">
+              {stations.some(s => s.basis != null)
+                ? `${stations.length} stations forecast, ${stations.filter(s => s.obs_available === true).length} with live readings`
+                : `${stations.length} stations reporting`}
+            </p>
           </div>
         )}
         {/* Search + sort */}
@@ -1100,6 +1107,12 @@ function ForecastDays({ days, current }: { days: StationForecastDay[]; current: 
         })}
       </ul>
       <p className="mt-1.5 text-xs leading-relaxed text-slate-600">Daily average PM2.5 in µg/m³. &ldquo;Up to&rdquo; is the 90th percentile of the forecast.</p>
+      {days.some(d => d.basis === 'neighbours') && (
+        <p className="mt-1 text-xs leading-relaxed text-amber-700">This station had no live readings when the forecast was made; its values are estimated from nearby reporting stations.</p>
+      )}
+      {days.some(d => d.basis === 'prior') && (
+        <p className="mt-1 text-xs leading-relaxed text-amber-700">No live readings here or nearby when the forecast was made; these are model estimates only.</p>
+      )}
     </>
   )
 }

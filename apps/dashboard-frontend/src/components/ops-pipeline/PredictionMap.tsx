@@ -51,6 +51,8 @@ interface StationReading {
   valid_hours?: number | null
   complete?: boolean
   station_id?: string
+  basis?: string
+  obs_available?: boolean
 }
 
 interface PredictionMapProps {
@@ -953,6 +955,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           color: bandColor(band),
           band: normalizeBand(band),
           text: '#0f172a',
+          // forecast readings: 'model' | 'neighbours' | 'prior'; live readings have none
+          basis: stn.basis ?? 'model',
         },
       })
     })
@@ -1001,6 +1005,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       },
       paint: {
         'text-color': ['get', 'text'],
+        // Forecast stations without live readings behind them are shown faded
+        'icon-opacity': ['case', ['==', ['get', 'basis'], 'model'], 1, 0.5],
+        'text-opacity': ['case', ['==', ['get', 'basis'], 'model'], 1, 0.6],
         'icon-opacity-transition': { duration: 250, delay: 0 },
         'text-opacity-transition': { duration: 250, delay: 0 },
       },
@@ -1263,7 +1270,11 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
             pm25={hoveredStation.pm25}
             title={hoveredStation.name}
             subtitle={hoveredStation.city}
-            caption={stationCaption ?? (hoveredStation.valid_hours != null ? `${hoveredStation.valid_hours}-hour mean PM2.5` : 'Daily mean PM2.5')}
+            caption={[
+              stationCaption ?? (hoveredStation.valid_hours != null ? `${hoveredStation.valid_hours}-hour mean PM2.5` : 'Daily mean PM2.5'),
+              hoveredStation.basis === 'neighbours' ? 'Estimated from nearby stations (no live data here)'
+                : hoveredStation.basis === 'prior' ? 'Model estimate only (no live data nearby)' : null,
+            ].filter(Boolean).join(' · ')}
           />
         </div>
       )}
