@@ -58,4 +58,10 @@ done
 gcloud storage buckets add-iam-policy-binding "$BUCKET" --quiet \
   --member "serviceAccount:${SA}" --role roles/storage.legacyBucketReader >/dev/null
 
+# Builds run as the build account, so submitting one means acting as it. Granted on that one
+# account, not the project, so the deployer cannot act as any other service account.
+gcloud iam service-accounts add-iam-policy-binding "$BUILD_SA" --project "$PROJECT" --quiet \
+  --role roles/iam.serviceAccountUser --condition None \
+  --member "serviceAccount:${SA}" >/dev/null
+
 echo "Ready: ${SA} via projects/${NUMBER}/locations/global/workloadIdentityPools/${POOL}/providers/${PROVIDER}"
