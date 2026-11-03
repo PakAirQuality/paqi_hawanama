@@ -23,6 +23,7 @@ def test_defaults_are_https_and_documented():
     assert s.IQAIR_BASE_URL.startswith("https://")
     assert s.OPENAQ_BASE_URL == "https://api.openaq.org/v3"
     assert s.OPENAQ_ENABLED is False
+    assert s.ICIMOD_ENABLED is False and s.ICIMOD_BASE_URL == "https://pakistan.smog.icimod.org/api/v1"
     assert s.OPS_TABLES_REQUIRED is True
     assert s.INGEST_LEASE_TTL_S < 3600
 

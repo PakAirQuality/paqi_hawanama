@@ -542,3 +542,38 @@ resource "google_cloud_scheduler_job" "openaq_reconcile" {
     max_backoff_duration = "600s"
   }
 }
+
+# ---------------------------------------------------------------------------
+# ICIMOD Air Quality Watch — shadow provider pilot (ICIMOD_ENABLED on hawanama-ingest).
+# One POST per run fetches the current UTC day for every Punjab station; :50 is a free
+# minute slot, and the run's latest_label_age_min shows whether an earlier slot would do.
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_scheduler_job" "icimod_ingestion" {
+  name             = "icimod-ingest-hourly"
+  description      = "ICIMOD: hourly PM2.5 for the EPCCD Punjab stations (shadow provider pilot)"
+  schedule         = "50 * * * *"
+  time_zone        = "UTC"
+  attempt_deadline = "300s"
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/icimod/ingest"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "600s"
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}

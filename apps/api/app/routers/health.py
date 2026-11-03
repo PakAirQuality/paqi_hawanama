@@ -110,8 +110,9 @@ LAST_GOOD_RUN_SQL = text("""
     LIMIT 1
 """)
 # Feeds that are listed for information only while they have no threshold (e.g. the BAM push
-# feed while SFL is not sending): shown, never degraded, until a threshold is configured again.
-INFORMATIONAL_SOURCES = ("bam",)
+# feed while SFL is not sending, the ICIMOD shadow feed during its pilot): shown, never degraded,
+# until a threshold is configured.
+INFORMATIONAL_SOURCES = ("bam", "icimod")
 
 
 @router.get("/freshness")

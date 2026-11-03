@@ -212,3 +212,12 @@ async def test_freshness_bam_is_informational_without_threshold(monkeypatch):
                                    "latest_ingested_at": None, "active_24h": 0}]
     r = await _get(_app(FakeDB({"FROM readings": rows, "ops.ingest_runs": []})), "/api/v1/health/freshness")
     assert r.status_code == 200 and next(s for s in r.json()["sources"] if s["source"] == "bam")["status"] == "no_threshold"
+
+
+async def test_freshness_icimod_shadow_feed_is_informational_during_the_pilot(monkeypatch):
+    monkeypatch.setattr(settings, "FRESHNESS_MAX_AGE_MIN", '{"airvisual": 180, "default": 360}')
+    stale = {"source": "icimod", "scope_type": "station", "latest_ts": datetime.now(timezone.utc) - timedelta(days=2),
+             "latest_ingested_at": None, "active_24h": 0}
+    r = await _get(_app(FakeDB({"FROM readings": _freshness_rows(10) + [stale], "ops.ingest_runs": []})), "/api/v1/health/freshness")
+    ic = next(s for s in r.json()["sources"] if s["source"] == "icimod")
+    assert r.status_code == 200 and ic["status"] == "no_threshold" and ic["threshold_min"] is None

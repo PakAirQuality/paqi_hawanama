@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, bindparam
 from app.core.database import get_database, SessionLocal
 from app.core.security import verify_tasks_token
+from app.ingestion.export_membership import SHADOW_PROVIDER_CODES
 
 from typing import Optional, Iterable, Any
 import logging
@@ -266,9 +267,11 @@ def _build_station_list_query(
         where_station.append("s.station_id IN :station_ids")
     if provider_codes:
         where_station.append("LOWER(COALESCE(p.code,'')) IN :provider_codes")
-    # Shadow-mode OpenAQ stations are excluded unless provider=openaq is requested explicitly.
-    if "openaq" not in {str(c).lower() for c in (provider_codes or [])}:
-        where_station.append("LOWER(COALESCE(p.code,'')) <> 'openaq'")
+    # Shadow-mode providers (OpenAQ, ICIMOD) are excluded unless requested explicitly by code.
+    requested = {str(c).lower() for c in (provider_codes or [])}
+    for code in SHADOW_PROVIDER_CODES:
+        if code not in requested:
+            where_station.append(f"LOWER(COALESCE(p.code,'')) <> '{code}'")
 
     station_where_sql = " AND ".join(where_station)
 
@@ -931,6 +934,7 @@ async def export_station_readings_by_city_csv(
         WHERE r.scope_type = 'station'
             AND LOWER(COALESCE(c.name, '')) = LOWER(:city_name)
             AND r.source <> 'openaq'
+            AND r.source <> 'icimod'
             AND r.ts_utc >= :start_ts
             AND r.ts_utc < :end_ts
         ORDER BY r.scope_key, r.ts_utc ASC

@@ -18,6 +18,7 @@ PROVIDER_UNITS: Dict[str, Dict[str, str]] = {
     "airvisual": {"pm25": UGM3, "pm10": UGM3},
     "punjab": {},          # endpoint units not attested
     "openaq": {},          # taken verbatim from each measurement's parameter.units instead
+    "icimod": {},          # the feed states no units; attest µg/m³ during the pilot before promoting
 }
 
 POLLUTANTS = ("pm25", "pm10", "o3", "no2", "so2", "co")
