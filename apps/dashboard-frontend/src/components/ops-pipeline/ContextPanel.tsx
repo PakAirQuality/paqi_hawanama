@@ -312,6 +312,12 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
               </div>
             </div>
       </div>
+      {/* Map credits, pinned to the card's bottom edge so they stay in view */}
+      <p className="sticky bottom-0 mt-auto border-t border-slate-900/[0.06] bg-white/90 px-4 py-1.5 text-[11px] text-slate-500">
+        Map © <a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener noreferrer" className="hover:underline">Mapbox</a>
+        {' '}© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="hover:underline">OpenStreetMap</a>
+        {' · '}<a href="https://apps.mapbox.com/feedback/" target="_blank" rel="noopener noreferrer" className="hover:underline">Improve this map</a>
+      </p>
     </m.section>
     )}
     </AnimatePresence>

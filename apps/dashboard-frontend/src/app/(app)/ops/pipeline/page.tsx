@@ -26,6 +26,10 @@ import { useSelection } from '@/lib/selection'
 import { formatDateOnly, formatPkt, pktToday } from '@/lib/time'
 import type { StationReading } from '@/components/ops-pipeline/types'
 import { INDUSTRY_CATEGORIES, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
+
+const ALL_INDUSTRY = INDUSTRY_CATEGORIES.map(c => c.key as string)
+// Emission sources the Layers panel switches, in the Sources panel's order
+const SOURCE_LAYERS = [{ key: 'kilns', label: 'Brick Kilns', color: '#d97706' }, ...INDUSTRY_CATEGORIES]
 import { MapErrorBoundary, MapUnavailableNotice } from '@/components/MapErrorBoundary'
 import type { MapUnavailableReason } from '@/lib/webgl'
 
@@ -50,7 +54,9 @@ export default function OpsPipelinePage() {
 
   // Layer toggles
   const [showKilns, setShowKilns] = useState(false)
-  const [showIndustry, setShowIndustry] = useState(false)
+  // Industry categories on the map, by key (power_plants, cement_plants, ...)
+  const [industryKeys, setIndustryKeys] = useState<string[]>([])
+  const showIndustry = industryKeys.length > 0
   const [showFires, setShowFires] = useState(false)
   const [showStations, setShowStations] = useState(true)
   const [showSurface, setShowSurface] = useState(true)
@@ -65,10 +71,11 @@ export default function OpsPipelinePage() {
   // Static inventories for the Sources panel: same cached loads the map uses (parsed once).
   // Low priority: fetched the first time the panel is opened, not on page load.
   const sourcesWanted = railTab === 'sources'
-  // Kilns and industry are shown on the map only while the Sources panel is open
+  // Opening the Sources panel puts kilns and industry on the map; they stay until switched off in Layers
   useEffect(() => {
-    setShowKilns(railTab === 'sources')
-    setShowIndustry(railTab === 'sources')
+    if (railTab !== 'sources') return
+    setShowKilns(true)
+    setIndustryKeys(ALL_INDUSTRY)
   }, [railTab])
   useEffect(() => {
     if (!sourcesWanted) return
@@ -114,7 +121,9 @@ export default function OpsPipelinePage() {
     const layers = q.get('layers')
     if (layers != null) {
       const on = new Set(layers.split(',').filter(Boolean))
-      setShowKilns(on.has('kilns')); setShowIndustry(on.has('industry')); setShowFires(on.has('fires'))
+      setShowKilns(on.has('kilns')); setShowFires(on.has('fires'))
+      // "industry" (older links) means every category
+      setIndustryKeys(on.has('industry') ? ALL_INDUSTRY : ALL_INDUSTRY.filter(k => on.has(k)))
       setShowWind(on.has('wind')); setShowPopulation(on.has('population'))
     }
   }, [])
@@ -190,11 +199,12 @@ export default function OpsPipelinePage() {
     else if (futureStep === 'now') q.set('view', 'today')
     else q.set('view', String(daysAheadOf(futureStep)))
     if (model !== 'backbone') q.set('model', model)
-    const layers = [showKilns && 'kilns', showIndustry && 'industry', showFires && 'fires', showWind && 'wind', showPopulation && 'population'].filter(Boolean).join(',')
+    const industry = industryKeys.length === ALL_INDUSTRY.length ? ['industry'] : industryKeys
+    const layers = [showKilns && 'kilns', ...industry, showFires && 'fires', showWind && 'wind', showPopulation && 'population'].filter(Boolean).join(',')
     q.set('layers', layers)
     window.history.replaceState(null, '', `${window.location.pathname}?${q}`)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPredDate, futureStep, forecastData, model, showKilns, showIndustry, showFires, showWind, showPopulation])
+  }, [selectedPredDate, futureStep, forecastData, model, showKilns, industryKeys, showFires, showWind, showPopulation])
 
   // Never leave the page empty: fall back if today's readings fail or a forecast day is not available
   useEffect(() => { if (futureStep === 'now' && liveFailed) setFutureStep(null) }, [futureStep, liveFailed])
@@ -609,6 +619,11 @@ export default function OpsPipelinePage() {
             onToggleWind={() => setShowWind(v => !v)}
             showPopulation={showPopulation}
             onTogglePopulation={() => setShowPopulation(v => !v)}
+            sources={SOURCE_LAYERS.map(s => ({ ...s, on: s.key === 'kilns' ? showKilns : industryKeys.includes(s.key) }))}
+            onToggleSource={(key) => {
+              if (key === 'kilns') setShowKilns(v => !v)
+              else setIndustryKeys(keys => (keys.includes(key) ? keys.filter(k => k !== key) : [...keys, key]))
+            }}
           />
         </div>
 
@@ -655,6 +670,7 @@ export default function OpsPipelinePage() {
             model={model}
             showKilns={showKilns}
             showIndustry={showIndustry}
+            industryKeys={industryKeys}
             showFires={showFires}
             firesData={firesGeoJSON ?? null}
             stations={shownStations as StationReading[]}

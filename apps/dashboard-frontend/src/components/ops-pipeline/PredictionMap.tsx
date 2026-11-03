@@ -3,12 +3,13 @@
 import { useRef, useState, useEffect } from 'react'
 import { canRenderMap, type MapErrorEvent, type MapUnavailableReason } from '@/lib/webgl'
 import { INVENTORY_NOTE, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/staticLayers'
-import { formatPkt } from '@/lib/time'
+import { formatDateOnly, formatPkt } from '@/lib/time'
 import { bandKey, normalizeBand, bandColor, classifyPm25 } from '@/lib/aqi'
 import { esc } from '@/lib/html'
+import { CITY_RANGE, SURFACE_RANGE, rangeTicks, turboGradient } from '@/lib/turbo'
 import { AqiCard } from '@/components/shared/AqiCard'
 import { WindParticleRenderer, type WindMetadata } from '@/components/analyst-desk/WindParticleLayer'
-import { Loader2 } from 'lucide-react'
+import { Loader2, X } from 'lucide-react'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { API_BASE } from './api'
@@ -58,6 +59,8 @@ interface PredictionMapProps {
   model?: 'backbone' | 'support_aware'
   showKilns?: boolean
   showIndustry?: boolean
+  /** Industry categories to show; every category when left out */
+  industryKeys?: readonly string[]
   showFires?: boolean
   firesData?: FiresGeoJSON | null
   /** Station daily means from the page's shared query; when given, the map does not fetch its own copy */
@@ -117,6 +120,38 @@ function hitsStation(map: mapboxgl.Map, e: mapboxgl.MapMouseEvent): boolean {
 }
 
 // Zoom range: a whole-country view at the lowest level (fits a phone), street level at the highest
+interface SelectedDistrict {
+  name: string
+  pm25: number | null
+  stations: StationReading[]
+}
+
+/** Average of a ring's points: near enough a district's middle for a point reading. */
+function ringCentre(ring: number[][]): [number, number] {
+  let x = 0, y = 0
+  for (const [lon, lat] of ring) { x += lon; y += lat }
+  return [x / ring.length, y / ring.length]
+}
+
+/** Is the point inside a Polygon or MultiPolygon (holes respected)? */
+function pointInGeometry(lon: number, lat: number, geom: GeoJSON.Geometry): boolean {
+  const inRing = (ring: number[][]) => {
+    let inside = false
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const [xi, yi] = ring[i], [xj, yj] = ring[j]
+      if ((yi > lat) !== (yj > lat) && lon < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside
+    }
+    return inside
+  }
+  const inPolygon = (rings: number[][][]) => inRing(rings[0]) && !rings.slice(1).some(inRing)
+  if (geom.type === 'Polygon') return inPolygon(geom.coordinates)
+  if (geom.type === 'MultiPolygon') return geom.coordinates.some(inPolygon)
+  return false
+}
+
+const SURFACE_GRADIENT = turboGradient()
+const SURFACE_TICKS = rangeTicks(SURFACE_RANGE)
+
 const MIN_ZOOM = 3.6
 const MAX_ZOOM = 16
 
@@ -124,7 +159,7 @@ const PAKISTAN_BOUNDS: [[number, number], [number, number]] = [[60.8, 23.5], [77
 const SUMMARY_CARD_PX = 380 // the floating card's width plus its margin
 const PANEL_SETTLE_MS = 350 // the side panel's spring has finished by then
 
-export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick, userLocation, panelOpen = false, showStations = true, showSurface = true, showWind = false, showPopulation = false, stationCaption }: PredictionMapProps) {
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, industryKeys, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick, userLocation, panelOpen = false, showStations = true, showSurface = true, showWind = false, showPopulation = false, stationCaption }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -134,6 +169,13 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   // Station markers
   const [stations, setStations] = useState<StationReading[]>([])
   const [hoveredStation, setHoveredStation] = useState<StationReading | null>(null)
+  // The district clicked on the map: its modelled PM2.5 and the stations inside it
+  const [selectedDistrict, setSelectedDistrict] = useState<SelectedDistrict | null>(null)
+  const clearDistrictRef = useRef<(() => void) | null>(null)
+  // Zoomed into a city with its own 1 km layer, which uses a narrower colour range
+  const [inCityDetail, setInCityDetail] = useState(false)
+  const surfaceRef = useRef({ selectedDate, model, smoothed })
+  surfaceRef.current = { selectedDate, model, smoothed }
 
   // Fire layer refs
   const fireSourceAdded = useRef(false)
@@ -219,7 +261,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       zoom: initialZoom(),
       minZoom: MIN_ZOOM,
       maxZoom: MAX_ZOOM,
-      attributionControl: true,
+      // Map credits are shown in the summary card (ContextPanel)
+      attributionControl: false,
       transformRequest: (url: string) => {
         if (url.includes('/ops/pipeline/tiles/') || url.includes('/ops/downscaler/tiles/')) {
           return { url }
@@ -255,6 +298,10 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
     // Someone moving the map keeps their view; only drags, scrolls and pinches carry originalEvent
     map.on('movestart', (e) => { if (e.originalEvent) viewChosenRef.current = true })
+    map.on('moveend', () => {
+      const { lng, lat } = map.getCenter()
+      setInCityDetail(map.getZoom() >= 9.5 && URBAN_CITIES.some(({ bounds: [w, so, e, n] }) => lng >= w && lng <= e && lat >= so && lat <= n))
+    })
 
     // Expose flyTo callback to parent
     onMapReady?.((lng: number, lat: number, zoom?: number) => new Promise<void>((resolve) => {
@@ -394,17 +441,16 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           },
         })
 
-        // Small amber dots — the earliest hint (z8.5-10)
+        // Small amber dots — from province zoom (z7) until the icons take over (z10)
         map.addLayer({
           id: 'brick-kilns-dots', type: 'circle', source: 'brick-kilns',
-          minzoom: 8.5,
+          minzoom: 7,
           maxzoom: 11,
           paint: {
-            'circle-radius': ['interpolate', ['linear'], ['zoom'], 8.5, 1, 10, 2.5],
+            'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 1.2, 8.5, 1.9, 10, 2.5],
             'circle-color': '#d97706',
             'circle-opacity': ['interpolate', ['linear'], ['zoom'],
-              8.5, 0,
-              9.5, 0.25,
+              7, 0.5,
               10.5, 0.5,
             ],
           },
@@ -429,8 +475,13 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           },
         })
 
+        // Sources sit under the station markers, which stay readable on top
+        if (map.getLayer('stations-label')) {
+          for (const id of ['brick-kilns-glow', 'brick-kilns-dots', 'brick-kilns-layer']) map.moveLayer(id, 'stations-label')
+        }
+
         // Hover popup — z10+
-        const kilnPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '220px' })
+        const kilnPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '220px', className: 'pointer-events-none' })
 
         map.on('mouseenter', 'brick-kilns-layer', (e) => {
           if (!e.features?.[0] || map.getZoom() < 10) return
@@ -506,7 +557,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           })
         }
 
-        const industryPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '220px' })
+        const industryPopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '220px', className: 'pointer-events-none' })
 
         for (const layer of INDUSTRY_LAYERS) {
           if (!srcData[layer.key]?.features?.length) continue
@@ -515,16 +566,16 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
           map.addSource(srcId, { type: 'geojson', data: srcData[layer.key] })
 
-          // Background glow circle
+          // A fine dot from province zoom (z7), growing into a glow behind the icon
           map.addLayer({
             id: `${layerId}-bg`, type: 'circle', source: srcId,
             minzoom: 7,
             layout: { visibility: 'none' },
             paint: {
-              'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 4, 10, 10, 12, 14],
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 7, 1.5, 8, 2.5, 10, 10, 12, 14],
               'circle-color': layer.color,
-              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8.5, 0.15, 10, 0.25, 12, 0.3],
-              'circle-blur': 0.8,
+              'circle-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0.5, 8, 0.5, 8.5, 0.15, 10, 0.25, 12, 0.3],
+              'circle-blur': ['interpolate', ['linear'], ['zoom'], 7, 0, 8, 0, 8.5, 0.8],
             },
           })
 
@@ -543,6 +594,10 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
               'icon-opacity': ['interpolate', ['linear'], ['zoom'], 7, 0, 8.5, 0.5, 10, 0.85, 12, 1],
             },
           })
+          if (map.getLayer('stations-label')) {
+            map.moveLayer(`${layerId}-bg`, 'stations-label')
+            map.moveLayer(layerId, 'stations-label')
+          }
 
           map.on('mouseenter', layerId, (e) => {
             if (!e.features?.[0]) return
@@ -670,7 +725,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       })
 
       // Fire hover popup
-      const firePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '200px' })
+      const firePopup = new mapboxgl.Popup({ closeButton: false, closeOnClick: false, maxWidth: '200px', className: 'pointer-events-none' })
 
       map.on('mouseenter', 'fires-layer', (e) => {
         if (!e.features?.[0]) return
@@ -793,6 +848,58 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         setHoveredDistrict(null)
         setHoverPM25(null)
         map.getCanvas().style.cursor = ''
+      })
+
+      // Click a district: highlight it, then show its modelled PM2.5 and the stations inside it
+      let districtId: string | null = null
+      let pointAbort: AbortController | null = null
+      const clearDistrict = () => {
+        if (districtId) map.setFeatureState({ source: 'pakistan-districts', id: districtId }, { selected: false })
+        districtId = null
+        pointAbort?.abort()
+        setSelectedDistrict(null)
+      }
+      clearDistrictRef.current = clearDistrict
+      map.on('click', async (e) => {
+        const hits = map.queryRenderedFeatures(e.point)
+        // Station, kiln and industry markers open their own panels
+        if (hits.some(f => f.layer?.id === 'stations-label' || f.layer?.id.startsWith('industry-') || f.layer?.id.startsWith('brick-kilns'))) return
+        const feature = hits.find(f => f.layer?.id === 'districts-fill')
+        if (!feature) { clearDistrict(); return }
+        const name = String(feature.properties?.shapeName ?? '')
+        if (districtId) map.setFeatureState({ source: 'pakistan-districts', id: districtId }, { selected: false })
+        districtId = name
+        map.setFeatureState({ source: 'pakistan-districts', id: name }, { selected: true })
+
+        // Rendered geometry is cut at tile edges: use the full district outline
+        const geom = (districtsGeoJSON.features as GeoJSON.Feature[]).find(f => f.properties?.shapeName === name)?.geometry ?? feature.geometry
+        const ring = geom.type === 'Polygon' ? geom.coordinates[0]
+          : geom.type === 'MultiPolygon' ? geom.coordinates.reduce((a, b) => (a[0].length > b[0].length ? a : b))[0]
+          : null
+        const [lon, lat] = ring ? ringCentre(ring) : [e.lngLat.lng, e.lngLat.lat]
+        const stations = stationsByIdRef.current.filter(st => {
+          const x = st.lon ?? st.longitude, y = st.lat ?? st.latitude
+          return x != null && y != null && pointInGeometry(x, y, geom)
+        })
+
+        const sel = surfaceRef.current
+        const params = [sel.smoothed && 'smoothed=true', sel.model !== 'backbone' && `model=${sel.model}`].filter(Boolean).map(p => '&' + p).join('')
+        pointAbort?.abort()
+        const ac = new AbortController()
+        pointAbort = ac
+        // The district's centre first; where the centre has no estimate, the spot that was clicked
+        let pm25: number | null = null
+        for (const [y, x] of [[lat, lon], [e.lngLat.lat, e.lngLat.lng]]) {
+          try {
+            const res = await fetch(`${API_BASE}/api/v1/ops/pipeline/tiles/${sel.selectedDate}/point?lat=${y}&lon=${x}${params}`, { signal: ac.signal })
+            if (res.ok) pm25 = (await res.json()).pm25 ?? null
+          } catch {
+            if (ac.signal.aborted) return
+          }
+          if (pm25 != null) break
+        }
+        if (ac.signal.aborted || districtId !== name) return
+        setSelectedDistrict({ name, pm25, stations })
       })
 
       setMapLoaded(true)
@@ -920,6 +1027,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     })
   }, [stations, mapLoaded])
 
+  // A new day or model makes the open district's reading stale
+  useEffect(() => { clearDistrictRef.current?.() }, [selectedDate, model])
+
   // Start loading kilns and industry the first time either layer is switched on
   useEffect(() => {
     if (!mapLoaded || sourcesStartedRef.current || !(showKilns || showIndustry)) return
@@ -941,13 +1051,15 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   useEffect(() => {
     if (!mapRef.current || !mapLoaded) return
     const map = mapRef.current
-    const vis = showIndustry ? 'visible' : 'none'
     for (const key of ['power_plants', 'cement_plants', 'steel_sites', 'sugar_mills', 'industrial_sites', 'mines_quarries']) {
+      // Mines and quarries have no switch of their own: they follow industrial sites
+      const wanted = key === 'mines_quarries' ? 'industrial_sites' : key
+      const vis = showIndustry && (!industryKeys || industryKeys.includes(wanted)) ? 'visible' : 'none'
       const layerId = `industry-${key}-layer`
       if (map.getLayer(layerId)) map.setLayoutProperty(layerId, 'visibility', vis)
       if (map.getLayer(`${layerId}-bg`)) map.setLayoutProperty(`${layerId}-bg`, 'visibility', vis)
     }
-  }, [showIndustry, mapLoaded, sourcesReady])
+  }, [showIndustry, industryKeys, mapLoaded, sourcesReady])
 
   // Toggle fire layers visibility
   useEffect(() => {
@@ -1157,7 +1269,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       )}
 
       {/* Urban grid hover readout */}
-      {hoverPM25 && !hoveredStation && (
+      {hoverPM25 && !hoveredStation && !selectedDistrict && (
         <div className="absolute bottom-16 left-4 z-20 bg-white/95 backdrop-blur-sm rounded-lg shadow-lg border border-slate-200/60 px-3 py-2">
           <div className="text-[11px] text-emerald-600 font-semibold tracking-wide">{hoverPM25.label}</div>
           <div className="flex items-baseline gap-1 mt-0.5">
@@ -1167,7 +1279,101 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         </div>
       )}
 
-      {/* District hover tooltip removed — district name visible on click in sidebar */}
+      {/* What the PM2.5 surface colours mean */}
+      {showSurface && mapLoaded && (
+        <div
+          role="img"
+          aria-label={`PM2.5 estimate colour scale, ${SURFACE_RANGE.min} to ${SURFACE_RANGE.max} µg/m³`}
+          className="pointer-events-none absolute top-3 left-3 z-10 w-[210px] rounded-xl px-3 py-2 md:top-4 md:left-4 md:w-[230px]"
+          style={{
+            background: 'rgba(255,255,255,0.82)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            border: '1px solid rgba(15,23,42,0.08)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+          }}
+        >
+          <div className="flex items-baseline justify-between text-[11px] font-medium text-slate-800">
+            <span>PM2.5 estimate</span>
+            <span className="text-slate-600">µg/m³</span>
+          </div>
+          <div className="mt-1.5 h-2 rounded-full" style={{ background: SURFACE_GRADIENT }} />
+          <div className="mt-1 flex justify-between text-[10px] tabular-nums text-slate-600">
+            {SURFACE_TICKS.map((t, i) => (
+              <span key={t}>{i === 0 ? `≤${t}` : i === SURFACE_TICKS.length - 1 ? `${t}+` : t}</span>
+            ))}
+          </div>
+          {inCityDetail && (
+            <p className="mt-1 text-[10px] leading-snug text-slate-600">
+              City detail layer: same colours for {CITY_RANGE.min} to {CITY_RANGE.max} µg/m³
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Clicked district: modelled PM2.5 and the stations inside it */}
+      {selectedDistrict && (() => {
+        const band = selectedDistrict.pm25 != null ? classifyPm25(selectedDistrict.pm25) : null
+        const rows = [...selectedDistrict.stations].sort((x, y) => y.pm25 - x.pm25)
+        return (
+          <section
+            aria-label={`${selectedDistrict.name} district`}
+            className="absolute top-[92px] left-4 z-20 w-[300px] max-h-[calc(100%-330px)] max-md:top-auto max-md:bottom-[156px] max-md:left-3 max-md:right-3 max-md:w-auto max-md:max-h-[40%] flex flex-col overflow-hidden rounded-2xl text-slate-900"
+            style={{
+              background: 'rgba(255,255,255,0.82)',
+              backdropFilter: 'blur(20px) saturate(180%)',
+              WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+              border: '1px solid rgba(15,23,42,0.08)',
+              boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+            }}
+          >
+            <div style={band ? { background: band.color, color: band.textColor } : undefined}>
+              <div className="flex items-center justify-between gap-2 px-4 pt-3.5">
+                <h3 className="text-[15px] font-semibold tracking-tight truncate">{selectedDistrict.name}</h3>
+                <button
+                  onClick={() => clearDistrictRef.current?.()}
+                  aria-label="Close district panel"
+                  className="-mr-1.5 rounded-lg p-1.5 opacity-70 hover:bg-black/10 hover:opacity-100 transition-colors"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+              <div className="px-4 pt-2 pb-4">
+                <div className="text-xs opacity-80">
+                  Modelled PM₂.₅{selectedDate ? `, satellite estimate for ${formatDateOnly(selectedDate, { month: 'short', day: 'numeric' })}` : ''}
+                </div>
+                <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+                  <span className="text-[34px] leading-none font-semibold tabular-nums tracking-tight">
+                    {selectedDistrict.pm25 != null ? Math.round(selectedDistrict.pm25) : '—'}
+                  </span>
+                  <span className="text-xs opacity-80">µg/m³</span>
+                  {band && <span className="rounded-full bg-white/50 px-3 py-1 text-xs font-semibold">{band.label}</span>}
+                </div>
+              </div>
+            </div>
+            {rows.length > 0 && (
+              <div className="min-h-0 flex flex-col">
+                <div className="px-4 pt-2.5 pb-1 text-xs font-semibold text-slate-600">
+                  {rows.length} station{rows.length > 1 ? 's' : ''}, {(stationCaption ?? 'PM2.5 daily mean').replace(/^./, c => c.toLowerCase())}
+                </div>
+                <ul className="overflow-y-auto px-2 pb-2">
+                  {rows.map((stn, i) => {
+                    const b = classifyPm25(stn.pm25)
+                    return (
+                      <li key={i} className="flex items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-[13px]">
+                        <span className="truncate text-slate-800">{stn.name}</span>
+                        <span className="min-w-[40px] shrink-0 rounded-full px-2.5 py-0.5 text-center text-xs font-semibold tabular-nums" style={{ background: b.color, color: b.textColor }} title={b.label}>
+                          {Math.round(stn.pm25)}
+                        </span>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+          </section>
+        )
+      })()}
 
       {!mapLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100">
