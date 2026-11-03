@@ -1,18 +1,29 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Card, CardContent } from "@/components/ui/card";
+import { ChevronLeft, Search } from "lucide-react";
+import { Skeleton } from "@/components/shared/Skeleton";
+import { AqiCard } from "@/components/shared/AqiCard";
 import { OverviewPanel } from "@/components/stations/panels/OverviewPanel";
 import { UptimePanel } from "@/components/stations/panels/UptimePanel";
 import { DiurnalPanel } from "@/components/stations/panels/DiurnalPanel";
 import { EpisodesPanel } from "@/components/stations/panels/EpisodesPanel";
-
-type StationListItem = {
-  station_id: string;
-  station_name: string;
-  display_name: string;
-};
+import { fetchCurrentStations } from "@/components/analyst-desk/api";
+import { isPakistanStation } from "@/lib/api";
+import { classifyPm25 } from "@/lib/aqi";
+import { relativeAge } from "@/lib/time";
+import {
+  filterStationRows,
+  groupStationRows,
+  isReporting,
+  stationCities,
+  stationRows,
+  worstStation,
+  type StationListItem,
+  type StationRow,
+  type StationSort,
+} from "@/lib/stationList";
 
 type TabKey = "overview" | "uptime" | "diurnal" | "episodes";
 
@@ -25,68 +36,80 @@ const TABS: { key: TabKey; label: string }[] = [
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
+// Viewport less the header, page padding and page title: list and details scroll on their own
+const PANES_HEIGHT = "lg:h-[calc(100dvh-170px)]";
+
 async function fetchStations(): Promise<StationListItem[]> {
   const res = await fetch(`${API_BASE}/api/v1/meta/stations`);
   if (!res.ok) throw new Error("Failed to load stations");
-  return res.json();
+  return ((await res.json()) as StationListItem[]).filter(isPakistanStation);
 }
 
-/** Extract city from display_name like "Station Name, City, State, Country" */
-function getCity(displayName: string): string {
-  const parts = displayName.split(", ");
-  return parts.length >= 3 ? parts[1] : "";
+function setStationInAddress(id: string | null) {
+  const url = new URL(window.location.href);
+  if (id) url.searchParams.set("station", id);
+  else url.searchParams.delete("station");
+  window.history.replaceState(null, "", url);
 }
 
 export default function StationsPage() {
-  const { data: stations, isLoading, error } = useQuery({
+  const { data: stations, isLoading, error, refetch } = useQuery({
     queryKey: ["stations"],
     queryFn: fetchStations,
+  });
+  const { data: liveData, isError: liveFailed } = useQuery({
+    queryKey: ["current-stations"],
+    queryFn: fetchCurrentStations,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 2,
   });
 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("overview");
   const [search, setSearch] = useState("");
+  const [city, setCity] = useState("");
+  const [showAll, setShowAll] = useState(false);
+  const [sort, setSort] = useState<StationSort>("worst");
 
-  // Group stations by city and filter by search
-  const { groupedStations, matchCount } = useMemo(() => {
-    if (!stations) return { filteredStations: [], groupedStations: new Map<string, StationListItem[]>(), matchCount: 0 };
+  const rows = useMemo(() => stationRows(stations ?? [], liveData?.stations ?? []), [stations, liveData]);
+  const reportingCount = useMemo(() => rows.filter(isReporting).length, [rows]);
+  const liveReady = !!liveData || liveFailed;
+  // With no readings to go on, "reporting" would hide every station
+  const reportingOnly = !showAll && !!liveData;
+  const matches = useMemo(() => filterStationRows(rows, search, reportingOnly, city), [rows, search, reportingOnly, city]);
+  const cities = useMemo(() => stationCities(rows, reportingOnly), [rows, reportingOnly]);
+  const groups = useMemo(() => groupStationRows(matches, sort), [matches, sort]);
 
-    const q = search.toLowerCase().trim();
-    const filtered = q
-      ? stations.filter(s =>
-          s.station_name.toLowerCase().includes(q) ||
-          s.display_name.toLowerCase().includes(q)
-        )
-      : stations;
+  const current = rows.find(r => r.id === selectedId) ?? null;
 
-    const grouped = new Map<string, StationListItem[]>();
-    for (const s of filtered) {
-      const city = getCity(s.display_name) || "Other";
-      if (!grouped.has(city)) grouped.set(city, []);
-      grouped.get(city)!.push(s);
-    }
+  // First view: a shared link's station, or on a wide screen the worst one, so the details are never empty.
+  // Phones open on the list.
+  const firstViewDone = useRef(false);
+  useEffect(() => {
+    if (firstViewDone.current || !rows.length || !liveReady) return;
+    firstViewDone.current = true;
+    const linked = new URLSearchParams(window.location.search).get("station");
+    if (linked && rows.some(r => r.id === linked)) setSelectedId(linked);
+    else if (window.matchMedia("(min-width: 1024px)").matches) setSelectedId(worstStation(rows)?.id ?? rows[0].id);
+  }, [rows, liveReady]);
 
-    // Sort cities alphabetically, sort stations within each city
-    const sorted = new Map(
-      [...grouped.entries()]
-        .sort(([a], [b]) => a.localeCompare(b))
-        .map(([city, list]) => [city, list.sort((a, b) => a.station_name.localeCompare(b.station_name))])
-    );
-
-    return { filteredStations: filtered, groupedStations: sorted, matchCount: filtered.length };
-  }, [stations, search]);
-
-  const currentStation = stations?.find(s => s.station_id === selectedId) ?? null;
+  const detailsRef = useRef<HTMLElement>(null);
+  const select = (id: string | null) => {
+    setSelectedId(id);
+    setActiveTab("overview");
+    setStationInAddress(id);
+    detailsRef.current?.scrollTo(0, 0);
+    document.querySelector("main")?.scrollTo(0, 0);
+  };
 
   if (isLoading) {
     return (
-      <div className="space-y-6">
-        <div className="animate-pulse space-y-4">
-          <div className="h-8 bg-muted rounded w-48"></div>
-          <div className="grid grid-cols-1 lg:grid-cols-[380px,1fr] gap-6">
-            <div className="h-[600px] bg-muted rounded-lg"></div>
-            <div className="h-[600px] bg-muted rounded-lg"></div>
-          </div>
+      <div className="space-y-4" aria-busy="true" aria-label="Loading stations">
+        <Skeleton className="h-8 w-48 rounded-lg" />
+        <div className={`grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr] ${PANES_HEIGHT}`}>
+          <Skeleton className="h-[60vh] rounded-2xl lg:h-full" />
+          <Skeleton className="hidden rounded-2xl lg:block" />
         </div>
       </div>
     );
@@ -94,148 +117,225 @@ export default function StationsPage() {
 
   if (error || !stations) {
     return (
-      <Card className="border-destructive">
-        <CardContent className="p-6">
-          <p className="text-destructive font-medium">Failed to load stations</p>
-          <p className="text-sm text-muted-foreground mt-1">{error?.message}</p>
-        </CardContent>
-      </Card>
+      <div className="rounded-2xl border border-slate-200 bg-white p-6">
+        <p className="font-medium text-slate-900">Couldn&rsquo;t load the stations</p>
+        <p className="mt-1 text-sm text-slate-600">{error?.message}</p>
+        <button
+          onClick={() => refetch()}
+          className="mt-3 rounded-full bg-slate-900 px-3.5 py-1.5 text-[13px] font-medium text-white hover:bg-slate-800"
+        >
+          Try again
+        </button>
+      </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Header */}
-      <div>
-        <h2 className="text-3xl font-bold tracking-tight">Stations</h2>
-        <p className="text-muted-foreground">
-          {stations.length} monitoring stations across South Asia
+    <div className="space-y-4">
+      <header className={current ? "max-lg:hidden" : undefined}>
+        <h1 className="text-[22px] font-semibold leading-tight tracking-tight text-slate-900">Stations</h1>
+        <p className="mt-0.5 text-[13px] text-slate-600">
+          {liveData ? `${reportingCount} reporting now, of ${stations.length} registered in Pakistan` : `${stations.length} registered in Pakistan`}
         </p>
-      </div>
+      </header>
 
-      <main className="grid grid-cols-1 lg:grid-cols-[380px,1fr] gap-6 min-h-[70vh]">
-        {/* LEFT: Station List */}
-        <div className="border border-border rounded-lg overflow-hidden bg-card flex flex-col">
-          {/* Search */}
-          <div className="p-3 border-b border-border bg-muted/30">
+      <div className={`grid grid-cols-1 gap-4 lg:grid-cols-[360px_1fr] ${PANES_HEIGHT}`}>
+        {/* List */}
+        <section
+          aria-label="Stations"
+          className={`min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/70 bg-white ${current ? "hidden lg:flex" : "flex"}`}
+        >
+          <div className="space-y-2.5 border-b border-slate-100 p-3">
             <div className="relative">
-              <svg
-                className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" aria-hidden />
               <input
-                type="text"
-                placeholder="Search stations or cities..."
+                type="search"
+                aria-label="Search stations or cities"
+                placeholder="Search stations or cities"
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-md border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/50 placeholder:text-muted-foreground"
+                className="w-full rounded-full bg-slate-900/[0.05] py-2 pl-9 pr-3 text-base text-slate-900 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-slate-900/20 md:text-[13px]"
               />
             </div>
-            <div className="text-xs text-muted-foreground mt-2">
-              {search ? `${matchCount} of ${stations.length} stations` : `${stations.length} stations`}
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              {liveData ? (
+                <div className="flex items-center gap-0.5 rounded-full bg-slate-900/[0.06] p-0.5" role="group" aria-label="Which stations">
+                  <Segment active={!showAll} onClick={() => setShowAll(false)}>Reporting</Segment>
+                  <Segment active={showAll} onClick={() => setShowAll(true)}>All</Segment>
+                </div>
+              ) : (
+                <span className="text-xs text-amber-700">{liveFailed ? "Latest readings unavailable" : "Loading readings"}</span>
+              )}
+              <select
+                aria-label="City"
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                className={`min-w-0 flex-1 cursor-pointer truncate rounded-full py-1 pl-2.5 text-xs font-medium max-md:order-last max-md:basis-full max-md:py-2 focus:outline-none focus:ring-2 focus:ring-slate-900/20 ${city ? "bg-slate-900 text-white" : "bg-slate-900/[0.06] text-slate-700"}`}
+              >
+                <option value="">All cities</option>
+                {/* The chosen city stays listed when the other filter leaves it empty */}
+                {city && !cities.some(c => c.city === city) && <option value={city}>{city} (0)</option>}
+                {cities.map(c => <option key={c.city} value={c.city}>{c.city} ({c.count})</option>)}
+              </select>
+              <select
+                aria-label="Sort stations"
+                value={sort}
+                onChange={(e) => setSort(e.target.value as StationSort)}
+                className="shrink-0 cursor-pointer rounded-full bg-transparent py-1 text-xs font-medium max-md:py-2 text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-900/20"
+              >
+                <option value="worst">Worst first</option>
+                <option value="city">By city</option>
+              </select>
             </div>
           </div>
 
-          {/* Station List grouped by city */}
-          <div className="flex-1 overflow-y-auto max-h-[65vh]">
-            {matchCount === 0 ? (
-              <div className="p-6 text-center text-muted-foreground text-sm">
-                No stations match &ldquo;{search}&rdquo;
+          <div className="min-h-0 flex-1 overflow-y-auto scrollbar-hide p-1.5">
+            {groups.length === 0 ? (
+              <div className="p-6 text-center text-[13px] text-slate-600">
+                <p>
+                  No {reportingOnly ? "reporting " : ""}stations
+                  {search && <> match &ldquo;{search}&rdquo;</>}
+                  {city && <> in {city}</>}
+                </p>
+                {reportingOnly && (
+                  <button onClick={() => setShowAll(true)} className="mt-2 font-medium text-slate-900 underline underline-offset-2">
+                    Search all stations
+                  </button>
+                )}
+                {!reportingOnly && city && (
+                  <button onClick={() => setCity("")} className="mt-2 font-medium text-slate-900 underline underline-offset-2">
+                    Search all cities
+                  </button>
+                )}
               </div>
             ) : (
-              [...groupedStations.entries()].map(([city, cityStations]) => (
-                <div key={city}>
-                  <div className="px-4 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider bg-muted/40 border-b border-border/50 sticky top-0">
-                    {city} ({cityStations.length})
-                  </div>
-                  {cityStations.map(station => (
-                    <button
-                      key={station.station_id}
-                      className={`w-full text-left px-4 py-3 border-b border-border/30 transition-colors ${
-                        station.station_id === selectedId
-                          ? "bg-primary/10 border-l-[3px] border-l-primary"
-                          : "hover:bg-muted/50 border-l-[3px] border-l-transparent"
-                      }`}
-                      onClick={() => {
-                        setSelectedId(station.station_id);
-                        setActiveTab("overview");
-                      }}
-                    >
-                      <div className="font-medium text-sm leading-tight">
-                        {station.station_name}
-                      </div>
-                      <div className="text-xs text-muted-foreground mt-0.5 truncate">
-                        {station.station_id}
-                      </div>
-                    </button>
+              groups.map(group => (
+                <div key={group.city ?? "all"}>
+                  {group.city && (
+                    <h2 className="sticky top-0 z-10 bg-white px-2.5 pb-1 pt-2.5 text-xs font-semibold text-slate-600">
+                      {group.city} <span className="font-normal">{group.rows.length}</span>
+                    </h2>
+                  )}
+                  {group.rows.map(row => (
+                    <StationButton
+                      key={row.id}
+                      row={row}
+                      showCity={!group.city}
+                      selected={row.id === selectedId}
+                      onClick={() => select(row.id)}
+                    />
                   ))}
                 </div>
               ))
             )}
           </div>
-        </div>
 
-        {/* RIGHT: Station Details */}
-        <div className="border border-border rounded-lg bg-card min-h-[400px]">
-          {!currentStation || !selectedId ? (
-            <div className="flex items-center justify-center h-full p-8">
-              <div className="text-center space-y-2 max-w-sm">
-                <div className="text-5xl mb-4">📡</div>
-                <p className="font-medium">Select a station</p>
-                <p className="text-sm text-muted-foreground">
-                  Choose a station from the list to view overview, uptime, diurnal patterns, and pollution episodes.
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="flex flex-col">
-              {/* Station Header */}
-              <div className="px-6 pt-6 pb-4 border-b border-border">
-                <h1 className="text-xl font-bold">{currentStation.station_name}</h1>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  {currentStation.display_name}
-                </p>
-              </div>
+          <p className="truncate border-t border-slate-100 px-3 py-2 text-right text-xs text-slate-600">
+            {matches.length} of {rows.length}, latest hourly PM2.5 in µg/m³
+          </p>
+        </section>
 
-              {/* Tabs */}
-              <div className="border-b border-border px-6">
-                <div className="flex gap-6">
-                  {TABS.map(({ key, label }) => (
-                    <button
-                      key={key}
-                      onClick={() => setActiveTab(key)}
-                      className={`py-3 text-sm font-medium border-b-2 transition-colors ${
-                        activeTab === key
-                          ? "border-primary text-primary"
-                          : "border-transparent text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Tab Content */}
-              <div className="p-6">
-                {activeTab === "overview" && <OverviewPanel stationId={selectedId} />}
-                {activeTab === "uptime" && <UptimePanel stationId={selectedId} />}
-                {activeTab === "diurnal" && <DiurnalPanel stationId={selectedId} />}
-                {activeTab === "episodes" && <EpisodesPanel stationId={selectedId} />}
-              </div>
-            </div>
+        {/* Details */}
+        <section
+          ref={detailsRef}
+          aria-label="Station details"
+          className={`min-h-0 overflow-y-auto rounded-2xl border border-slate-200/70 bg-white ${current ? "block" : "hidden lg:block"}`}
+        >
+          {current && (
+            <StationDetails
+              key={current.id}
+              station={current}
+              activeTab={activeTab}
+              onTab={setActiveTab}
+              onBack={() => select(null)}
+            />
           )}
-        </div>
-      </main>
+        </section>
+      </div>
     </div>
+  );
+}
+
+function Segment({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      onClick={onClick}
+      aria-pressed={active}
+      className={`rounded-full px-3 py-1 text-xs font-medium transition-colors max-md:py-2 ${active ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-900/[0.06]"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function StationButton({ row, showCity, selected, onClick }: { row: StationRow; showCity: boolean; selected: boolean; onClick: () => void }) {
+  const band = row.pm25 != null ? classifyPm25(row.pm25) : null;
+  const status = row.pm25 == null ? "Not reporting" : row.lastReading ? relativeAge(row.lastReading) : "";
+  return (
+    <button
+      onClick={onClick}
+      aria-current={selected ? "true" : undefined}
+      className={`flex w-full items-center gap-3 rounded-xl px-2.5 py-2 text-left transition-colors ${selected ? "bg-slate-100" : "hover:bg-slate-50"}`}
+    >
+      <span
+        className={`flex w-12 shrink-0 flex-col items-center rounded-lg py-1 leading-none ${band ? "" : "bg-slate-100 text-slate-500"}`}
+        style={band ? { background: band.color, color: band.textColor } : undefined}
+      >
+        <span className="text-[13px] font-semibold tabular-nums">{row.pm25 != null ? Math.round(row.pm25) : "—"}</span>
+        <span className="mt-0.5 text-[9px] font-medium">PM2.5</span>
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-[13px] font-medium text-slate-900">{row.name}</span>
+        <span className="block truncate text-xs text-slate-600">
+          {[showCity ? row.city : null, status].filter(Boolean).join(", ")}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function StationDetails({ station, activeTab, onTab, onBack }: { station: StationRow; activeTab: TabKey; onTab: (tab: TabKey) => void; onBack: () => void }) {
+  return (
+    <>
+      <div className="p-4 md:p-5">
+        <button onClick={onBack} className="-ml-1 mb-1 flex items-center gap-0.5 py-2 text-[13px] font-medium text-slate-700 lg:hidden">
+          <ChevronLeft size={16} aria-hidden />
+          All stations
+        </button>
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <h2 className="text-[20px] font-semibold leading-snug tracking-tight text-slate-900">{station.name}</h2>
+            {station.place && <p className="mt-0.5 text-[13px] text-slate-600">{station.place}</p>}
+            <p className={`mt-0.5 text-xs font-medium ${station.pm25 != null ? "text-emerald-700" : "text-slate-500"}`}>
+              {station.pm25 != null ? `Reporting${station.lastReading ? `, last reading ${relativeAge(station.lastReading)}` : ""}` : "Not reporting now"}
+            </p>
+          </div>
+          {station.pm25 != null && <AqiCard pm25={station.pm25} caption="Latest hourly PM2.5" className="w-full shrink-0 shadow-none md:w-[300px]" />}
+        </div>
+      </div>
+
+      <div className="sticky top-0 z-10 border-b border-slate-100 bg-white px-4 pb-3 md:px-5">
+        <div className="inline-flex items-center gap-0.5 rounded-full bg-slate-900/[0.06] p-0.5" role="tablist" aria-label="Station information">
+          {TABS.map(({ key, label }) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={activeTab === key}
+              onClick={() => onTab(key)}
+              className={`rounded-full px-3 py-1 text-xs font-medium transition-colors max-md:py-2 ${activeTab === key ? "bg-slate-900 text-white" : "text-slate-700 hover:bg-slate-900/[0.06]"}`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="station-panels p-4 md:p-5">
+        {activeTab === "overview" && <OverviewPanel stationId={station.id} />}
+        {activeTab === "uptime" && <UptimePanel stationId={station.id} />}
+        {activeTab === "diurnal" && <DiurnalPanel stationId={station.id} />}
+        {activeTab === "episodes" && <EpisodesPanel stationId={station.id} />}
+      </div>
+    </>
   );
 }

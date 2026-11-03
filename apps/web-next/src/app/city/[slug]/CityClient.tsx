@@ -93,7 +93,7 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -117,7 +117,7 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
             <div className="flex items-center justify-between">
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
           </div>
@@ -147,17 +147,17 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
     // Fallback to category-based colors if no AQI value
     switch (aqi_category) {
       case 'good': 
-        return { style: { backgroundColor: 'rgba(110, 204, 57, 1)', color: '#000000' }, className: 'font-bold text-black' }
+        return { style: { backgroundColor: 'rgba(168, 224, 95, 1)', color: '#000000' }, className: 'font-bold text-black' }
       case 'moderate': 
-        return { style: { backgroundColor: 'rgba(240, 194, 12, 1)', color: '#000000' }, className: 'font-bold text-black' }
+        return { style: { backgroundColor: 'rgba(253, 214, 75, 1)', color: '#000000' }, className: 'font-bold text-black' }
       case 'unhealthy_sensitive': 
-        return { style: { backgroundColor: 'rgba(241, 128, 23, 1)', color: '#000000' }, className: 'font-bold text-black' }
+        return { style: { backgroundColor: 'rgba(255, 155, 87, 1)', color: '#000000' }, className: 'font-bold text-black' }
       case 'unhealthy': 
-        return { style: { backgroundColor: 'rgba(239, 120, 85, 1)', color: '#ffffff' }, className: 'font-bold text-white' }
+        return { style: { backgroundColor: 'rgba(254, 106, 105, 1)', color: '#000000' }, className: 'font-bold text-black' }
       case 'very_unhealthy': 
-        return { style: { backgroundColor: '#a070b5', color: '#ffffff' }, className: 'font-bold text-white' }
+        return { style: { backgroundColor: '#a97abc', color: '#000000' }, className: 'font-bold text-black' }
       case 'hazardous': 
-        return { style: { backgroundColor: '#991b1b', color: '#ffffff' }, className: 'font-bold text-white' }
+        return { style: { backgroundColor: '#a87383', color: '#000000' }, className: 'font-bold text-black' }
       default: 
         return { style: { backgroundColor: '#6b7280', color: '#ffffff' }, className: 'font-bold text-white' }
     }
@@ -212,20 +212,20 @@ export default function CityClient({ citySlug, city }: CityClientProps) {
                 alt="Hawanama Logo" 
                 className="w-8 h-8 sm:w-12 sm:h-12 object-contain flex-shrink-0"
               />
-              <div className="min-w-0">
+              <div className="min-w-0 hidden sm:block">
                 <Link href="/" className="text-lg sm:text-2xl font-bold text-foreground truncate block">Hawanama</Link>
-                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">South Asia Air Quality Monitoring</p>
+                <p className="text-xs sm:text-sm text-muted-foreground hidden sm:block">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
-            <div className="flex items-center space-x-2 sm:space-x-4 min-w-0">
-              <div className="relative">
-                <CitySearch className="w-32 sm:w-48 md:w-64 ring-2 ring-blue-400/50 border-blue-400/50 rounded-2xl" />
+            <div className="flex items-center space-x-2 sm:space-x-4 min-w-0 flex-1 sm:flex-none justify-end">
+              <div className="relative flex-1 sm:flex-none min-w-0">
+                <CitySearch className="w-full sm:w-48 md:w-64 ring-2 ring-blue-400/50 border-blue-400/50 rounded-2xl" />
               </div>
               <div className="flex items-center space-x-4">
                 <Link href="/">
-                  <Button variant="ghost" size="sm">
-                    <ArrowLeft className="w-4 h-4 mr-2" />
-                    Back to Map
+                  <Button variant="ghost" size="sm" aria-label="Back to Map">
+                    <ArrowLeft className="w-4 h-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Back to Map</span>
                   </Button>
                 </Link>
               </div>

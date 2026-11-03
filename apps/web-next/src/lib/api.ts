@@ -1,3 +1,4 @@
+import { filterToPakistan } from './pakistan'
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE || 'https://hawanama-152782825429.asia-south1.run.app/api'
 
 export interface Station {
@@ -123,7 +124,7 @@ export const api = {
 
     // Server returns each station's newest PM2.5-bearing hour (48 h lookback, 6 h freshness),
     // so a weather-only row at H+1 no longer blanks a marker and the HH:00 cliff is gone.
-    return data.stations || []
+    return filterToPakistan<Station>(data.stations || [])
   },
 
   // Get single station
@@ -150,14 +151,13 @@ export const api = {
     return response.json()
   },
 
-  // Get all cities
+  // Get Pakistan's cities. The API lists every country, so filter before applying the limit.
   async getCities(limit?: number) {
-    const query = new URLSearchParams()
-    if (limit) query.append('limit', limit.toString())
-    
-    const url = `${API_BASE_URL}/v1/cities${query.toString() ? '?' + query.toString() : ''}`
-    const response = await fetch(url)
-    return response.json()
+    const response = await fetch(`${API_BASE_URL}/v1/cities`)
+    const data = await response.json()
+    const pakistan = (data.cities || []).filter((c: { country?: string }) => c.country === 'Pakistan')
+    const cities = limit ? pakistan.slice(0, limit) : pakistan
+    return { ...data, cities, count: cities.length }
   },
 
   // Get single city details

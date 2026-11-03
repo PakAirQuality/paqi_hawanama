@@ -1,10 +1,15 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect } from 'react'
+import { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react'
+import { AqiCard } from '@/components/shared/AqiCard'
+import { Skeleton } from '@/components/shared/Skeleton'
+import { formatDateOnly, relativeAge } from '@/lib/time'
 import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, ChevronLeft, Search, MapPin } from 'lucide-react'
+import { ChevronRight, ChevronLeft, ChevronDown, Search, MapPin } from 'lucide-react'
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
+import { stationForecastDays, type StationForecastDay } from '@/lib/timeline'
+import type { ForecastEntry } from '@/components/analyst-desk/types'
 
 // ── Category icons (Google Material Symbols, weight 300, filled) ──
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -112,6 +117,12 @@ export interface StructuresTabProps {
   initialView?: 'stations' | 'sources'
   /** Open this item's detail view (a map click). A new object each time, so a repeat click reopens it. */
   focus?: StructuresFocus | null
+  /** When given, leaving the station detail closes the panel instead of returning to the list */
+  onClose?: () => void
+  /** What a station's number means in this view */
+  stationCaption?: string
+  /** Set on a forecast day: the run, today, and the day in view */
+  stationForecast?: { forecasts: ForecastEntry[]; today: string; date: string | null }
 }
 
 // Health classification: one implementation for the whole dashboard (lib/aqi)
@@ -126,92 +137,121 @@ function pm25BarColor(v: number): string {
   return pm25Color(v)
 }
 
-// ── Canvas bar chart for 24h PM2.5 ──
+// ── Interactive 24h PM2.5 bar chart: hover, touch or arrow keys to read any hour ──
 function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [width, setWidth] = useState(0)
+  const [active, setActive] = useState<number | null>(null)
+  const tipRef = useRef<HTMLDivElement>(null)
+  const [tipWidth, setTipWidth] = useState(0)
+
+  useLayoutEffect(() => {
+    if (tipRef.current) setTipWidth(tipRef.current.offsetWidth)
+  }, [active])
 
   useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return
+    const el = wrapRef.current
+    if (!el) return
+    setWidth(el.clientWidth)
+    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
 
-    const dpr = window.devicePixelRatio || 1
-    const W = canvas.clientWidth
-    const H = canvas.clientHeight
-    canvas.width = W * dpr
-    canvas.height = H * dpr
-    ctx.scale(dpr, dpr)
+  const H = 150
+  const pad = { top: 28, right: 4, bottom: 22, left: 4 }
+  const vals = data.filter(d => d.pm25 != null).map(d => d.pm25 as number)
 
-    const pad = { top: 12, right: 32, bottom: 24, left: 4 }
-    const w = W - pad.left - pad.right
-    const h = H - pad.top - pad.bottom
+  if (!vals.length) {
+    return <div ref={wrapRef} className="flex h-[150px] items-center justify-center text-xs text-slate-600">No data</div>
+  }
 
-    const validVals = data.filter(d => d.pm25 != null).map(d => d.pm25!)
-    if (!validVals.length) {
-      ctx.fillStyle = '#94a3b8'
-      ctx.font = '11px system-ui'
-      ctx.textAlign = 'center'
-      ctx.fillText('No data', W / 2, H / 2)
-      return
-    }
+  const maxVal = Math.ceil(Math.max(...vals, 20) / 10) * 10
+  const w = Math.max(0, width - pad.left - pad.right)
+  const h = H - pad.top - pad.bottom
+  const slot = w / data.length
+  const barW = Math.max(3, slot - 3)
+  const step = Math.max(1, Math.floor(data.length / 5))
 
-    const maxVal = Math.ceil(Math.max(...validVals, 20) / 10) * 10
-    const barW = Math.max(4, (w / data.length) - 2)
-    const gap = (w - barW * data.length) / data.length
+  const move = (delta: number) => {
+    setActive(cur => {
+      const start = cur ?? (delta > 0 ? -1 : data.length)
+      let i = start + delta
+      while (i >= 0 && i < data.length && data[i].pm25 == null) i += delta
+      return i >= 0 && i < data.length ? i : cur
+    })
+  }
 
-    // Grid lines
-    ctx.strokeStyle = '#cbd5e1'
-    ctx.lineWidth = 0.8
-    ctx.setLineDash([4, 3])
-    const gridSteps = [0, Math.round(maxVal * 0.33), Math.round(maxVal * 0.66), maxVal]
-    for (const v of gridSteps) {
-      const y = pad.top + h - (v / maxVal) * h
-      ctx.beginPath()
-      ctx.moveTo(pad.left, y)
-      ctx.lineTo(pad.left + w, y)
-      ctx.stroke()
-      // Y-axis label
-      ctx.fillStyle = '#94a3b8'
-      ctx.font = '9px system-ui'
-      ctx.textAlign = 'left'
-      ctx.fillText(String(v), pad.left + w + 4, y + 3)
-    }
-    ctx.setLineDash([])
+  const a = active != null ? data[active] : null
+  const tip = a && a.pm25 != null ? (() => {
+    const band = classifyPm25(a.pm25)
+    const cx = pad.left + (active as number) * slot + slot / 2
+    const left = Math.max(0, Math.min(cx - tipWidth / 2, width - tipWidth))
+    return { left, label: `${a.hour}:00`, value: Math.round(a.pm25), band }
+  })() : null
 
-    // Bars
-    for (let i = 0; i < data.length; i++) {
-      const d = data[i]
-      const x = pad.left + i * (barW + gap) + gap / 2
-      if (d.pm25 == null) continue
-      const barH = (d.pm25 / maxVal) * h
-      const y = pad.top + h - barH
+  return (
+    <div ref={wrapRef} className="relative select-none" style={{ height: H }}>
+      {width > 0 && (
+        <svg
+          width={width}
+          height={H}
+          tabIndex={0}
+          role="img"
+          aria-label={`Hourly PM2.5 for the last 24 hours. Use the left and right arrow keys to read each hour.`}
+          onKeyDown={e => {
+            if (e.key === 'ArrowRight') { e.preventDefault(); move(1) }
+            else if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1) }
+            else if (e.key === 'Escape') setActive(null)
+          }}
+          onBlur={() => setActive(null)}
+          onPointerLeave={() => setActive(null)}
+          className="block outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-slate-900/30"
+        >
+          {data.map((d, i) => {
+            const x = pad.left + i * slot + (slot - barW) / 2
+            const bh = d.pm25 == null ? 0 : Math.max(2, (d.pm25 / maxVal) * h)
+            const y = pad.top + h - bh
+            return (
+              <g key={i}>
+                {d.pm25 != null && (
+                  <rect
+                    x={x} y={y} width={barW} height={bh} rx={Math.min(2.5, barW / 2)}
+                    fill={pm25BarColor(d.pm25)}
+                    opacity={active == null || active === i ? 1 : 0.4}
+                    className="bar-grow"
+                    style={{ transition: 'opacity 120ms', animationDelay: `${i * 14}ms` }}
+                  />
+                )}
+                {/* full-height hit area so thin bars are easy to hover or tap */}
+                <rect
+                  x={pad.left + i * slot} y={0} width={slot} height={H} fill="transparent"
+                  onPointerEnter={() => d.pm25 != null && setActive(i)}
+                  onPointerDown={() => d.pm25 != null && setActive(i)}
+                />
+                {i % step === 0 && (
+                  <text x={pad.left + i * slot + slot / 2} y={H - 6} textAnchor="middle" fontSize="11" fill="#64748b">{d.hour}</text>
+                )}
+              </g>
+            )
+          })}
+        </svg>
+      )}
 
-      ctx.fillStyle = pm25BarColor(d.pm25)
-      const r = Math.min(2, barW / 2)
-      ctx.beginPath()
-      ctx.moveTo(x, y + r)
-      ctx.quadraticCurveTo(x, y, x + r, y)
-      ctx.lineTo(x + barW - r, y)
-      ctx.quadraticCurveTo(x + barW, y, x + barW, y + r)
-      ctx.lineTo(x + barW, pad.top + h)
-      ctx.lineTo(x, pad.top + h)
-      ctx.closePath()
-      ctx.fill()
-    }
-
-    // X-axis labels (show every ~6 hours)
-    ctx.fillStyle = '#94a3b8'
-    ctx.font = '9px system-ui'
-    ctx.textAlign = 'center'
-    const step = Math.max(1, Math.floor(data.length / 5))
-    for (let i = 0; i < data.length; i += step) {
-      const x = pad.left + i * (barW + gap) + gap / 2 + barW / 2
-      ctx.fillText(data[i].hour, x, pad.top + h + 14)
-    }
-  }, [data])
-
-  return <canvas ref={canvasRef} className="w-full" style={{ height: 140 }} />
+      {tip && (
+        <div
+          ref={tipRef}
+          className="pointer-events-none absolute top-0 max-w-full truncate whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs text-white shadow-lg"
+          style={{ left: tip.left }}
+          role="status"
+        >
+          <span className="tabular-nums">{tip.label}</span>
+          <span className="mx-1.5 font-semibold tabular-nums">{tip.value} µg/m³</span>
+          <span className="opacity-80">{tip.band.label}</span>
+        </div>
+      )}
+    </div>
+  )
 }
 
 // ── Esri satellite image for station location ──
@@ -228,7 +268,7 @@ type View =
 
 export type StructuresFocus = Extract<View, { type: 'station-detail' | 'kiln-detail' | 'industry-detail' }>
 
-export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus }: StructuresTabProps) {
+export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus, onClose, stationCaption, stationForecast }: StructuresTabProps) {
   const [view, setView] = useState<View>(focus ?? (initialView === 'stations' ? { type: 'stations' } : { type: 'categories' }))
   // Follow a new focus from the map (state adjusted during render, not in an effect)
   const [prevFocus, setPrevFocus] = useState(focus)
@@ -296,9 +336,9 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   const BackButton = ({ label, onClick }: { label: string; onClick: () => void }) => (
     <button
       onClick={onClick}
-      className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
+      className="flex items-center gap-1 px-4 py-3 text-[14px] font-medium text-slate-700 hover:text-slate-900 transition-colors w-full"
     >
-      <ChevronLeft size={14} strokeWidth={2} /> {label}
+      <ChevronLeft size={18} strokeWidth={2} /> {label}
     </button>
   )
 
@@ -307,35 +347,33 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     const CategoryRow = ({ onClick, color, icon, label, sub }: { onClick: () => void; color: string; icon: React.ReactNode; label: string; sub: string }) => (
       <button
         onClick={onClick}
-        className="w-full flex items-center gap-3.5 px-4 py-3.5 rounded-xl border border-slate-100 bg-white hover:border-slate-200 hover:shadow-sm transition-all text-left group"
+        className="w-full flex items-center gap-3.5 px-3 py-3 rounded-2xl hover:bg-slate-900/[0.04] transition-colors text-left group"
       >
-        <div className="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background: color + '14', color }}>
+        <div className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
+          style={{ background: color + '1f', color }}>
           {icon}
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-semibold text-[#1e293b]">{label}</div>
-          <div className="text-[11px] text-[#94a3b8] mt-0.5">{sub}</div>
+          <div className="text-[15px] font-medium text-slate-900">{label}</div>
+          <div className="text-[13px] text-slate-600 mt-0.5">{sub}</div>
         </div>
-        <ChevronRight size={15} className="text-slate-200 group-hover:text-slate-400 transition-colors" />
+        <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-700 transition-colors" />
       </button>
     )
 
     return (
-      <div className="flex flex-col h-full bg-[#fafbfc]">
+      <div className="flex flex-col h-full bg-white">
         <div className="px-5 pt-5 pb-3">
-          <h3 className="text-[13px] font-semibold text-[#1e293b] tracking-[-0.01em]">
-            Emission Sources
-          </h3>
-          <p className="text-[11px] text-[#94a3b8] mt-0.5">Browse kilns & industry</p>
+          <h3 className="text-[20px] font-semibold text-slate-900 tracking-tight">Emission sources</h3>
+          <p className="text-[13px] text-slate-600 mt-0.5">Brick kilns and industrial sites on the map</p>
         </div>
-        <div className="flex-1 overflow-y-auto scrollbar-hide px-3 pb-4 space-y-2">
+        <div className="flex-1 overflow-y-auto scrollbar-hide px-2 pb-4 space-y-0.5">
           <CategoryRow
             onClick={() => setView({ type: 'kilns' })}
             color={CATEGORY_COLORS.kilns}
             icon={CATEGORY_ICONS.kilns}
             label="Brick Kilns"
-            sub={`${kilns.length.toLocaleString()} geolocated kilns`}
+            sub={`${kilns.length.toLocaleString()} kilns`}
           />
           {industryCategories.map(cat => (
             <CategoryRow
@@ -360,7 +398,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   if (view.type === 'stations') {
     const filtered = filterBySearch(sortedStations)
     return (
-      <div className="flex flex-col h-full bg-[#fafbfc]">
+      <div className="flex flex-col h-full bg-white">
         {initialView !== 'stations' && (
           <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch(''); setSortBy('pm25') }} />
         )}
@@ -372,19 +410,19 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
         )}
         {/* Search + sort */}
         <div className="px-4 pb-3 flex items-center gap-2">
-          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white border border-slate-200/80 flex-1 min-w-0">
-            <Search size={14} className="text-slate-300 shrink-0" />
+          <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-slate-100 flex-1 min-w-0 focus-within:bg-slate-200/70 transition-colors">
+            <Search size={17} className="text-slate-500 shrink-0" />
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="Search stations..."
-              className="flex-1 text-[12px] bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+              className="flex-1 text-[15px] bg-transparent outline-none text-slate-900 placeholder:text-slate-500"
             />
           </div>
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value as 'pm25' | 'name' | 'city' | 'network')}
-            className="text-[11px] text-slate-500 bg-white border border-slate-200/80 rounded-xl px-2.5 py-2 outline-none shrink-0"
+            className="text-[13px] text-slate-800 bg-slate-100 rounded-xl px-3 py-3 outline-none shrink-0 cursor-pointer"
           >
             <option value="pm25">PM2.5 (highest first)</option>
             <option value="city">City</option>
@@ -392,7 +430,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             <option value="name">A → Z</option>
           </select>
         </div>
-        <div className="px-5 pb-2 text-[10px] font-medium text-[#94a3b8]">
+        <div className="px-5 pb-2 text-[11px] font-medium text-[#94a3b8]">
           {filtered.length} stations
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -404,14 +442,14 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             return (
               <div key={`${s.name}-${i}`}>
                 {showCityHeader && (
-                  <div className="px-3 pt-2.5 pb-1 text-[10px] font-semibold text-slate-500 uppercase tracking-wide bg-slate-50/80 sticky top-0">
+                  <div className="px-3 pt-2.5 pb-1 text-[11px] font-semibold text-slate-500 tracking-wide bg-slate-50/80 sticky top-0">
                     {s.city}
                   </div>
                 )}
                 {showNetworkHeader && (
-                  <div className="px-3 pt-3 pb-1.5 bg-slate-50/80 sticky top-0 border-b border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{netGroup}</div>
-                    <div className="text-[9.5px] text-slate-400 mt-0.5">{netCount} stations</div>
+                  <div className="px-4 pt-4 pb-1.5 bg-white/90 backdrop-blur sticky top-0 z-[1]">
+                    <div className="text-[13px] font-semibold text-slate-900">{netGroup}</div>
+                    <div className="text-[9.5px] text-slate-500 mt-0.5">{netCount} stations</div>
                   </div>
                 )}
                 <button
@@ -419,7 +457,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                     onFlyTo(s.lon, s.lat, 14)
                     setView({ type: 'station-detail', station: s })
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-100/80"
+                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-slate-100/80"
                 >
                   {/* AQI badge */}
                   <div
@@ -436,7 +474,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="text-[12px] font-semibold text-slate-800 truncate">{s.name}</div>
-                    {sortBy !== 'city' && <div className="text-[10.5px] text-slate-400 truncate">{s.city}</div>}
+                    {sortBy !== 'city' && <div className="text-[10.5px] text-slate-500 truncate">{s.city}</div>}
                   </div>
                   <svg className="w-4 h-4 text-slate-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
                     <polyline points="9 18 15 12 9 6" />
@@ -456,7 +494,9 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
       <StationDetailView
         station={view.station}
         selectedDate={selectedDate}
-        onBack={() => setView({ type: 'stations' })}
+        caption={stationCaption}
+        forecast={stationForecast}
+        onBack={() => (onClose ? onClose() : setView({ type: 'stations' }))}
         onFlyTo={onFlyTo}
       />
     )
@@ -468,27 +508,18 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     return (
       <div className="flex flex-col h-full">
         <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch(''); setKilnSort('province') }} />
-        <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 flex-1 min-w-0">
-            <Search size={13} className="text-slate-400 shrink-0" />
-            <input
-              value={search}
-              onChange={e => { setSearch(e.target.value); setKilnLimit(200) }}
-              placeholder="Search kilns..."
-              className="flex-1 text-xs bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
-            />
-          </div>
+        <div className="px-4 pb-3 pt-1 flex items-center gap-2">
           <select
             value={kilnSort}
             onChange={e => { setKilnSort(e.target.value as 'province' | 'district' | 'id'); setKilnLimit(200) }}
-            className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none shrink-0"
+            className="w-full text-[13px] text-slate-800 bg-slate-100 rounded-xl px-3 py-3 outline-none shrink-0 cursor-pointer"
           >
             <option value="province">Province</option>
             <option value="district">District</option>
             <option value="id">A → Z</option>
           </select>
         </div>
-        <div className="px-3 py-1 text-[10px] text-slate-400 border-b border-slate-50">
+        <div className="px-4 pb-1 text-[13px] text-slate-600">
           {searched.length.toLocaleString()} kilns
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -508,14 +539,14 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
               const fuelCounts: Record<string, number> = {}
               for (const item of group) { fuelCounts[item.fuel] = (fuelCounts[item.fuel] || 0) + 1 }
               const parts = Object.entries(fuelCounts).sort((a, b) => b[1] - a[1]).map(([f, c]) => `${c} ${f}`)
-              groupStats = `${group.length} kilns · ${parts.join(' · ')}`
+              groupStats = `${group.length} kilns: ${parts.join(', ')}`
             }
             return (
               <div key={k.id}>
                 {showHeader && (
-                  <div className="px-3 pt-3 pb-1.5 bg-slate-50/80 sticky top-0 border-b border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{headerLabel}</div>
-                    {groupStats && <div className="text-[9.5px] text-slate-400 mt-0.5">{groupStats}</div>}
+                  <div className="px-4 pt-4 pb-1.5 bg-white/90 backdrop-blur sticky top-0 z-[1]">
+                    <div className="text-[13px] font-semibold text-slate-900">{headerLabel}</div>
+                    {groupStats && <div className="text-xs text-slate-600 mt-0.5">{groupStats}</div>}
                   </div>
                 )}
                 <button
@@ -523,10 +554,10 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                     onFlyTo(k.lon, k.lat, 16)
                     setView({ type: 'kiln-detail', kiln: k })
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-100/80"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-900/[0.04] transition-colors text-left"
                 >
                   {/* Chimney badge */}
-                  <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg bg-amber-600 shadow-sm">
+                  <div className="shrink-0 flex items-center justify-center w-9 h-9 rounded-full bg-amber-600">
                     <svg xmlns="http://www.w3.org/2000/svg" width="16" height="18" viewBox="0 0 24 28">
                       <rect x="8" y="6" width="8" height="16" rx="1" fill="white" opacity="0.9"/>
                       <rect x="6.5" y="4" width="11" height="3" rx="1" fill="white"/>
@@ -537,10 +568,10 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                     </svg>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-semibold text-slate-800">{k.id}</div>
-                    <div className="text-[10.5px] text-slate-400 capitalize">{k.fuel}</div>
+                    <div className="text-[14px] font-medium text-slate-900">{k.id}</div>
+                    <div className="text-xs text-slate-600">{[k.district, k.state].filter(Boolean).join(', ')}</div>
                   </div>
-                  <div className="text-[11px] text-slate-400 shrink-0 capitalize">{k.fuel}</div>
+                  <div className="text-[13px] text-slate-700 shrink-0 capitalize">{k.fuel}</div>
                 </button>
               </div>
             )
@@ -548,7 +579,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
           {searched.length > kilnLimit && (
             <button
               onClick={() => setKilnLimit(prev => prev + 200)}
-              className="w-full px-3 py-3 text-[11px] font-medium text-amber-600 hover:bg-amber-50 transition-colors text-center border-t border-slate-100"
+              className="w-full px-4 py-4 text-[13px] font-medium text-slate-800 hover:bg-slate-900/[0.04] transition-colors text-center"
             >
               Load more ({(searched.length - kilnLimit).toLocaleString()} remaining)
             </button>
@@ -562,12 +593,12 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
   if (view.type === 'kiln-detail') {
     const k = view.kiln
     return (
-      <div className="flex flex-col h-full bg-[#fafbfc]">
+      <div className="flex flex-col h-full bg-white">
         <button
           onClick={() => { setView({ type: 'kilns' }) }}
-          className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
+          className="flex items-center gap-1 px-4 py-3 text-[14px] font-medium text-slate-700 hover:text-slate-900 transition-colors w-full"
         >
-          <ChevronLeft size={14} strokeWidth={2} /> All Kilns
+          <ChevronLeft size={18} strokeWidth={2} /> All Kilns
         </button>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           {/* Header */}
@@ -578,7 +609,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             <p className="text-[12px] text-[#94a3b8] mt-1 leading-relaxed">
               {k.district ? `${k.district}, ` : ''}{k.state} &middot; {k.fuel} fuel
             </p>
-            <span className="inline-flex items-center mt-2.5 text-[10px] font-semibold uppercase tracking-wide px-2.5 py-[3px] rounded-full bg-amber-50 text-amber-600">
+            <span className="inline-flex items-center mt-2.5 text-[11px] font-semibold tracking-wide px-2.5 py-[3px] rounded-full bg-amber-50 text-amber-600">
               Brick Kiln
             </span>
           </div>
@@ -591,15 +622,15 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
           {/* Details card */}
           <div className="px-4 pb-4">
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-100">
+              <div className="px-4 py-2.5 border-slate-100">
                 <span className="text-[12px] font-bold text-slate-700">Kiln Details</span>
               </div>
               <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-2.5 text-[11px]">
-                <div><div className="text-slate-400 text-[10px]">Province</div><div className="text-slate-700 font-medium">{k.state}</div></div>
-                {k.district && <div><div className="text-slate-400 text-[10px]">District</div><div className="text-slate-700 font-medium">{k.district}</div></div>}
-                <div><div className="text-slate-400 text-[10px]">Fuel Type</div><div className="text-slate-700 font-medium">{k.fuel}</div></div>
-                <div><div className="text-slate-400 text-[10px]">Capacity</div><div className="text-slate-700 font-medium">{k.capacity_tonnes} tonnes</div></div>
-                <div><div className="text-slate-400 text-[10px]">Coordinates</div><div className="text-slate-700 font-medium">{k.lat.toFixed(4)}, {k.lon.toFixed(4)}</div></div>
+                <div><div className="text-slate-500 text-[11px]">Province</div><div className="text-slate-700 font-medium">{k.state}</div></div>
+                {k.district && <div><div className="text-slate-500 text-[11px]">District</div><div className="text-slate-700 font-medium">{k.district}</div></div>}
+                <div><div className="text-slate-500 text-[11px]">Fuel Type</div><div className="text-slate-700 font-medium">{k.fuel}</div></div>
+                <div><div className="text-slate-500 text-[11px]">Capacity</div><div className="text-slate-700 font-medium">{k.capacity_tonnes} tonnes</div></div>
+                <div><div className="text-slate-500 text-[11px]">Coordinates</div><div className="text-slate-700 font-medium">{k.lat.toFixed(4)}, {k.lon.toFixed(4)}</div></div>
               </div>
             </div>
           </div>
@@ -686,20 +717,20 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     return (
       <div className="flex flex-col h-full">
         <BackButton label="All Sources" onClick={() => { setView({ type: 'categories' }); setSearch(''); setIndustrySort('province') }} />
-        <div className="px-3 py-2 border-b border-slate-100 flex items-center gap-2">
-          <div className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg bg-slate-50 border border-slate-200 flex-1 min-w-0">
-            <Search size={13} className="text-slate-400 shrink-0" />
+        <div className="px-4 pb-3 pt-1 flex items-center gap-2">
+          <div className="flex items-center gap-2.5 px-3.5 py-3 rounded-xl bg-slate-100 flex-1 min-w-0 focus-within:bg-slate-200/70 transition-colors">
+            <Search size={17} className="text-slate-500 shrink-0" />
             <input
               value={search}
               onChange={e => { setSearch(e.target.value); setIndustryLimit(200) }}
               placeholder={`Search ${cat.label.toLowerCase()}...`}
-              className="flex-1 text-xs bg-transparent outline-none text-slate-700 placeholder:text-slate-400"
+              className="flex-1 text-[15px] bg-transparent outline-none text-slate-900 placeholder:text-slate-500"
             />
           </div>
           <select
             value={effectiveSort}
             onChange={e => { setIndustrySort(e.target.value as 'province' | 'district' | 'type' | 'name'); setIndustryLimit(200) }}
-            className="text-[10px] text-slate-600 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 outline-none shrink-0"
+            className="text-[13px] text-slate-800 bg-slate-100 rounded-xl px-3 py-3 outline-none shrink-0 cursor-pointer"
           >
             {hasProvince && <option value="province">Province</option>}
             {hasDistrict && <option value="district">District</option>}
@@ -707,7 +738,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             <option value="name">A &rarr; Z</option>
           </select>
         </div>
-        <div className="px-3 py-1 text-[10px] border-b border-slate-50" style={{ color: catColor }}>
+        <div className="px-4 pb-1 text-[13px] text-slate-600">
           {filtered.length.toLocaleString()} {cat.label.toLowerCase()}
         </div>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
@@ -737,9 +768,9 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             return (
               <div key={`${item.name}-${i}`}>
                 {showHeader && (
-                  <div className="px-3 pt-3 pb-1.5 bg-slate-50/80 sticky top-0 border-b border-slate-100">
-                    <div className="text-[10px] font-bold text-slate-600 uppercase tracking-wide">{headerLabel}</div>
-                    {groupStats && <div className="text-[9.5px] text-slate-400 mt-0.5">{groupStats}</div>}
+                  <div className="px-4 pt-4 pb-1.5 bg-white/90 backdrop-blur sticky top-0 z-[1]">
+                    <div className="text-[13px] font-semibold text-slate-900">{headerLabel}</div>
+                    {groupStats && <div className="text-xs text-slate-600 mt-0.5">{groupStats}</div>}
                   </div>
                 )}
                 <button
@@ -747,16 +778,16 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
                     onFlyTo(item.lon, item.lat, 14)
                     setView({ type: 'industry-detail', item, categoryKey: cat.key })
                   }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 transition-colors text-left border-b border-slate-100/80"
+                  className="w-full flex items-center gap-3 px-4 py-2.5 hover:bg-slate-900/[0.04] transition-colors text-left"
                 >
-                  <div className="shrink-0 flex items-center justify-center w-8 h-8 rounded-lg shadow-sm" style={{ background: catColor }}>
+                  <div className="shrink-0 flex items-center justify-center w-9 h-9 rounded-full" style={{ background: catColor }}>
                     {rowIcon}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-[12px] font-semibold text-slate-800 truncate">{item.name || 'Unnamed'}</div>
-                    <div className="text-[10.5px] text-slate-400 truncate">{itemSub(item)}</div>
+                    <div className="text-[14px] font-medium text-slate-900 truncate">{item.name || 'Unnamed'}</div>
+                    <div className="text-xs text-slate-600 truncate">{[item.district, item.province].filter(Boolean).join(', ') || itemSub(item)}</div>
                   </div>
-                  {itemTag(item) && <div className="text-[11px] text-slate-400 shrink-0">{itemTag(item)}</div>}
+                  {itemTag(item) && <div className="text-[13px] text-slate-700 shrink-0">{itemTag(item)}</div>}
                 </button>
               </div>
             )
@@ -764,8 +795,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
           {filtered.length > industryLimit && (
             <button
               onClick={() => setIndustryLimit(prev => prev + 200)}
-              className="w-full px-3 py-3 text-[11px] font-medium hover:bg-slate-50 transition-colors text-center border-t border-slate-100"
-              style={{ color: catColor }}
+              className="w-full px-4 py-4 text-[13px] font-medium text-slate-800 hover:bg-slate-900/[0.04] transition-colors text-center"
             >
               Load more ({(filtered.length - industryLimit).toLocaleString()} remaining)
             </button>
@@ -793,12 +823,12 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
     }
 
     return (
-      <div className="flex flex-col h-full bg-[#fafbfc]">
+      <div className="flex flex-col h-full bg-white">
         <button
           onClick={() => setView({ type: 'industry', categoryKey: view.categoryKey })}
-          className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
+          className="flex items-center gap-1 px-4 py-3 text-[14px] font-medium text-slate-700 hover:text-slate-900 transition-colors w-full"
         >
-          <ChevronLeft size={14} strokeWidth={2} /> {catLabel}
+          <ChevronLeft size={18} strokeWidth={2} /> {catLabel}
         </button>
         <div className="flex-1 overflow-y-auto scrollbar-hide">
           {/* Header */}
@@ -811,7 +841,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
               {item.fuel ? <> &middot; {item.fuel}</> : ''}
             </p>
             <span
-              className="inline-flex items-center mt-2.5 text-[10px] font-semibold uppercase tracking-wide px-2.5 py-[3px] rounded-full"
+              className="inline-flex items-center mt-2.5 text-[11px] font-semibold tracking-wide px-2.5 py-[3px] rounded-full"
               style={{ background: `${catColor}15`, color: catColor }}
             >
               {BADGE_LABELS[view.categoryKey] || catLabel}
@@ -833,17 +863,17 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
           {/* Details card */}
           <div className="px-4 pb-4">
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-100">
+              <div className="px-4 py-2.5 border-slate-100">
                 <span className="text-[12px] font-bold text-slate-700">Site Details</span>
               </div>
               <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-2.5 text-[11px]">
-                {item.province && <div><div className="text-slate-400 text-[10px]">Province</div><div className="text-slate-700 font-medium">{item.province}</div></div>}
-                {item.district && <div><div className="text-slate-400 text-[10px]">District</div><div className="text-slate-700 font-medium">{item.district}</div></div>}
-                {item.fuel && <div><div className="text-slate-400 text-[10px]">Fuel Type</div><div className="text-slate-700 font-medium">{item.fuel}</div></div>}
-                {item.capacity_mw != null && <div><div className="text-slate-400 text-[10px]">Capacity</div><div className="text-slate-700 font-medium">{item.capacity_mw} MW</div></div>}
-                {item.capacity_mtpa != null && <div><div className="text-slate-400 text-[10px]">Capacity</div><div className="text-slate-700 font-medium">{item.capacity_mtpa} Mt/yr</div></div>}
-                <div><div className="text-slate-400 text-[10px]">Coordinates</div><div className="text-slate-700 font-medium">{item.lat.toFixed(4)}, {item.lon.toFixed(4)}</div></div>
-                {item.type && <div><div className="text-slate-400 text-[10px]">Type</div><div className="text-slate-700 font-medium">{item.type}</div></div>}
+                {item.province && <div><div className="text-slate-500 text-[11px]">Province</div><div className="text-slate-700 font-medium">{item.province}</div></div>}
+                {item.district && <div><div className="text-slate-500 text-[11px]">District</div><div className="text-slate-700 font-medium">{item.district}</div></div>}
+                {item.fuel && <div><div className="text-slate-500 text-[11px]">Fuel Type</div><div className="text-slate-700 font-medium">{item.fuel}</div></div>}
+                {item.capacity_mw != null && <div><div className="text-slate-500 text-[11px]">Capacity</div><div className="text-slate-700 font-medium">{item.capacity_mw} MW</div></div>}
+                {item.capacity_mtpa != null && <div><div className="text-slate-500 text-[11px]">Capacity</div><div className="text-slate-700 font-medium">{item.capacity_mtpa} Mt/yr</div></div>}
+                <div><div className="text-slate-500 text-[11px]">Coordinates</div><div className="text-slate-700 font-medium">{item.lat.toFixed(4)}, {item.lon.toFixed(4)}</div></div>
+                {item.type && <div><div className="text-slate-500 text-[11px]">Type</div><div className="text-slate-700 font-medium">{item.type}</div></div>}
               </div>
             </div>
           </div>
@@ -871,11 +901,13 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
 interface StationDetailProps {
   station: StationItem
   selectedDate: string | null
+  caption?: string
+  forecast?: StructuresTabProps['stationForecast']
   onBack: () => void
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
 }
 
-function StationDetailView({ station, selectedDate, onBack }: StationDetailProps) {
+function StationDetailView({ station, selectedDate, caption, forecast, onBack }: StationDetailProps) {
   const { data: hourlyData, isLoading: hourlyLoading } = useQuery({
     queryKey: ['station-hourly', station.station_id, selectedDate],
     queryFn: async () => {
@@ -912,6 +944,11 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
     })
   }, [hourlyData])
 
+  const forecastDays = useMemo(
+    () => (forecast ? stationForecastDays(forecast.forecasts, forecast.today, station.name, station.city) : []),
+    [forecast, station.name, station.city],
+  )
+
   const poll = overview?.pollutant_summary
   const avail = overview?.data_availability
   const provider = overview?.station?.provider
@@ -923,12 +960,6 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
     if (hrs < 3) return { text: 'Online', bg: '#ecfdf5', color: '#059669' }
     if (hrs < 24) return { text: 'Delayed', bg: '#fefce8', color: '#ca8a04' }
     return { text: 'Offline', bg: '#fef2f2', color: '#dc2626' }
-  })()
-
-  // Health category (US EPA 2024 PM2.5 breakpoints, lib/aqi)
-  const aqiBand = (() => {
-    const b = classifyPm25(station.pm25)
-    return { label: b.shortLabel, color: b.color, bg: b.color + '1f' }
   })()
 
   const stats24h = useMemo(() => {
@@ -945,139 +976,100 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
 
   const rolling7d = poll?.rolling_means?.['7d'] ?? null
 
+  const peak = (() => {
+    if (!stats24h) return null
+    let best: { hour: string; pm25: number } | null = null
+    for (const d of chartData) if (d.pm25 != null && (!best || d.pm25 > best.pm25)) best = { hour: d.hour, pm25: d.pm25 }
+    return best
+  })()
+
+  const dateLabel = selectedDate
+    ? new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })
+    : ''
+
+  const statusColor = statusLabel.text === 'Online' ? 'text-emerald-700' : statusLabel.text === 'Delayed' ? 'text-amber-700' : statusLabel.text === 'Offline' ? 'text-red-700' : 'text-slate-500'
+
+  // One short reading of the day, instead of a paragraph of narrative
+  const insight = (() => {
+    if (!stats24h || !peak) return null
+    const parts = [`Peaked at ${Math.round(peak.pm25)} µg/m³ around ${peak.hour}:00.`]
+    if (rolling7d != null) {
+      const diff = stats24h.mean - rolling7d
+      const pct = Math.round((Math.abs(diff) / rolling7d) * 100)
+      parts.push(Math.abs(diff) < 3 ? 'In line with the 7-day average.' : `${pct}% ${diff > 0 ? 'above' : 'below'} the 7-day average.`)
+    }
+    return parts.join(' ')
+  })()
+
   return (
-    <div className="flex flex-col h-full bg-[#fafbfc]">
-      {/* Back row */}
+    <div className="flex flex-col h-full bg-white">
       <button
         onClick={onBack}
-        className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
+        aria-label="Close station panel"
+        className="flex w-full items-center justify-center py-2 text-slate-500 hover:text-slate-900 transition-colors"
       >
-        <ChevronLeft size={14} strokeWidth={2} /> All Stations
+        <ChevronDown size={22} strokeWidth={2} />
       </button>
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide">
-        {/* ── Header ── */}
-        <div className="px-5 pb-5">
-          <div className="flex items-start justify-between gap-4">
-            {/* Left: identity */}
-            <div className="min-w-0 flex-1 pt-0.5">
-              <h2 className="text-[20px] font-semibold text-[#1e293b] leading-snug tracking-[-0.01em]">
-                {station.name}
-              </h2>
-              <p className="text-[12px] text-[#94a3b8] mt-1 leading-relaxed">
-                {station.city}, Pakistan{provider ? <> &middot; {provider}</> : ''}
-              </p>
-              <span
-                className="inline-flex items-center mt-2.5 text-[10px] font-semibold uppercase tracking-wide px-2.5 py-[3px] rounded-full"
-                style={{ background: statusLabel.bg, color: statusLabel.color }}
-              >
-                {statusLabel.text}
-              </span>
+      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-6">
+        {/* Identity */}
+        <h2 className="text-[20px] font-semibold text-slate-900 leading-snug tracking-tight">{station.name}</h2>
+        <p className="mt-0.5 text-[13px] text-slate-600">
+          {station.city}{provider ? `, ${provider}` : ''}
+        </p>
+        <p className={`mt-0.5 text-xs font-medium ${statusColor}`}>
+          {statusLabel.text}{avail?.last_obs ? `, last reading ${relativeAge(avail.last_obs)}` : ''}
+        </p>
+
+        {/* Headline reading */}
+        <AqiCard
+          className="mt-4 shadow-none"
+          pm25={station.pm25}
+          caption={caption ?? (selectedDate ? 'PM2.5 daily mean' : 'PM2.5')}
+        />
+
+        {forecastDays.length > 0 && <ForecastDays days={forecastDays} current={forecast?.date ?? null} />}
+
+        {/* Key numbers */}
+        <div className="mt-5 grid grid-cols-3 gap-3">
+          <Figure label="24-hour average" value={stats24h ? stats24h.mean : null} />
+          <Figure label="24-hour peak" value={stats24h ? stats24h.max : null} />
+          <Figure label="7-day average" value={rolling7d != null ? Math.round(rolling7d) : null} />
+        </div>
+
+        {/* 24-hour trend */}
+        <div className="mt-6 flex items-baseline justify-between">
+          <h3 className="text-[13px] font-semibold text-slate-900">Last 24 hours</h3>
+          <span className="text-xs text-slate-600">{dateLabel}</span>
+        </div>
+        <div className="mt-2 -mx-1">
+          {hourlyLoading ? (
+            <div className="flex h-[150px] items-end gap-1 px-1 pb-6" aria-busy="true" aria-label="Loading chart">
+              {Array.from({ length: 24 }, (_, i) => <Skeleton key={i} className="flex-1 rounded-t-md" style={{ height: `${30 + ((i * 37) % 70)}%` }} />)}
             </div>
-
-            {/* Right: metric */}
-            <div className="shrink-0 flex flex-col items-end pt-0.5">
-              <div className="text-[28px] font-bold tabular-nums leading-none tracking-[-0.02em]" style={{ color: aqiBand.color }}>
-                {Math.round(station.pm25)}
-              </div>
-              <div className="text-[11px] text-[#94a3b8] mt-1 font-medium">µg/m³</div>
-              <span
-                className="mt-2.5 text-[10px] font-semibold px-2.5 py-[3px] rounded-full"
-                style={{ background: aqiBand.bg, color: aqiBand.color }}
-              >
-                {aqiBand.label}
-              </span>
-            </div>
-          </div>
+          ) : chartData.length ? (
+            <PM25BarChart data={chartData} />
+          ) : (
+            <div className="h-[150px] flex items-center justify-center text-xs text-slate-600">No hourly data available</div>
+          )}
         </div>
+        {insight && <p className="mt-2 text-[13px] leading-relaxed text-slate-700">{insight}</p>}
 
-        {/* ── Satellite image ── */}
-        <div className="px-4 pb-3">
-          <SatelliteImage lat={station.lat} lon={station.lon} name={station.name} markerColor={pm25ToBandColor(station.pm25)} markerType="aqi" aqiValue={station.pm25} />
-        </div>
+        {/* Location */}
+        <h3 className="mt-6 mb-2 text-[13px] font-semibold text-slate-900">Location</h3>
+        <SatelliteImage lat={station.lat} lon={station.lon} name={station.name} markerColor={pm25ToBandColor(station.pm25)} markerType="aqi" aqiValue={station.pm25} />
 
-        {/* ── Stats cards ── */}
-        <div className="px-4 pb-3">
-          <div className="flex gap-2">
-            <StatCard
-              value={stats24h ? `${stats24h.mean}` : '—'}
-              label="24h Avg"
-              unit="µg/m³"
-              barPct={stats24h ? Math.min(100, (stats24h.mean / 200) * 100) : 0}
-              barColor={stats24h ? pm25ToBandColor(stats24h.mean) : '#e2e8f0'}
-            />
-            <StatCard
-              value={stats24h ? `${stats24h.max}` : '—'}
-              label="24h Max"
-              unit="µg/m³"
-              barPct={stats24h ? Math.min(100, (stats24h.max / 200) * 100) : 0}
-              barColor={stats24h ? pm25ToBandColor(stats24h.max) : '#e2e8f0'}
-            />
-            <StatCard
-              value={rolling7d != null ? `${Math.round(rolling7d)}` : '—'}
-              label="7d Avg"
-              unit="µg/m³"
-              barPct={rolling7d != null ? Math.min(100, (rolling7d / 200) * 100) : 0}
-              barColor={rolling7d != null ? pm25ToBandColor(rolling7d) : '#e2e8f0'}
-            />
-            <StatCard
-              value={stats24h ? `${stats24h.count}` : '—'}
-              unit="hours"
-              label="/24 Coverage"
-              barPct={stats24h ? (stats24h.count / 24) * 100 : 0}
-              barColor={stats24h && stats24h.count >= 18 ? '#16a34a' : '#f59e0b'}
-              barDashed={true}
-            />
-          </div>
-        </div>
-
-        {/* ── 24h Bar Chart ── */}
-        <div className="px-4 pb-3">
-          <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-            <div className="px-4 pt-3 pb-1 flex items-center justify-between">
-              <span className="text-[13px] font-bold text-slate-700">24-Hour PM2.5 Trend</span>
-              <span className="text-[10px] text-slate-400">
-                {selectedDate && new Date(selectedDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
-              </span>
-            </div>
-            <div className="px-2 pb-2">
-              {hourlyLoading ? (
-                <div className="h-[160px] flex items-center justify-center">
-                  <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-600 rounded-full animate-spin" />
-                </div>
-              ) : chartData.length ? (
-                <PM25BarChart data={chartData} />
-              ) : (
-                <div className="h-[160px] flex items-center justify-center text-[11px] text-slate-400">
-                  No hourly data available
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* ── Today's insight ── */}
-        <div className="px-4 pb-3">
-          <StationInsight station={station} stats={stats24h} rolling7d={rolling7d} selectedDate={selectedDate} />
-        </div>
-
-        {/* ── Station Details ── */}
+        {/* About this station */}
         {overview?.station && (
-          <div className="px-4 pb-4">
-            <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-100">
-                <span className="text-[12px] font-bold text-slate-700">Station Details</span>
-              </div>
-              <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-2.5 text-[11px]">
-                <DetailRow label="Provider" value={overview.station.provider || '—'} />
-                <DetailRow label="Coordinates" value={`${station.lat.toFixed(4)}, ${station.lon.toFixed(4)}`} />
-                {overview.station.site_type && <DetailRow label="Site Type" value={overview.station.site_type} />}
-                {overview.station.timezone && <DetailRow label="Timezone" value={overview.station.timezone} />}
-                {avail?.first_obs && <DetailRow label="Since" value={new Date(avail.first_obs).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} />}
-                {avail?.coverage_last_365d_pct != null && <DetailRow label="Annual Coverage" value={`${Math.round(avail.coverage_last_365d_pct)}%`} />}
-              </div>
-            </div>
-          </div>
+          <>
+            <h3 className="mt-6 mb-1 text-[13px] font-semibold text-slate-900">About this station</h3>
+            <dl className="text-[13px]">
+              <DetailRow label="Provider" value={overview.station.provider || '—'} />
+              <DetailRow label="Coordinates" value={`${station.lat.toFixed(4)}, ${station.lon.toFixed(4)}`} />
+              {overview.station.site_type && <DetailRow label="Site type" value={overview.station.site_type} />}
+              {avail?.first_obs && <DetailRow label="Reporting since" value={new Date(avail.first_obs).toLocaleDateString('en-US', { month: 'short', year: 'numeric' })} />}
+            </dl>
+          </>
         )}
       </div>
     </div>
@@ -1086,107 +1078,46 @@ function StationDetailView({ station, selectedDate, onBack }: StationDetailProps
 
 // ── Subcomponents ──
 
-function StatCard({ value, label, unit, barPct, barColor, barDashed }: { value: string; label: string; unit?: string; barPct: number; barColor: string; barDashed?: boolean }) {
+function ForecastDays({ days, current }: { days: StationForecastDay[]; current: string | null }) {
   return (
-    <div className="flex-1 bg-white border border-slate-200 rounded-xl px-2 py-2.5 text-center min-w-0">
-      <div className="text-[16px] font-bold text-slate-800 tabular-nums leading-none">
-        {value}{unit && <span className="text-[8px] font-medium text-slate-300 ml-0.5">{unit}</span>}
-      </div>
-      <div className="text-[9px] text-slate-400 mt-1">{label}</div>
-      <div className="mt-1.5 h-[3px] rounded-full bg-slate-100 overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{
-            width: `${Math.max(barPct, 4)}%`,
-            background: barDashed
-              ? `repeating-linear-gradient(90deg, ${barColor} 0px, ${barColor} 4px, transparent 4px, transparent 7px)`
-              : barColor,
-          }}
-        />
-      </div>
+    <>
+      <h3 className="mt-5 text-[13px] font-semibold text-slate-900">Forecast</h3>
+      <ul className="mt-1.5 -mx-2">
+        {days.map(d => {
+          const band = classifyPm25(d.pm25)
+          return (
+            <li
+              key={d.date}
+              aria-current={d.date === current ? 'date' : undefined}
+              className={`flex items-center gap-2.5 rounded-lg px-2 py-1.5 text-[13px] ${d.date === current ? 'bg-slate-100' : ''}`}
+            >
+              <span className="w-[86px] shrink-0 text-slate-700">{formatDateOnly(d.date, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+              <span className="w-10 shrink-0 rounded-md py-0.5 text-center font-semibold tabular-nums" style={{ background: band.color, color: band.textColor }}>{Math.round(d.pm25)}</span>
+              <span className="min-w-0 flex-1 truncate text-slate-700">{band.label}</span>
+              {d.high != null && d.high > d.pm25 && <span className="shrink-0 text-xs tabular-nums text-slate-600">up to {Math.round(d.high)}</span>}
+            </li>
+          )
+        })}
+      </ul>
+      <p className="mt-1.5 text-xs leading-relaxed text-slate-600">Daily average PM2.5 in µg/m³. &ldquo;Up to&rdquo; is the 90th percentile of the forecast.</p>
+    </>
+  )
+}
+
+function Figure({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div>
+      <div className="text-[22px] font-semibold leading-none tabular-nums tracking-tight text-slate-900">{value ?? '—'}</div>
+      <div className="mt-1 text-xs text-slate-600">{label}</div>
     </div>
   )
 }
 
 function DetailRow({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div className="text-slate-400 text-[10px]">{label}</div>
-      <div className="text-slate-700 font-medium">{value}</div>
-    </div>
-  )
-}
-
-function StationInsight({ station, stats, rolling7d, selectedDate }: { station: StationItem; stats: { mean: number; max: number; min: number; count: number } | null; rolling7d: number | null; selectedDate: string | null }) {
-  const dateLabel = selectedDate
-    ? new Date(selectedDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
-    : 'this date'
-
-  if (!stats) {
-    return (
-      <div className="rounded-xl border border-slate-200 bg-white px-4 py-3">
-        <div className="flex items-center gap-1.5 mb-1">
-          <svg className="w-3.5 h-3.5 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><path d="M12 16v-4" /><path d="M12 8h.01" />
-          </svg>
-          <span className="text-[12px] font-semibold text-slate-700">Retrospective</span>
-          <span className="text-[9px] text-slate-400 ml-auto">Based on observed data</span>
-        </div>
-        <div className="text-[11px] text-slate-500 leading-relaxed">No hourly data was recorded at {station.name} on {dateLabel}.</div>
-      </div>
-    )
-  }
-
-  const accentColor = pm25ToBandColor(stats.mean)
-  const conditionLabel = classifyPm25(stats.mean).label.toLowerCase()
-
-  // Build station-specific narrative
-  const lines: string[] = []
-
-  // Opening — station-specific with condition
-  lines.push(`${station.name} recorded ${conditionLabel} air quality on ${dateLabel}, averaging ${stats.mean} µg/m³ across ${stats.count} hourly observations.`)
-
-  // Peak analysis
-  if (stats.max > stats.mean * 1.5) {
-    lines.push(`PM2.5 peaked at ${stats.max} µg/m³, significantly above the daily mean — suggesting a transient pollution episode.`)
-  } else if (stats.max > stats.mean * 1.2) {
-    lines.push(`The peak reading of ${stats.max} µg/m³ indicates moderate variability throughout the day.`)
-  } else {
-    lines.push(`Concentrations remained relatively stable, peaking at ${stats.max} µg/m³.`)
-  }
-
-  // 7-day comparison
-  if (rolling7d != null) {
-    const diff = stats.mean - rolling7d
-    const pct = Math.round((Math.abs(diff) / rolling7d) * 100)
-    if (Math.abs(diff) < 3) {
-      lines.push(`This is consistent with the 7-day rolling average of ${Math.round(rolling7d)} µg/m³.`)
-    } else if (diff > 0) {
-      lines.push(`This was ${pct}% above the 7-day rolling average of ${Math.round(rolling7d)} µg/m³, indicating a worse-than-usual day for this station.`)
-    } else {
-      lines.push(`This was ${pct}% below the 7-day rolling average of ${Math.round(rolling7d)} µg/m³, a relatively cleaner day for this location.`)
-    }
-  }
-
-  // Coverage caveat
-  if (stats.count < 18) {
-    lines.push(`Note: Only ${stats.count} of 24 hours reported data, so the actual daily exposure may differ.`)
-  }
-
-  return (
-    <div className="rounded-xl border border-slate-200 bg-white overflow-hidden" style={{ borderLeft: `3px solid ${accentColor}` }}>
-      <div className="px-4 py-3">
-        <div className="flex items-center gap-1.5 mb-2">
-          <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke={accentColor} strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
-          </svg>
-          <span className="text-[12px] font-semibold text-slate-800">Retrospective</span>
-          <span className="text-[9px] text-slate-400 ml-auto">Based on observed data</span>
-        </div>
-        <div className="text-[11px] text-slate-600 leading-[1.75] space-y-1">
-          {lines.map((line, i) => <p key={i}>{line}</p>)}
-        </div>
-      </div>
+    <div className="flex items-baseline justify-between gap-4 py-1.5">
+      <dt className="text-slate-600">{label}</dt>
+      <dd className="text-right font-medium text-slate-900">{value}</dd>
     </div>
   )
 }

@@ -21,7 +21,7 @@ interface CityMapProps {
 }
 
 export default function CityMap({ 
-  center = [78, 22], // South Asia center
+  center = [69.35, 30.0], // Pakistan center
   zoom = 11,
   className = "w-full h-full",
   cityName,
@@ -34,7 +34,7 @@ export default function CityMap({
   // Calculate center from stations if not provided or if using fallback coordinates
   const calculateCenterFromStations = (): [number, number] => {
     if (!stations || stations.length === 0) {
-      return [78, 22] // South Asia center fallback
+      return [69.35, 30.0] // Pakistan center fallback
     }
     
     const validStations = stations.filter(s => 
@@ -43,7 +43,7 @@ export default function CityMap({
     )
     
     if (validStations.length === 0) {
-      return [78, 22] // South Asia center fallback
+      return [69.35, 30.0] // Pakistan center fallback
     }
     
     // Calculate average coordinates
@@ -67,12 +67,12 @@ export default function CityMap({
 
   // AQI colors - match main map exactly
   const AQI_COLORS = {
-    good: 'rgba(110, 204, 57, 1)',             // Green from cluster-small div
-    moderate: 'rgba(240, 194, 12, 1)',         // Yellow from cluster-medium div  
-    unhealthy_sensitive: 'rgba(241, 128, 23, 1)', // Orange from cluster-large div
-    unhealthy: 'rgba(239, 120, 85, 1)',        // More red, slightly darker shade
-    very_unhealthy: '#a070b5',                  // Purple for very unhealthy
-    hazardous: '#991b1b',                       // Dark red for hazardous
+    good: 'rgba(168, 224, 95, 1)',             // Green from cluster-small div
+    moderate: 'rgba(253, 214, 75, 1)',         // Yellow from cluster-medium div  
+    unhealthy_sensitive: 'rgba(255, 155, 87, 1)', // Orange from cluster-large div
+    unhealthy: 'rgba(254, 106, 105, 1)',        // More red, slightly darker shade
+    very_unhealthy: '#a97abc',                  // Purple for very unhealthy
+    hazardous: '#a87383',                       // Dark red for hazardous
     fallback: '#6b7280'                         // Gray
   }
 

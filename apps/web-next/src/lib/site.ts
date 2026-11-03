@@ -6,8 +6,8 @@ export const SITE = {
   org: 'Pakistan Air Quality Initiative',
   orgShort: 'PAQI',
   description:
-    'Hawanama is the Pakistan Air Quality Initiative’s live air quality map: hourly PM2.5 and US AQI from more than 1,200 monitors across Pakistan, India, Bangladesh, Nepal and Sri Lanka, with open data downloads.',
-  ogImage: '/og.v1.png',
+    'Hawanama is the Pakistan Air Quality Initiative’s live air quality map: hourly PM2.5 and US AQI from monitors across Pakistan, with open data downloads.',
+  ogImage: '/og.v2.png',
   twitter: '@pakairquality',
   links: {
     github: 'https://github.com/PakAirQuality',

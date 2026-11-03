@@ -5,8 +5,8 @@
 
 export const MAP_CONFIG = {
   style: 'mapbox://styles/mapbox/standard',
-  center: [78, 22] as [number, number], // South Asia center
-  zoom: 3.6,
+  center: [69.35, 30.0] as [number, number], // Pakistan center
+  zoom: 5,
   projection: 'globe' as const, // Beautiful globe projection with 2D overlay
   accessToken: process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || '',
   config: {
@@ -67,12 +67,12 @@ export const STYLES = {
     // Color stops for heatmap density
     colorStops: [
       [0.00, 'rgba(0,0,0,0)'],      // Transparent
-      [0.10, '#16a34a'],            // Good (green)
-      [0.25, '#ca8a04'],            // Moderate (amber)
-      [0.45, '#ea580c'],            // Unhealthy Sensitive (orange)
-      [0.65, '#dc2626'],            // Unhealthy (red)
-      [0.85, '#a070b5'],            // Very Unhealthy (purple)
-      [1.00, '#991b1b']             // Hazardous (dark red)
+      [0.10, '#a8e05f'],            // Good (green)
+      [0.25, '#fdd64b'],            // Moderate (amber)
+      [0.45, '#ff9b57'],            // Unhealthy Sensitive (orange)
+      [0.65, '#fe6a69'],            // Unhealthy (red)
+      [0.85, '#a97abc'],            // Very Unhealthy (purple)
+      [1.00, '#a87383']             // Hazardous (dark red)
     ]
   },
   hexagon: {
@@ -104,7 +104,7 @@ export const STYLES = {
       [245, 158, 11],   // Moderate (amber-500) - warm yellow-orange
       [251, 146, 60],   // Unhealthy for Sensitive (orange-400) - clear orange
       [239, 68, 68],    // Unhealthy (red-500) - strong red
-      [160, 112, 181],   // Very Unhealthy (custom purple) - vivid purple
+      [169, 122, 188],   // Very Unhealthy (custom purple) - vivid purple
       [127, 29, 29]     // Hazardous (red-900) - dark maroon
     ],
     // Domain for color scaling (AQI ranges) - adjusted for typical values

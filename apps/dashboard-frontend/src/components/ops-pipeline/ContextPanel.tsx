@@ -2,11 +2,17 @@
 
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Radio, ChevronUp, ChevronDown, Info } from 'lucide-react'
+import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { AnimatePresence, m } from 'motion/react'
+import { AqiCard } from '@/components/shared/AqiCard'
+import { AnimatedNumber } from '@/components/shared/AnimatedNumber'
+import { Skeleton } from '@/components/shared/Skeleton'
 import type { StationReading, PredictionData, RunReport } from './types'
 import { fetchDailyBrief } from './api'
 import { BAND_KEYS, bandColor, bandCounts, bandKey, bandLabel, classifyPm25, unhealthyOrWorse, BAND_SCALE_LABEL } from '@/lib/aqi'
+import { MIN_CITY_MONITORS, worstRankedCities } from '@/lib/cityRanking'
 import { formatDateOnly } from '@/lib/time'
+import { useIsMobile } from '@/lib/useMediaQuery'
 import { MODEL_HELP, MODEL_LABELS, type ModelKey } from '@/lib/selection'
 
 interface OpsContextPanelProps {
@@ -17,6 +23,22 @@ interface OpsContextPanelProps {
   /** stats of the prediction grid for `model` (an area average over the model domain) */
   predictionStats: PredictionData['stats'] | null
   runReport: RunReport | null
+  /** fly the map to a place (lng, lat, zoom) */
+  onFlyTo?: (lng: number, lat: number, zoom?: number) => void
+  /** Which part of the timeline the card describes */
+  mode?: 'day' | 'now' | 'forecast'
+  /** Replaces the date line, for today and forecast days */
+  dayLabel?: string
+  /** What a station's number means in this view */
+  readingLabel?: string
+  /** A warning under the date, such as a forecast that has fallen behind */
+  notice?: string | null
+  /** A line about the data behind the view, for today and forecast days */
+  detail?: string | null
+  /** Fires and forecast ramps, for today and forecast days */
+  evidence?: { fires: string; firesLabel: string; firesWarn: boolean; ramps: number } | null
+  /** Air quality where the visitor is: the nearest monitor, or none within range */
+  nearby?: { station: { name: string; city: string; pm25: number } | null; distKm: number | null; radiusKm: number } | null
 }
 
 interface Obs {
@@ -25,61 +47,14 @@ interface Obs {
   max: number
   band: string
   bands: ReturnType<typeof bandCounts>
-  worstCities: { city: string; avg: number; count: number }[]
+  worstCities: { city: string; avg: number; count: number; lat: number; lon: number }[]
 }
 
-function assessmentText(
-  obs: Obs | null,
-  gridMean: number | null,
-  coverage: number | null,
-  matched: { bias: number; mae: number; n: number } | null,
-  modelLabel: string,
-): { text: string; severity: string; color: string } {
-  if (!obs && gridMean == null) return { text: 'No observation or prediction data available for this date.', severity: 'Unknown', color: '#6b7280' }
-
-  const parts: string[] = []
-  let severity = 'Moderate'
-  let color = '#3b82f6'
-
-  if (obs) {
-    const band = classifyPm25(obs.mean)
-    severity = band.label
-    color = band.color
-    parts.push(
-      `${band.label} conditions at the reporting-station mean of ${Math.round(obs.mean)} µg/m³ PM2.5 across ${obs.count} reporting stations (${BAND_SCALE_LABEL}).`,
-    )
-    const bad = unhealthyOrWorse(obs.bands)
-    if (bad > 0) {
-      parts.push(`${bad} station${bad > 1 ? 's' : ''} (${Math.round((bad / obs.count) * 100)}%) were Unhealthy or worse.`)
-    }
-    if (obs.worstCities.length > 0) {
-      const worst = obs.worstCities[0]
-      parts.push(`${worst.city} recorded the highest city mean at ${Math.round(worst.avg)} µg/m³ (${worst.count} station${worst.count > 1 ? 's' : ''}).`)
-    }
-    if (matched) {
-      const abs = Math.abs(matched.bias)
-      const dir = matched.bias > 0 ? 'over' : 'under'
-      parts.push(
-        abs <= 5
-          ? `The ${modelLabel} matched the stations closely (bias ${matched.bias > 0 ? '+' : ''}${matched.bias.toFixed(1)} µg/m³ at ${matched.n} matched stations).`
-          : `The ${modelLabel} ${dir}-estimated at the stations by ${abs.toFixed(1)} µg/m³ on average (${matched.n} matched stations, MAE ${matched.mae.toFixed(1)}).`,
-      )
-    } else if (gridMean != null) {
-      parts.push(`Modelled area-average PM2.5 was ${Math.round(gridMean)} µg/m³; no matched-station comparison is available for this date.`)
-    }
-    if (coverage != null && coverage < 80) parts.push(`Model grid coverage was limited at ${coverage}%.`)
-  } else if (gridMean != null) {
-    const band = classifyPm25(gridMean)
-    severity = band.label
-    color = band.color
-    parts.push(`Modelled area-average PM2.5 of ${Math.round(gridMean)} µg/m³. No ground observations were available for comparison.`)
-  }
-
-  return { text: parts.join(' '), severity, color }
-}
-
-export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport }: OpsContextPanelProps) {
-  const [minimized, setMinimized] = useState(false)
+export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport, onFlyTo, nearby, mode = 'day', dayLabel, readingLabel = 'PM2.5 daily mean', notice, detail, evidence }: OpsContextPanelProps) {
+  const isMobile = useIsMobile()
+  const [hidden, setHidden] = useState(false)
+  const [seenMobile, setSeenMobile] = useState(false)
+  if (isMobile && !seenMobile) { setSeenMobile(true); setHidden(true) }
   const [showModelHelp, setShowModelHelp] = useState(false)
 
   const obs = useMemo<Obs | null>(() => {
@@ -88,18 +63,27 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
     const values = valid.map(s => s.pm25)
     const mean = values.reduce((a, b) => a + b, 0) / values.length
     const max = Math.max(...values)
-    const cityMap: Record<string, number[]> = {}
-    valid.forEach(s => { if (s.city) { (cityMap[s.city] ??= []).push(s.pm25) } })
+    const cityMap: Record<string, { vals: number[]; lat: number; lon: number; n: number }> = {}
+    valid.forEach(s => {
+      if (!s.city) return
+      const lat = s.lat ?? s.latitude, lon = s.lon ?? s.longitude
+      const c = (cityMap[s.city] ??= { vals: [], lat: 0, lon: 0, n: 0 })
+      c.vals.push(s.pm25)
+      if (lat != null && lon != null) { c.lat += lat; c.lon += lon; c.n += 1 }
+    })
     const worstCities = Object.entries(cityMap)
-      .map(([city, vals]) => ({ city, avg: vals.reduce((a, b) => a + b, 0) / vals.length, count: vals.length }))
+      .filter(([, c]) => c.n > 0)
+      .map(([city, c]) => ({ city, avg: c.vals.reduce((a, b) => a + b, 0) / c.vals.length, count: c.vals.length, lat: c.lat / c.n, lon: c.lon / c.n }))
       .sort((a, b) => b.avg - a.avg)
     return { count: valid.length, mean, max: Math.round(max), band: bandKey(mean), bands: bandCounts(values), worstCities }
   }, [stations])
+  const rankedCities = worstRankedCities(obs?.worstCities ?? [])
 
   const coverage = predictionStats?.n_total
     ? Math.round((predictionStats.n_valid / predictionStats.n_total) * 100) : null
 
-  const { data: brief, isLoading: briefLoading } = useQuery({
+  // Only the matched-station bias is used from the daily brief response (shown in Model details)
+  const { data: brief } = useQuery({
     queryKey: ['ops-brief', selectedDate],
     queryFn: () => fetchDailyBrief(selectedDate!),
     enabled: !!selectedDate,
@@ -110,157 +94,258 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
   const matched = brief?.matched_bias?.[model] ?? null
   const modelLabel = MODEL_LABELS[model]
 
-  const assessment = useMemo(
-    () => assessmentText(obs, predictionStats?.mean ?? null, coverage, matched, modelLabel),
-    [obs, predictionStats?.mean, coverage, matched, modelLabel]
-  )
-
-  const formattedDate = selectedDate
+  const formattedDate = dayLabel ?? (selectedDate
     ? formatDateOnly(selectedDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
-    : '—'
+    : '—')
+  const forecast = mode === 'forecast'
+
+  const unhealthyCount = obs ? unhealthyOrWorse(obs.bands) : 0
+
+  // Show the card again when a location result arrives (it starts tucked away on phones)
+  const [seenNearby, setSeenNearby] = useState<typeof nearby>(null)
+  if (nearby && nearby !== seenNearby) { setSeenNearby(nearby); setHidden(false) }
+  const total = obs?.count ?? 0
 
   return (
-    <div
-      className="absolute top-3 right-4 z-10 flex flex-col rounded-xl shadow-2xl overflow-hidden"
+    <>
+    <AnimatePresence>
+    {!hidden && (
+    <m.section
+      key="card"
+      aria-label="Daily assessment"
+      initial={{ opacity: 0, y: -8 }}
+      animate={{ opacity: 1, y: 0, x: 0 }}
+      exit={{ opacity: 0, x: '110%' }}
+      transition={{ duration: 0.28, ease: [0.2, 0.8, 0.2, 1] }}
+      className="absolute top-3 left-3 right-3 md:left-auto md:right-4 md:w-[352px] md:max-w-[calc(100%-2rem)] z-10 flex flex-col rounded-2xl overflow-y-auto overflow-x-hidden overscroll-contain max-h-[calc(100%-236px)] md:max-h-[calc(100%-200px)] text-slate-900"
       style={{
-        background: 'rgba(15, 23, 42, 0.95)',
-        border: '1px solid rgba(255,255,255,0.12)',
-        width: 340,
-        maxHeight: 'calc(100vh - 120px)',
+        background: 'rgba(255,255,255,0.82)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        border: '1px solid rgba(15,23,42,0.08)',
+        boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
       }}
     >
       {/* ── Header ── */}
-      <div className="px-4 pt-4 pb-1.5" style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}>
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="text-[14px] font-bold text-white/90">Pakistan</div>
-            <div className="mt-0.5 text-[9px] text-slate-400">{formattedDate} · Pakistan Standard Time · daily means of hourly PM2.5</div>
-          </div>
-          <button
-            onClick={() => setMinimized(v => !v)}
-            className="p-1 rounded-md hover:bg-white/10 transition-colors -mt-0.5 -mr-1"
-            title={minimized ? 'Expand' : 'Minimize'}
-          >
-            {minimized ? <ChevronDown size={14} className="text-white/40" /> : <ChevronUp size={14} className="text-white/40" />}
-          </button>
+      <div className="flex items-start justify-between gap-2 px-4 pt-3.5">
+        <div className="min-w-0">
+          <div className="text-[15px] font-semibold tracking-tight">Pakistan</div>
+          <div className="mt-0.5 text-xs text-slate-600" title={mode === 'day' ? 'Daily means of hourly PM2.5, Pakistan time' : undefined}>{formattedDate}</div>
+          {notice && <div className="mt-1.5 rounded-md bg-amber-50 px-2 py-1 text-xs text-amber-800">{notice}</div>}
         </div>
-
-        {/* Station stats row — visible even when minimized */}
-        {obs && !minimized && (
-          <div className="mt-2 flex items-center gap-2 pb-1.5 text-[10px]">
-            <Radio size={12} className="text-slate-500" />
-            <span className="text-slate-300" title="Unweighted mean across the stations that reported on this day; not an area or population average">
-              Reporting-station mean {Math.round(obs.mean)} µg/m³ · {obs.count} stations
-            </span>
-          </div>
-        )}
-        {obs && !minimized && (
-          <div className="flex flex-wrap gap-x-2 gap-y-0.5 pb-1.5 text-[9px]">
-            {BAND_KEYS.map(k => obs.bands[k] > 0 ? (
-              <span key={k} style={{ color: bandColor(k) }}>{obs.bands[k]} {bandLabel(k, true)}</span>
-            ) : null)}
-          </div>
-        )}
+        <button
+          onClick={() => setHidden(true)}
+          className="-mr-1.5 -mt-1 rounded-lg p-1.5 text-slate-500 hover:bg-slate-900/5 hover:text-slate-900 transition-colors"
+          aria-label="Hide Pakistan summary to the right"
+        >
+          <ChevronRight size={16} />
+        </button>
       </div>
 
-      {!minimized && (
-        <>
-          {/* ── Assessment ── */}
+      {/* ── Headline (always visible): how many stations are unhealthy, then the five worst cities ── */}
+      {nearby && (
+        <div className="px-4 pt-3">
+          <div className="mb-1.5 text-xs font-semibold text-slate-600">Near you</div>
+          {nearby.station ? (
+            <AqiCard
+              className="shadow-none"
+              pm25={nearby.station.pm25}
+              title={nearby.station.name}
+              subtitle={`${nearby.station.city}, ${nearby.distKm != null ? (nearby.distKm < 1 ? 'under 1' : Math.round(nearby.distKm)) : ''} km away`}
+              caption={readingLabel}
+            />
+          ) : (
+            <p className="text-[13px] text-slate-700">No monitor within {nearby.radiusKm} km of your location.</p>
+          )}
+        </div>
+      )}
+
+      {!obs && (
+        <div className="px-4 pt-3 pb-4" aria-busy="true" aria-label="Loading stations">
+          <Skeleton className="h-10 w-3/4" />
+          <Skeleton className="mt-3 h-2 w-full rounded-full" />
+          <Skeleton className="mt-5 h-3 w-24" />
+          {[0, 1, 2, 3, 4].map(i => <Skeleton key={i} className="mt-3 h-9 w-full" />)}
+        </div>
+      )}
+
+      {obs && (
+        <div className="px-4 pt-3 pb-3.5">
+          <div className="flex items-center gap-2.5">
+            <AnimatedNumber value={unhealthyCount} className="text-[40px] leading-none font-semibold tabular-nums tracking-tight" />
+            <span className="text-sm leading-snug text-slate-700">of {obs.count} stations {forecast ? 'forecast' : 'are'} Unhealthy or worse</span>
+          </div>
+
+          {/* Composition at a glance: same colours as the map markers; hover a segment for its count */}
           <div
-            className="mx-3 my-2 rounded-lg overflow-hidden"
-            style={{
-              background: 'rgba(255,255,255,0.03)',
-              border: '1px solid rgba(255,255,255,0.06)',
-              borderLeft: `3px solid ${assessment.color}`,
-            }}
+            className="mt-3 flex h-2 gap-px overflow-hidden rounded-full"
+            role="img"
+            aria-label={BAND_KEYS.filter(k => obs.bands[k] > 0).map(k => `${obs.bands[k]} ${bandLabel(k)}`).join(', ')}
           >
-            <div className="flex items-center justify-between px-3 pt-2.5 pb-0">
-              <span className="text-[8px] font-semibold uppercase tracking-widest text-white/20">{brief?.narrative ? 'Brief' : 'Assessment'}</span>
-              <span
-                className="rounded px-1.5 py-0.5 text-[7px] font-bold uppercase"
-                style={{ color: assessment.color, background: assessment.color + '18' }}
-              >
-                {assessment.severity}
-              </span>
-            </div>
-            <div className="px-3 pt-2 pb-2.5 text-[12px] leading-[1.6] text-white/80">
-              {briefLoading ? (
-                <span className="text-white/40 italic">Loading brief…</span>
-              ) : brief?.narrative ? (
-                brief.narrative
-              ) : (
-                assessment.text
+            {BAND_KEYS.map(k => obs.bands[k] > 0 ? (
+              <div
+                key={k}
+                title={`${obs.bands[k]} ${bandLabel(k)}`}
+                style={{ width: `${(obs.bands[k] / total) * 100}%`, background: bandColor(k) }}
+              />
+            ) : null)}
+          </div>
+
+          {/* Five worst cities, each flies the map to the city */}
+          <div className="mt-4 text-xs font-semibold text-slate-600">
+            Worst {rankedCities.length === 5 ? 'five ' : ''}cities
+          </div>
+          <div className="text-xs text-slate-500">With more than {MIN_CITY_MONITORS - 1} monitors {forecast ? 'forecast' : 'reporting'}</div>
+          {rankedCities.length === 0 && (
+            <p className="mt-1 text-[13px] text-slate-600">No city has that many monitors {forecast ? 'forecast' : 'reporting'} for this day.</p>
+          )}
+          <ul className="mt-1 -mx-2">
+            {rankedCities.map(c => {
+              const b = classifyPm25(c.avg)
+              return (
+                <li key={c.city}>
+                  <button
+                    onClick={() => onFlyTo?.(c.lon, c.lat, 10.5)}
+                    disabled={!onFlyTo}
+                    aria-label={`Fly to ${c.city}`}
+                    className="group flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-slate-900/[0.05] focus-visible:bg-slate-900/[0.05] transition-colors"
+                  >
+                    <span
+                      className="min-w-[44px] shrink-0 rounded-full px-2.5 py-0.5 text-center text-xs font-semibold tabular-nums"
+                      style={{ background: b.color, color: b.textColor }}
+                      title={b.label}
+                    >
+                      <AnimatedNumber value={Math.round(c.avg)} />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-medium text-slate-900">{c.city}</span>
+                      <span className="block text-xs text-slate-600">{c.count} station{c.count > 1 ? 's' : ''}, {b.label}</span>
+                    </span>
+                    <ChevronRight size={16} className="shrink-0 text-slate-400 group-hover:text-slate-700" aria-hidden />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        </div>
+      )}
+
+      <div>
+            {/* ── Model switch: the satellite models describe past days, not forecasts ── */}
+            {!forecast && <div className="px-4 pt-3">
+              <div className="flex items-center gap-1 rounded-xl bg-slate-900/[0.06] p-1" role="group" aria-label="Prediction model">
+                {([['backbone', 'Satellite'], ['support_aware', 'Enhanced']] as const).map(([key, label]) => (
+                  <button
+                    key={key}
+                    onClick={() => onModelChange(key)}
+                    aria-pressed={model === key}
+                    className={`relative flex-1 rounded-lg py-1.5 text-[13px] font-medium transition-colors ${model === key ? 'text-slate-900' : 'text-slate-600 hover:text-slate-900'}`}
+                  >
+                    {model === key && (
+                      <m.span
+                        layoutId="model-pill"
+                        transition={{ type: 'spring', stiffness: 400, damping: 32 }}
+                        className="absolute inset-0 rounded-lg bg-white shadow-sm"
+                      />
+                    )}
+                    <span className="relative">{label}</span>
+                  </button>
+                ))}
+                <button
+                  onClick={() => setShowModelHelp(v => !v)}
+                  className="rounded-lg p-1.5 text-slate-500 hover:text-slate-900"
+                  aria-label="Explain model modes"
+                  aria-expanded={showModelHelp}
+                >
+                  <Info size={14} />
+                </button>
+              </div>
+              {showModelHelp && (
+                <div className="mt-2 space-y-1 text-xs leading-snug text-slate-700">
+                  <div><span className="font-semibold">Satellite:</span> {MODEL_HELP.backbone}</div>
+                  <div><span className="font-semibold">Enhanced:</span> {MODEL_HELP.support_aware}</div>
+                </div>
               )}
-            </div>
-          </div>
+            </div>}
 
-          {/* ── Model figures for the selected model ── */}
-          <div className="mx-3 mb-2 grid grid-cols-2 gap-2 text-[10px]">
-            <div className="rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
-              <div className="text-[8px] uppercase tracking-wider text-white/30">Modelled area-average</div>
-              <div className="text-white/90 font-semibold tabular-nums text-[13px]">
-                {predictionStats?.mean != null ? `${Math.round(predictionStats.mean)} µg/m³` : '—'}
-              </div>
-              <div className="text-white/30">{modelLabel}{coverage != null ? ` · ${coverage}% grid coverage` : ''}</div>
-            </div>
-            <div className="rounded-lg px-2.5 py-2" style={{ background: 'rgba(255,255,255,0.03)' }}>
-              <div className="text-[8px] uppercase tracking-wider text-white/30">Matched-station bias</div>
-              <div className="text-white/90 font-semibold tabular-nums text-[13px]">
-                {matched ? `${matched.bias > 0 ? '+' : ''}${matched.bias.toFixed(1)} µg/m³` : '—'}
-              </div>
-              <div className="text-white/30">{matched ? `${matched.n} stations · MAE ${matched.mae.toFixed(1)}` : 'no matched comparison'}</div>
-            </div>
-          </div>
-
-          {/* ── Model toggle ── */}
-          <div className="mx-3 mb-2">
-            <div
-              className="flex rounded-lg overflow-hidden"
-              style={{ border: '1px solid rgba(255,255,255,0.1)', background: 'rgba(255,255,255,0.03)' }}
-            >
-              <button
-                onClick={() => onModelChange('backbone')}
-                className="flex-1 py-1.5 text-[10px] font-semibold transition-colors"
-                style={{
-                  background: model === 'backbone' ? 'rgba(255,255,255,0.08)' : 'transparent',
-                  color: model === 'backbone' ? '#fff' : 'rgba(255,255,255,0.3)',
-                }}
-              >
-                Satellite
-              </button>
-              <button
-                onClick={() => onModelChange('support_aware')}
-                className="flex-1 py-1.5 text-[10px] font-semibold transition-colors"
-                style={{
-                  background: model === 'support_aware' ? 'rgba(52,211,153,0.15)' : 'transparent',
-                  color: model === 'support_aware' ? '#34d399' : 'rgba(255,255,255,0.3)',
-                }}
-              >
-                Enhanced
-              </button>
-              <button
-                onClick={() => setShowModelHelp(v => !v)}
-                className="px-2 text-white/30 hover:text-white/70"
-                title="What do these modes mean?"
-                aria-label="Explain model modes"
-              >
-                <Info size={12} />
-              </button>
-            </div>
-            {showModelHelp && (
-              <div className="mt-1.5 text-[9px] leading-snug text-white/50">
-                <div><span className="text-white/70">Satellite:</span> {MODEL_HELP.backbone}</div>
-                <div className="mt-1"><span className="text-white/70">Enhanced:</span> {MODEL_HELP.support_aware}</div>
+            <div className="pb-1 pt-3">
+              <div>
+                  {obs && (
+                    <div className="px-4 pb-2 text-xs text-slate-600">
+                      Station mean {Math.round(obs.mean)} µg/m³ across {obs.count} stations (unweighted, not an area or population average){mode === 'day' ? '' : `, peak ${obs.max} µg/m³`}.
+                      {detail && <span className="mt-1 block">{detail}</span>}
+                    </div>
+                  )}
+            {evidence && (
+              <div className="grid grid-cols-2 gap-2 px-4 pt-1">
+                <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                  <div className="text-base font-semibold tabular-nums">{evidence.fires}</div>
+                  <div className={`text-xs ${evidence.firesWarn ? 'text-amber-700' : 'text-slate-600'}`}>{evidence.firesLabel}</div>
+                </div>
+                <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                  <div className="text-base font-semibold tabular-nums">{evidence.ramps}</div>
+                  <div className="text-xs text-slate-600">Forecast ramp events</div>
+                </div>
               </div>
             )}
-          </div>
+            {!forecast && <div className="grid grid-cols-2 gap-2 px-4 pt-3">
+              <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                <div className="text-xs text-slate-600">Modelled area average</div>
+                <div className="mt-0.5 text-base font-semibold tabular-nums">
+                  {predictionStats?.mean != null ? `${Math.round(predictionStats.mean)} µg/m³` : '—'}
+                </div>
+                <div className="text-xs text-slate-600">{modelLabel}</div>
+                {coverage != null && <div className="text-xs text-slate-600">{coverage}% grid coverage</div>}
+              </div>
+              <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                <div className="text-xs text-slate-600">Matched-station bias</div>
+                <div className="mt-0.5 text-base font-semibold tabular-nums">
+                  {matched ? `${matched.bias > 0 ? '+' : ''}${matched.bias.toFixed(1)} µg/m³` : '—'}
+                </div>
+                <div className="text-xs text-slate-600">{matched ? `MAE ${matched.mae.toFixed(1)} across ${matched.n} stations` : 'no matched comparison'}</div>
+              </div>
+            </div>}
 
-          {/* ── Source attribution ── */}
-          <div className="px-4 pb-2.5 text-center text-[8px] text-white/25">
-            {runReport?.model_version ? `Model ${runReport.model_version} · ` : ''}LightGBM · ERA5 · MODIS AOD · TROPOMI · {BAND_SCALE_LABEL}
-          </div>
-        </>
+            <div className="px-4 py-3 text-xs text-slate-500">
+              {!forecast && runReport?.model_version ? `Model ${runReport.model_version}. ` : ''}{BAND_SCALE_LABEL}.
+            </div>
+              </div>
+            </div>
+      </div>
+      {/* Map credits, pinned to the card's bottom edge so they stay in view */}
+      <p className="sticky bottom-0 mt-auto border-t border-slate-900/[0.06] bg-white/90 px-4 py-1.5 text-[11px] text-slate-500">
+        Map © <a href="https://www.mapbox.com/about/maps/" target="_blank" rel="noopener noreferrer" className="hover:underline">Mapbox</a>
+        {' '}© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer" className="hover:underline">OpenStreetMap</a>
+        {' · '}<a href="https://apps.mapbox.com/feedback/" target="_blank" rel="noopener noreferrer" className="hover:underline">Improve this map</a>
+      </p>
+    </m.section>
+    )}
+    </AnimatePresence>
+
+    {/* Handle that brings the card back from the right edge */}
+    <AnimatePresence>
+      {hidden && (
+        <m.button
+          key="handle"
+          onClick={() => setHidden(false)}
+          aria-label="Show Pakistan summary"
+          initial={{ x: 48, opacity: 0 }}
+          animate={{ x: 0, opacity: 1 }}
+          exit={{ x: 48, opacity: 0 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 34 }}
+          className="absolute top-3 right-0 z-10 flex items-center gap-1.5 rounded-l-xl py-2.5 pl-3 pr-2.5 text-[13px] font-medium text-slate-900"
+          style={{
+            background: 'rgba(255,255,255,0.82)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+          }}
+        >
+          <ChevronLeft size={16} aria-hidden />
+          Pakistan
+        </m.button>
       )}
-    </div>
+    </AnimatePresence>
+    </>
   )
 }

@@ -67,6 +67,17 @@ export function ageMinutes(instant: string | null | undefined, now: Date = new D
 }
 
 /** "12 min ago" / "3 h ago" / "2 d ago". */
+/** The header's wording: "Updated 15 mins ago". */
+export function updatedAgo(instant: string | null | undefined, now: Date = new Date()): string {
+  const m = ageMinutes(instant, now)
+  if (m == null) return 'Updated recently'
+  if (m < 1) return 'Updated just now'
+  const plural = (n: number, unit: string) => `Updated ${n} ${unit}${n === 1 ? '' : 's'} ago`
+  if (m < 60) return plural(m, 'min')
+  const h = Math.round(m / 60)
+  return h < 48 ? plural(h, 'hour') : plural(Math.round(h / 24), 'day')
+}
+
 export function relativeAge(instant: string | null | undefined, now: Date = new Date()): string {
   const m = ageMinutes(instant, now)
   if (m == null) return 'unknown'

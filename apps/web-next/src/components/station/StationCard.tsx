@@ -207,11 +207,11 @@ export function StationCard() {
   const isHistorical = viewDate !== null && viewSnapshot !== null
 
   function pm25Band(pm25: number): { label: string; color: string } {
-    if (pm25 <= 35)  return { label: 'Good',           color: '#6ecc39' }
-    if (pm25 <= 75)  return { label: 'Moderate',       color: '#f0c20c' }
-    if (pm25 <= 150) return { label: 'Unhealthy',      color: '#f18017' }
-    if (pm25 <= 250) return { label: 'Very Unhealthy', color: '#a070b5' }
-    return              { label: 'Hazardous',      color: '#c0392b' }
+    if (pm25 <= 35)  return { label: 'Good',           color: '#a8e05f' }
+    if (pm25 <= 75)  return { label: 'Moderate',       color: '#fdd64b' }
+    if (pm25 <= 150) return { label: 'Unhealthy',      color: '#fe6a69' }
+    if (pm25 <= 250) return { label: 'Very Unhealthy', color: '#a97abc' }
+    return              { label: 'Hazardous',      color: '#a87383' }
   }
 
   const histBand = isHistorical ? pm25Band(viewSnapshot!.pm25) : null

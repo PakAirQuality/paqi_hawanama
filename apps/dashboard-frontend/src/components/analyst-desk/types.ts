@@ -1,6 +1,7 @@
 // TypeScript interfaces for the Analyst Desk forecast data
 
 export interface ForecastEntry {
+  station_id?: string | null
   sensor_id: number
   station_name: string
   latitude: number | null
@@ -115,10 +116,16 @@ export interface CopilotAction {
   hours?: number
 }
 
+export type ChatMessageStatus = 'ok' | 'stopped' | 'limit' | 'busy' | 'unavailable' | 'error'
+
 export interface ChatMessage {
   id: string
   role: 'user' | 'assistant'
   content: string
   actions?: CopilotAction[]
   streaming?: boolean
+  /** How an assistant reply ended; undefined while streaming and for the published brief */
+  status?: ChatMessageStatus
+  /** Why the reply ended early, shown under whatever text arrived */
+  notice?: string
 }

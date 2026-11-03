@@ -60,7 +60,7 @@ async function fetchOverview(stationId: string): Promise<StationOverview> {
   return res.json();
 }
 
-function fmt(val: number | null | undefined, decimals = 1): string {
+function fmt(val: number | null | undefined, decimals = 0): string {
   if (val == null) return "N/A";
   return val.toFixed(decimals);
 }
@@ -117,7 +117,7 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {fmt(poll?.last_value)} {poll?.last_value != null ? "ug/m3" : ""}
+              {fmt(poll?.last_value)} {poll?.last_value != null ? "µg/m³" : ""}
             </div>
             <p className="text-sm text-muted-foreground">
               {fmtDate(poll?.last_value_ts)}
@@ -133,7 +133,7 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {fmt(poll?.rolling_means?.["24h"])} {poll?.rolling_means?.["24h"] != null ? "ug/m3" : ""}
+              {fmt(poll?.rolling_means?.["24h"])} {poll?.rolling_means?.["24h"] != null ? "µg/m³" : ""}
             </div>
             <p className="text-sm text-muted-foreground">Rolling average</p>
           </CardContent>
@@ -147,7 +147,7 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {fmt(poll?.rolling_means?.["7d"])} {poll?.rolling_means?.["7d"] != null ? "ug/m3" : ""}
+              {fmt(poll?.rolling_means?.["7d"])} {poll?.rolling_means?.["7d"] != null ? "µg/m³" : ""}
             </div>
             <p className="text-sm text-muted-foreground">Rolling average</p>
           </CardContent>
@@ -161,7 +161,7 @@ export function OverviewPanel({ stationId }: { stationId: string }) {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {fmt(poll?.rolling_means?.["30d"])} {poll?.rolling_means?.["30d"] != null ? "ug/m3" : ""}
+              {fmt(poll?.rolling_means?.["30d"])} {poll?.rolling_means?.["30d"] != null ? "µg/m³" : ""}
             </div>
             <p className="text-sm text-muted-foreground">Rolling average</p>
           </CardContent>

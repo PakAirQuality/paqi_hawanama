@@ -1,20 +1,8 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Hide all MapLibre attribution and controls */
-.maplibregl-ctrl-logo {
-  display: none !important;
-}
-
-.maplibregl-ctrl-attrib {
-  display: none !important;
-}
-
-.maplibregl-ctrl-attrib-inner {
-  display: none !important;
-}
-
-.maplibregl-ctrl-attrib-button {
+/* Map credits (Mapbox, OpenStreetMap) are shown in the Tracker's summary card; the logo stays hidden */
+.mapboxgl-ctrl-logo {
   display: none !important;
 }
 
@@ -30,6 +18,7 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -96,17 +85,18 @@
     @apply border-border outline-ring/50;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground antialiased;
+    font-feature-settings: "cv11", "calt";
   }
 }
 
 /* AQI Color Standards - consistent across light/dark modes */
-.aqi-good { background-color: #6ecc39; color: white; }
-.aqi-moderate { background-color: #f0c20c; color: black; }
-.aqi-unhealthy-sensitive { background-color: #f18017; color: white; }
-.aqi-unhealthy { background-color: #ef7855; color: white; }
-.aqi-very-unhealthy { background-color: #a070b5; color: white; }
-.aqi-hazardous { background-color: #991b1b; color: white; }
+.aqi-good { background-color: #a8e05f; color: #0f172a; }
+.aqi-moderate { background-color: #fdd64b; color: #0f172a; }
+.aqi-unhealthy-sensitive { background-color: #ff9b57; color: #0f172a; }
+.aqi-unhealthy { background-color: #fe6a69; color: #0f172a; }
+.aqi-very-unhealthy { background-color: #a97abc; color: #0f172a; }
+.aqi-hazardous { background-color: #a87383; color: #0f172a; }
 
 /* ── Station map markers (matching public app) ── */
 
@@ -115,46 +105,121 @@
 }
 
 .aqi-marker {
-  color: white;
+  color: #0f172a;
   font-size: 12px;
-  font-weight: normal;
-  box-shadow: 0 0 0 3px var(--glow-color, rgba(255, 255, 255, 0.4)), 0 0 12px var(--glow-color, rgba(255, 255, 255, 0.6)), 0 2px 4px rgba(0, 0, 0, 0.3);
+  font-weight: 400;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.35);
   border: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 26px;
+  height: 26px;
   border-radius: 50%;
+  transition: width 0.15s, height 0.15s;
+}
+
+/* Country-level zoom: small plain discs, numbers appear once there is room to read them */
+.aqi-marker-compact .aqi-marker {
+  width: 12px;
+  height: 12px;
+  font-size: 0;
 }
 
 .aqi-marker.bg-no-reading {
   background-color: #FFFFFFE6;
   color: #666;
-  --glow-color: rgba(255, 255, 255, 0.4);
 }
 .aqi-marker.bg-good {
-  background-color: rgba(110, 204, 57, 1);
-  --glow-color: rgba(110, 204, 57, 0.4);
+  background-color: rgba(168, 224, 95, 1);
 }
 .aqi-marker.bg-moderate {
-  background-color: rgba(240, 194, 12, 1);
-  color: #333;
-  --glow-color: rgba(240, 194, 12, 0.4);
+  background-color: rgba(253, 214, 75, 1);
 }
 .aqi-marker.bg-unhealthy-sensitive {
-  background-color: rgba(241, 128, 23, 1);
-  --glow-color: rgba(241, 128, 23, 0.4);
+  background-color: rgba(255, 155, 87, 1);
 }
 .aqi-marker.bg-unhealthy {
-  background-color: rgba(239, 120, 85, 1);
-  --glow-color: rgba(239, 120, 85, 0.4);
+  background-color: rgba(254, 106, 105, 1);
 }
 .aqi-marker.bg-very-unhealthy {
-  background-color: #a070b5;
-  --glow-color: rgba(160, 112, 181, 0.4);
+  background-color: #a97abc;
 }
 .aqi-marker.bg-hazardous {
-  background-color: #991b1b;
-  --glow-color: rgba(153, 27, 27, 0.4);
+  background-color: #a87383;
+}
+
+/* ── Assistant chat: a caret at the end of an answer while it is being written ── */
+.chat-prose .chat-caret,
+.chat-writing .chat-prose > p:last-child::after,
+.chat-writing .chat-prose > :is(ul, ol):last-child > li:last-child::after {
+  content: '';
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: -0.15em;
+  background: #475569;
+  animation: chat-caret 1s steps(2, start) infinite;
+}
+
+@keyframes chat-caret {
+  to { visibility: hidden; }
+}
+
+/* ── Accessibility ── */
+:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.tabular { font-variant-numeric: tabular-nums; }
+
+/* Figures: even-width digits with Inter's open-digit alternates, tighter at display sizes */
+.tabular-nums {
+  font-feature-settings: "tnum" 1, "ss01" 1, "cv11" 1;
+}
+
+/* ── Loading and chart motion ── */
+.skeleton {
+  background: linear-gradient(100deg, rgba(15, 23, 42, 0.06) 30%, rgba(15, 23, 42, 0.12) 50%, rgba(15, 23, 42, 0.06) 70%);
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skeleton-shimmer {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+.bar-grow {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: bar-grow 0.45s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+@keyframes bar-grow {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+
+/* The station panels use the app's shared cards; on the Stations page they sit smaller and quieter */
+.station-panels { font-size: 13px; }
+.station-panels .rounded-lg.border { border-radius: 14px; border-color: rgb(226 232 240 / 0.7); box-shadow: none; }
+.station-panels .flex-col.p-6 { padding: 14px 16px 6px; }
+.station-panels .p-6.pt-0 { padding: 0 16px 14px; }
+.station-panels .text-2xl, .station-panels .text-3xl { font-size: 22px; font-weight: 600; }
+.station-panels .text-2xl.leading-none { font-size: 14px; letter-spacing: normal; }
+
+/* iOS zooms the page when a field under 16px is focused */
+@media (max-width: 767px) {
+  input, select, textarea { font-size: 16px; }
 }

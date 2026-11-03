@@ -10,15 +10,32 @@ const API_BASE = "https://hawanama-152782825429.asia-south1.run.app"
 // /api/v1/stations is public; no credential is needed or sent.
 const TOKEN = ""
 const OUT_PATH = join(__dirname, '..', 'src', 'data', 'station-ids.json')
+const BOUNDARY_PATH = join(__dirname, '..', 'public', 'PAK_adm0.json')
+
+function pointInRing(lng, lat, ring) {
+  let inside = false
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i]
+    const [xj, yj] = ring[j]
+    if ((yi > lat) !== (yj > lat) && lng < ((xj - xi) * (lat - yi)) / (yj - yi) + xi) inside = !inside
+  }
+  return inside
+}
 
 async function main() {
   try {
+    const geom = JSON.parse(readFileSync(BOUNDARY_PATH, 'utf8')).features[0].geometry
+    const polygons = geom.type === 'MultiPolygon' ? geom.coordinates : [geom.coordinates]
+    const insidePakistan = (lng, lat) =>
+      polygons.some((p) => pointInRing(lng, lat, p[0]) && !p.slice(1).some((h) => pointInRing(lng, lat, h)))
+
     const res = await fetch(`${API_BASE}/api/v1/stations?country=Pakistan`, {
       headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {},
     })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
-    const stations = data.stations || data
+    // The API does not apply ?country=, so the boundary decides.
+    const stations = (data.stations || data).filter((s) => insidePakistan(s.longitude, s.latitude))
     const ids = stations.map((s) => s.id || s.station_id)
     if (ids.length === 0) throw new Error('API returned no stations')
     mkdirSync(dirname(OUT_PATH), { recursive: true })

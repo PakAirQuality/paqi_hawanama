@@ -1,9 +1,10 @@
 /**
  * The one PM2.5 health classification for the dashboard.
  *
- * US EPA 2024 PM2.5 breakpoints (89 FR 16202). Keys, labels, thresholds and colours mirror
- * the API's `app/services/aqi/pm25.py` (served at /api/v1/meta/aqi-categories); a test
- * compares the two. Every marker, card, chart, summary and export must classify through
+ * US EPA 2024 PM2.5 breakpoints (89 FR 16202). Keys, labels and thresholds mirror the API's
+ * `app/services/aqi/pm25.py` (served at /api/v1/meta/aqi-categories). Colours are IQAir's
+ * scale and differ from the API's. All are light enough to need dark text on every category.
+ * Every marker, card, chart, summary and export must classify through
  * `classifyPm25()` / `bandKey()` and colour through `bandColor()`. No component may carry
  * its own thresholds.
  *
@@ -35,12 +36,12 @@ export interface Band {
 }
 
 export const AQI_BANDS: readonly Band[] = [
-  { key: 'good', label: 'Good', shortLabel: 'Good', pm25Max: 9.0, aqiMin: 0, aqiMax: 50, color: '#6ecc39', textColor: '#1f2937', badge: 'bg-green-100 text-green-800' },
-  { key: 'moderate', label: 'Moderate', shortLabel: 'Moderate', pm25Max: 35.4, aqiMin: 51, aqiMax: 100, color: '#f0c20c', textColor: '#1f2937', badge: 'bg-yellow-100 text-yellow-800' },
-  { key: 'unhealthy_sensitive', label: 'Unhealthy for Sensitive Groups', shortLabel: 'USG', pm25Max: 55.4, aqiMin: 101, aqiMax: 150, color: '#f18017', textColor: '#ffffff', badge: 'bg-orange-100 text-orange-800' },
-  { key: 'unhealthy', label: 'Unhealthy', shortLabel: 'Unhealthy', pm25Max: 125.4, aqiMin: 151, aqiMax: 200, color: '#ef7855', textColor: '#ffffff', badge: 'bg-red-100 text-red-800' },
-  { key: 'very_unhealthy', label: 'Very Unhealthy', shortLabel: 'V. Unhealthy', pm25Max: 225.4, aqiMin: 201, aqiMax: 300, color: '#a070b5', textColor: '#ffffff', badge: 'bg-purple-100 text-purple-800' },
-  { key: 'hazardous', label: 'Hazardous', shortLabel: 'Hazardous', pm25Max: null, aqiMin: 301, aqiMax: 500, color: '#991b1b', textColor: '#ffffff', badge: 'bg-red-200 text-red-900' },
+  { key: 'good', label: 'Good', shortLabel: 'Good', pm25Max: 9.0, aqiMin: 0, aqiMax: 50, color: '#a8e05f', textColor: '#0f172a', badge: 'bg-green-100 text-green-800' },
+  { key: 'moderate', label: 'Moderate', shortLabel: 'Moderate', pm25Max: 35.4, aqiMin: 51, aqiMax: 100, color: '#fdd64b', textColor: '#0f172a', badge: 'bg-yellow-100 text-yellow-800' },
+  { key: 'unhealthy_sensitive', label: 'Unhealthy for Sensitive Groups', shortLabel: 'USG', pm25Max: 55.4, aqiMin: 101, aqiMax: 150, color: '#ff9b57', textColor: '#0f172a', badge: 'bg-orange-100 text-orange-800' },
+  { key: 'unhealthy', label: 'Unhealthy', shortLabel: 'Unhealthy', pm25Max: 125.4, aqiMin: 151, aqiMax: 200, color: '#fe6a69', textColor: '#0f172a', badge: 'bg-red-100 text-red-800' },
+  { key: 'very_unhealthy', label: 'Very Unhealthy', shortLabel: 'V. Unhealthy', pm25Max: 225.4, aqiMin: 201, aqiMax: 300, color: '#a97abc', textColor: '#0f172a', badge: 'bg-purple-100 text-purple-800' },
+  { key: 'hazardous', label: 'Hazardous', shortLabel: 'Hazardous', pm25Max: null, aqiMin: 301, aqiMax: 500, color: '#a87383', textColor: '#0f172a', badge: 'bg-red-200 text-red-900' },
 ] as const
 
 export const UNKNOWN_BAND: Band = {

@@ -43,7 +43,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
       zoom: INITIAL_ZOOM,
       minZoom: 2,
       maxZoom: 10,
-      attributionControl: false,
+      attributionControl: true,
       transformRequest: (url: string) => {
         if (url.includes('/ops/pipeline/tiles/')) {
           return { url }
@@ -369,12 +369,12 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
 
       {/* Selected district info panel */}
       {selectedDistrict && (
-        <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200/60 overflow-hidden min-w-[200px]">
-          <div className="px-4 py-3 bg-slate-50 border-b border-slate-200">
+        <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200/60 overflow-hidden min-w-[200px]">
+          <div className="px-4 py-3 bg-slate-50 border-slate-200">
             <h3 className="text-lg font-bold text-slate-800">{selectedDistrict.name}</h3>
           </div>
           <div className="px-4 py-4">
-            <div className="text-xs text-slate-500 uppercase tracking-wide font-medium">{feature.name}</div>
+            <div className="text-xs text-slate-500 tracking-wide font-medium">{feature.name}</div>
             <div className="flex items-baseline gap-1.5 mt-1">
               <span className="text-3xl font-bold text-slate-900">
                 {selectedDistrict.value !== null
@@ -389,7 +389,7 @@ export function FeatureMap({ selectedDate, feature }: FeatureMapProps) {
 
       {/* Hover tooltip */}
       {hoveredDistrict && !selectedDistrict && (
-        <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-sm rounded-xl shadow-2xl border border-slate-200/60 overflow-hidden px-4 py-3">
+        <div className="absolute top-6 left-6 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg border border-slate-200/60 overflow-hidden px-4 py-3">
           <h3 className="text-lg font-bold text-slate-800">{hoveredDistrict}</h3>
           <p className="text-sm text-slate-500 mt-1">Click for details</p>
         </div>

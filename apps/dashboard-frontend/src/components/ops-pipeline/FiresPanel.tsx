@@ -78,8 +78,8 @@ export function describeFiresState(
   if (isLoading || !data) return { tone: 'loading', title: 'Loading fire detections…', detail: '' }
   const status: FiresStatus = data.status ?? (data.features.length ? 'ok' : 'empty')
   const day = data.date ? formatDateOnly(data.date) : ''
-  const fetched = data.last_successful_fetch ? ` · fetched ${formatPkt(data.last_successful_fetch)}` : ''
-  const window = data.observation_period ? ` · overpasses ${formatPkt(data.observation_period.start)} to ${formatPkt(data.observation_period.end)}` : ''
+  const fetched = data.last_successful_fetch ? `, fetched ${formatPkt(data.last_successful_fetch)}` : ''
+  const window = data.observation_period ? `, overpasses ${formatPkt(data.observation_period.start)} to ${formatPkt(data.observation_period.end)}` : ''
   const delayed = firesDelayed(data)
   const delayNote = delayed ? `Last update ${Math.round(data.fetched_age_hours ?? 0)} h ago; the 3-hourly fire feed is behind, so recent overpasses may be missing. ` : ''
   switch (status) {
@@ -141,7 +141,7 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
   if (state.tone === 'loading') {
     return (
       <div className="flex-1 flex items-center justify-center bg-[#fafbfc]">
-        <div className="flex items-center gap-2 text-slate-400 text-sm">
+        <div className="flex items-center gap-2 text-slate-500 text-sm">
           <div className="w-4 h-4 border-2 border-slate-300 border-t-slate-500 rounded-full animate-spin" />
           {state.title}
         </div>
@@ -159,7 +159,7 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
       <div className="flex flex-col h-full bg-[#fafbfc]">
         <button
           onClick={() => setView({ type: 'list' })}
-          className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-400 hover:text-slate-600 transition-colors w-full"
+          className="flex items-center gap-1 px-5 py-3 text-[12px] font-medium text-slate-500 hover:text-slate-600 transition-colors w-full"
         >
           <ChevronLeft size={14} strokeWidth={2} /> All detections
         </button>
@@ -171,7 +171,7 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
             <p className="text-[12px] text-[#94a3b8] mt-1 leading-relaxed">
               {lat.toFixed(4)}°N, {lng.toFixed(4)}°E &middot; {satelliteName(satellite)}
             </p>
-            <span className={`inline-flex items-center mt-2.5 text-[10px] font-semibold uppercase tracking-wide px-2.5 py-[3px] rounded-full ${confidenceBadgeBg(confidence)}`}>
+            <span className={`inline-flex items-center mt-2.5 text-[11px] font-semibold tracking-wide px-2.5 py-[3px] rounded-full ${confidenceBadgeBg(confidence)}`}>
               {confidenceLabel(confidence)} confidence
             </span>
           </div>
@@ -189,36 +189,36 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
 
           <div className="px-4 pb-4">
             <div className="bg-white border border-slate-200 rounded-xl overflow-hidden">
-              <div className="px-4 py-2.5 border-b border-slate-100">
+              <div className="px-4 py-2.5 border-slate-100">
                 <span className="text-[12px] font-bold text-slate-700">Detection details</span>
               </div>
               <div className="px-4 py-3 grid grid-cols-2 gap-x-6 gap-y-2.5 text-[11px]">
                 <div>
-                  <div className="text-slate-400 text-[10px]">Fire radiative power</div>
+                  <div className="text-slate-500 text-[11px]">Fire radiative power</div>
                   <div className="text-slate-700 font-medium">{frp} MW</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">Intensity (FRP class)</div>
+                  <div className="text-slate-500 text-[11px]">Intensity (FRP class)</div>
                   <div className="text-slate-700 font-medium">{frpCategory(frp)}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">Confidence</div>
+                  <div className="text-slate-500 text-[11px]">Confidence</div>
                   <div className="font-medium" style={{ color: confidenceColor(confidence) }}>{confidenceLabel(confidence)}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">Satellite</div>
+                  <div className="text-slate-500 text-[11px]">Satellite</div>
                   <div className="text-slate-700 font-medium">{satelliteName(satellite)} (VIIRS)</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">Acquired</div>
+                  <div className="text-slate-500 text-[11px]">Acquired</div>
                   <div className="text-slate-700 font-medium">{acq_datetime_utc ? formatPkt(acq_datetime_utc) : acq_date}</div>
                 </div>
                 <div>
-                  <div className="text-slate-400 text-[10px]">Coordinates</div>
+                  <div className="text-slate-500 text-[11px]">Coordinates</div>
                   <div className="text-slate-700 font-medium">{lat.toFixed(5)}, {lng.toFixed(5)}</div>
                 </div>
               </div>
-              <div className="px-4 pb-3 text-[10px] text-slate-400 leading-snug">
+              <div className="px-4 pb-3 text-[11px] text-slate-500 leading-snug">
                 A thermal anomaly at the satellite pixel; FRP is radiative power, not a measured contribution to PM2.5.
               </div>
             </div>
@@ -240,7 +240,7 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
   // ── List view ──
   return (
     <div className="flex flex-col h-full bg-[#fafbfc]">
-      <div className="px-5 pt-5 pb-3 border-b border-slate-100">
+      <div className="px-5 pt-5 pb-3 border-slate-100">
         <div className="flex items-center gap-2 mb-1">
           <Flame size={16} className="text-orange-500" />
           <span className="text-[13px] font-semibold text-slate-800">Satellite fire detections</span>
@@ -261,19 +261,19 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
           <div className="flex gap-2 mt-3">
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-orange-50 border border-orange-100">
               <span className="text-[18px] font-bold text-orange-600">{features.length}</span>
-              <span className="text-[10px] text-orange-600/70 font-medium">detections</span>
+              <span className="text-[11px] text-orange-600/70 font-medium">detections</span>
             </div>
             <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-red-50 border border-red-100">
               <span className="text-[18px] font-bold text-red-600">{highCount}</span>
-              <span className="text-[10px] text-red-600/70 font-medium">high conf.</span>
+              <span className="text-[11px] text-red-600/70 font-medium">high conf.</span>
             </div>
           </div>
         )}
       </div>
 
       {features.length > 0 && (
-        <div className="px-5 py-2 border-b border-slate-100/80 flex items-center gap-2">
-          <span className="text-[10px] text-slate-400 font-medium uppercase tracking-wider">Sort</span>
+        <div className="px-5 py-2 border-slate-100/80 flex items-center gap-2">
+          <span className="text-[11px] text-slate-500 font-medium">Sort</span>
           <select
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value as 'frp' | 'confidence')}
@@ -287,7 +287,7 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
 
       <div className="flex-1 overflow-y-auto">
         {features.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-slate-400 gap-2 px-6 text-center">
+          <div className="flex flex-col items-center justify-center h-full text-slate-500 gap-2 px-6 text-center">
             <Flame size={24} className="opacity-30" />
             <span className="text-[12px]">{state.tone === 'empty' ? 'No detections in this period.' : 'Nothing to list.'}</span>
           </div>
@@ -302,15 +302,14 @@ export function FiresPanel({ firesData, onFlyTo, selectedDate, isLoading, isFetc
                   setView({ type: 'detail', fire: f as FireFeature, index: i })
                   onFlyTo(lng, lat, 12)
                 }}
-                className="w-full flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 border-b border-slate-100/80 text-left transition-colors"
+                className="w-full flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 border-slate-100/80 text-left transition-colors"
               >
-                <div className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: confidenceColor(confidence) }} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-2">
                     <span className="text-[12px] font-semibold text-slate-800">{frp} MW</span>
-                    <span className="text-[10px] font-medium" style={{ color: confidenceColor(confidence) }}>{confidenceLabel(confidence)}</span>
+                    <span className="text-[11px] font-medium" style={{ color: confidenceColor(confidence) }}>{confidenceLabel(confidence)}</span>
                   </div>
-                  <div className="text-[10px] text-slate-400">
+                  <div className="text-[11px] text-slate-500">
                     {satelliteName(satellite)} &middot; {acq_datetime_utc ? formatPkt(acq_datetime_utc) : acq_date} &middot; {lat.toFixed(3)}, {lng.toFixed(3)}
                   </div>
                 </div>

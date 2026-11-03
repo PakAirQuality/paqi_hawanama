@@ -52,12 +52,11 @@ export default function Home() {
 
   return (
     <div className="map-page relative w-full h-full overflow-hidden" style={{
-      height: '100vh',
       width: '100vw',
       maxWidth: '100vw'
     }}>
       {/* Page heading for search engines and screen readers; the map itself is the content. */}
-      <h1 className="sr-only">Hawanama: real-time air quality map of Pakistan and South Asia</h1>
+      <h1 className="sr-only">Hawanama: real-time air quality map of Pakistan</h1>
 
       {/* Full Screen Map */}
       <MapWrapper

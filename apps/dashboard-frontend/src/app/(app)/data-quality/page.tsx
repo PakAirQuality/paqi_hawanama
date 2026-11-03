@@ -8,6 +8,7 @@ import {
   Line, XAxis, YAxis, Tooltip,
   ResponsiveContainer, ComposedChart, Area,
 } from "recharts";
+import { isPakistanStation } from "@/lib/api";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 
@@ -98,7 +99,7 @@ type EpisodesResponse = {
 async function fetchStations(): Promise<StationListItem[]> {
   const res = await fetch(`${API_BASE}/api/v1/meta/stations`);
   if (!res.ok) throw new Error("Failed to load stations");
-  return res.json();
+  return ((await res.json()) as StationListItem[]).filter(isPakistanStation);
 }
 
 async function fetchUptime(stationId: string): Promise<UptimeResponse> {
@@ -441,7 +442,7 @@ export default function DataQualityPage() {
                           </div>
                           <div className="text-right">
                             <p className="text-sm font-bold">{day.mean_value.toFixed(0)} μg/m³</p>
-                            <Badge variant={day.severity_score >= 0.1 ? "destructive" : "secondary"} className="text-[10px]">
+                            <Badge variant={day.severity_score >= 0.1 ? "destructive" : "secondary"} className="text-[11px]">
                               {(day.severity_score * 100).toFixed(0)}% severity
                             </Badge>
                           </div>

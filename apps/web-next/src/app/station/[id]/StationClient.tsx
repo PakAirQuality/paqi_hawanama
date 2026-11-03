@@ -138,7 +138,7 @@ export default function StationClient({ stationId, station }: StationClientProps
               />
               <div>
                 <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-                <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+                <p className="text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
               </div>
             </div>
             <div className="flex items-center space-x-4">

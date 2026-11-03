@@ -5,9 +5,9 @@ import SiteFooter from '@/components/layout/SiteFooter'
 import { SITE, cityPath, jsonLd, breadcrumbJsonLd } from '@/lib/site'
 import { allCities } from '@/lib/siteData'
 
-const title = 'Air Quality by City: Pakistan, India, Bangladesh, Nepal and Sri Lanka'
+const title = 'Air Quality by City in Pakistan'
 const description =
-  'Live AQI and PM2.5 for every monitored city in Pakistan and South Asia, from Lahore, Karachi and Islamabad to Delhi, Dhaka, Kathmandu and Colombo. Hourly open data by the Pakistan Air Quality Initiative.'
+  'Live AQI and PM2.5 for every monitored city in Pakistan, from Lahore, Karachi and Islamabad to Peshawar, Faisalabad and Quetta. Hourly open data by the Pakistan Air Quality Initiative.'
 
 export const metadata: Metadata = {
   title,
@@ -17,27 +17,16 @@ export const metadata: Metadata = {
   twitter: { card: 'summary_large_image', title: `${title} | Hawanama`, description, images: [SITE.ogImage] },
 }
 
-const COUNTRY_ORDER = ['Pakistan', 'India', 'Bangladesh', 'Nepal', 'Sri Lanka']
-
 function groupCities() {
-  const byCountry = new Map<string, Map<string, typeof allCities>>()
+  const states = new Map<string, typeof allCities>()
   for (const c of allCities) {
-    const country = c.country || 'Other'
     const state = c.state || 'Other'
-    if (!byCountry.has(country)) byCountry.set(country, new Map())
-    const states = byCountry.get(country)!
     if (!states.has(state)) states.set(state, [])
     states.get(state)!.push(c)
   }
-  const countries = Array.from(byCountry.keys()).sort(
-    (a, b) => (COUNTRY_ORDER.indexOf(a) + 1 || 99) - (COUNTRY_ORDER.indexOf(b) + 1 || 99) || a.localeCompare(b),
-  )
-  return countries.map((country) => ({
-    country,
-    states: Array.from(byCountry.get(country)!.entries())
-      .sort((a, b) => a[0].localeCompare(b[0]))
-      .map(([state, cities]) => ({ state, cities: cities.slice().sort((a, b) => a.name.localeCompare(b.name)) })),
-  }))
+  return Array.from(states.entries())
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .map(([state, cities]) => ({ state, cities: cities.slice().sort((a, b) => a.name.localeCompare(b.name)) }))
 }
 
 export default function CitiesPage() {
@@ -53,15 +42,15 @@ export default function CitiesPage() {
       {/* Header */}
       <header className="border-b">
         <div className="container mx-auto px-4 py-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
             <div>
               <Link href="/" className="text-2xl font-bold text-foreground">Hawanama</Link>
-              <p className="text-sm text-muted-foreground">South Asia Air Quality Monitoring</p>
+              <p className="hidden sm:block text-sm text-muted-foreground">Pakistan Air Quality Monitoring</p>
             </div>
             <nav className="flex items-center space-x-4">
-              <Link href="/" className="text-sm hover:underline">Dashboard</Link>
-              <Link href="/city/" className="text-sm font-medium">Cities</Link>
-              <Link href="/about/" className="text-sm hover:underline">About</Link>
+              <Link href="/" className="py-1.5 text-sm hover:underline">Dashboard</Link>
+              <Link href="/city/" className="py-1.5 text-sm font-medium">Cities</Link>
+              <Link href="/about/" className="py-1.5 text-sm hover:underline">About</Link>
             </nav>
           </div>
         </div>
@@ -72,8 +61,8 @@ export default function CitiesPage() {
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-foreground mb-2">Air Quality by City</h1>
           <p className="text-muted-foreground max-w-3xl">
-            Hourly PM2.5 and US AQI for {allCities.length} monitored cities across Pakistan, India, Bangladesh, Nepal
-            and Sri Lanka. The cards show the cities with the most recent data; every monitored city is listed below.
+            Hourly PM2.5 and US AQI for {allCities.length} monitored cities across Pakistan. The cards show the cities
+            with the most recent data; every monitored city is listed below.
             Click a city for its live reading, 24-hour trend and the stations behind it.
           </p>
         </div>
@@ -82,26 +71,21 @@ export default function CitiesPage() {
 
         <section className="mt-12">
           <h2 className="text-2xl font-bold text-foreground mb-4">All monitored cities</h2>
-          {groups.map((g) => (
-            <div key={g.country} className="mb-8">
-              <h3 className="text-xl font-semibold text-foreground mb-3">{g.country}</h3>
-              {g.states.map((s) => (
-                <div key={s.state} className="mb-4">
-                  <h4 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-1">{s.state}</h4>
-                  <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                    {s.cities.map((c) => (
-                      <li key={c.slug}>
-                        <Link href={cityPath(c.slug)} className="hover:underline text-foreground">
-                          {c.name}
-                        </Link>
-                        {c.station_count > 1 && (
-                          <span className="text-muted-foreground"> ({c.station_count})</span>
-                        )}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
+          {groups.map((s) => (
+            <div key={s.state} className="mb-4">
+              <h3 className="text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-1">{s.state}</h3>
+              <ul className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+                {s.cities.map((c) => (
+                  <li key={c.slug}>
+                    <Link href={cityPath(c.slug)} className="inline-block py-1 sm:py-0 hover:underline text-foreground">
+                      {c.name}
+                    </Link>
+                    {c.station_count > 1 && (
+                      <span className="text-muted-foreground"> ({c.station_count})</span>
+                    )}
+                  </li>
+                ))}
+              </ul>
             </div>
           ))}
         </section>
