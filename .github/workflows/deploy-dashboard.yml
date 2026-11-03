@@ -1,6 +1,10 @@
 name: Deploy Dashboard
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - apps/dashboard-frontend/**
   workflow_dispatch:
     inputs:
       preview:
