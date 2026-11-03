@@ -243,6 +243,10 @@ async def get_overview(
             "priority_counts": priority_counts,
             "confidence_counts": confidence_counts,
             "n_ramp": n_ramp,
+            # Observation availability behind the D+1 forecast (pipeline ≥ Nov 2026)
+            "n_obs_available": sum(1 for e in d1 if e.get("obs_available") is True),
+            "n_obs_known": sum(1 for e in d1 if e.get("obs_available") is not None),
+            "basis_counts": _count_by(d1, "forecast_basis"),
         },
         "cities_unhealthy": n_cities_unhealthy,
         "cities_worsening": n_cities_worsening,
@@ -559,6 +563,16 @@ async def ingest_fires(
 
 
 # ── Internal helpers ─────────────────────────────────────────────────────
+
+def _count_by(entries: list, key: str) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for e in entries:
+        v = e.get(key)
+        if v is None:
+            continue
+        out[str(v)] = out.get(str(v), 0) + 1
+    return out
+
 
 def _resolve_latest_date() -> str:
     """Get the init_date from the latest.json pointer."""

@@ -25,7 +25,7 @@ configure_logging(
         settings.POSTGRES_PASSWORD,
     ),
 )
-from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest, reports
+from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest, reports, forecast_runs
 
 # True only on the dedicated ingestion Cloud Run service (hawanama-ingest).
 # Public read API does not expose POST /tasks/* — schedulers call ingest directly.
@@ -106,6 +106,8 @@ else:
     app.include_router(cities.router, prefix=f"{settings.API_V1_STR}", tags=["cities"], dependencies=json_limit)
     app.include_router(exports.router, prefix=f"{settings.API_V1_STR}/exports", tags=["exports"])
     app.include_router(exports_publish.router, prefix=f"{settings.API_V1_STR}/exports/publish", tags=["publish"])
+    # Forecast job run reports (POST is secret-protected; GET is a public read like the other ops routes)
+    app.include_router(forecast_runs.router, prefix=f"{settings.API_V1_STR}/forecast-runs", tags=["forecast-runs"])
     if INGEST_ROLE:
         app.include_router(tasks.router, prefix=f"{settings.API_V1_STR}", tags=["tasks"])
     app.include_router(bot.router, prefix=f"{settings.API_V1_STR}", tags=["bot"])
