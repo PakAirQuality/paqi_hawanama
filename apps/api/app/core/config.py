@@ -143,6 +143,16 @@ class Settings(BaseSettings):
     OPENAQ_ALIAS_DISTANCE_M: float = 150.0
     OPENAQ_HTTP_TIMEOUT_S: float = 30.0
     OPENAQ_RETIRE_AFTER_MISSED_RUNS: int = 7
+    # Provider: ICIMOD Air Quality Watch — open API relaying the EPCCD Punjab ground stations.
+    # Shadow provider (source='icimod', stations inactive) for the pilot; one POST per run, no key.
+    ICIMOD_ENABLED: bool = False
+    ICIMOD_BASE_URL: str = "https://pakistan.smog.icimod.org/api/v1"
+    ICIMOD_STATE: str = "Punjab"
+    ICIMOD_SOURCE: str = "Ground Station"           # the portal's vector-layer name for the EPCCD monitors
+    ICIMOD_POLLUTANT: str = "PM2.5"
+    ICIMOD_HTTP_TIMEOUT_S: float = 30.0
+    ICIMOD_RETRY_MAX_ATTEMPTS: int = 3
+    ICIMOD_ALIAS_DISTANCE_M: float = 300.0           # EPCCD vs ICIMOD coordinates for one site differ slightly
     # Ingestion behaviour
     INGEST_CONCURRENCY: int = 6                      # entities (stations/cities) in flight per task
     ALLOW_DB_STATION_FALLBACK: bool = False

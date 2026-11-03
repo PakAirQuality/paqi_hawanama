@@ -215,6 +215,26 @@ async def run_openaq_reconcile(request: Request, _: bool = Depends(verify_tasks_
         raise HTTPException(status_code=500, detail=f"OpenAQ reconciliation failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# ICIMOD Air Quality Watch (shadow provider pilot; gated by ICIMOD_ENABLED)
+# ---------------------------------------------------------------------------
+
+@router.post("/tasks/icimod/ingest")
+async def run_icimod_ingest(
+    request: Request,
+    dry_run: bool = Query(False, description="Make the requests and report the pilot metrics, but write nothing"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Hourly: current UTC day of PM2.5 for every EPCCD Punjab station via ICIMOD → readings (source='icimod')."""
+    from app.services.ingestion.icimod.ingest import ICIMODIngestTask
+    try:
+        outcome = await ICIMODIngestTask().run(dry_run=dry_run, trigger=_trigger(request))
+        return _outcome_response(outcome, "ICIMOD ingestion completed")
+    except Exception as e:
+        logger.error("ICIMOD ingestion failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"ICIMOD ingestion failed: {e}")
+
+
 @router.post("/tasks/twitter-lahore-pm25")
 async def run_twitter_lahore_pm25(
     request: Request,
@@ -291,6 +311,7 @@ async def get_task_status(
                 "POST /tasks/openaq/discover?dry_run=true|false",
                 "POST /tasks/openaq/ingest",
                 "POST /tasks/openaq/reconcile",
+                "POST /tasks/icimod/ingest?dry_run=true|false",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
             ],

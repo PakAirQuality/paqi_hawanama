@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text, bindparam
 from app.core.database import get_database
 from app.core.security import verify_tasks_token
+from app.ingestion.export_membership import SHADOW_PROVIDER_CODES
 
 from typing import Optional, Any
 import logging
@@ -351,11 +352,13 @@ def _build_all_stations_hourly_query(
     if provider_codes:
         where_clauses.append("LOWER(COALESCE(p.code, '')) IN :provider_codes")
         params["provider_codes"] = provider_codes
-    # Shadow-mode OpenAQ data (provider 'openaq' / source 'openaq') is never published
-    # to GCS unless a research caller asks for provider=openaq explicitly.
-    if "openaq" not in {str(c).lower() for c in (provider_codes or [])}:
-        where_clauses.append("COALESCE(p.code, '') <> 'openaq'")
-        where_clauses.append("r.source <> 'openaq'")
+    # Shadow-mode data (OpenAQ, ICIMOD: provider code / readings.source) is never published
+    # to GCS unless a research caller asks for that provider code explicitly.
+    requested = {str(c).lower() for c in (provider_codes or [])}
+    for code in SHADOW_PROVIDER_CODES:
+        if code not in requested:
+            where_clauses.append(f"COALESCE(p.code, '') <> '{code}'")
+            where_clauses.append(f"r.source <> '{code}'")
 
     where_sql = " AND ".join(where_clauses)
 

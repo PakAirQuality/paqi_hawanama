@@ -6,9 +6,10 @@ Membership used to be `providers.display_name = 'Airvisual/PAQI'`: a display
 string that discovery could (and once did) rewrite, and which no code sets.
 Membership is now explicit per station in stations.metadata_json.export.openaq
 (set by db_schema/oneoff/2026-10_export_membership.sql). Anything that
-originated from OpenAQ — provider code 'openaq', providers.metadata.origin or
-stations.metadata_json.origin = 'openaq' — is excluded unconditionally so no
-imported OpenAQ data is ever exported back to OpenAQ.
+originated from a shadow provider (SHADOW_PROVIDER_CODES: provider code,
+providers.metadata.origin or stations.metadata_json.origin) is excluded
+unconditionally, so no imported OpenAQ data is ever exported back to OpenAQ and
+no ICIMOD-relayed row leaves the pilot.
 """
 
 from __future__ import annotations
@@ -21,16 +22,17 @@ from fastapi import HTTPException
 
 from app.ingestion.identity import hardware_label as _hardware_label
 
-# Requires aliases: s = stations, p = providers.
-MEMBERSHIP_WHERE = """
-      (s.metadata_json->'export'->>'openaq')::boolean IS TRUE
-  AND p.code <> 'openaq'
-  AND COALESCE(p.metadata->>'origin', '') <> 'openaq'
-  AND COALESCE(s.metadata_json->>'origin', '') <> 'openaq'
-"""
+# Providers ingested in shadow mode: never a member, never a source of exported readings.
+SHADOW_PROVIDER_CODES = ("openaq", "icimod")
 
-# Readings whose source is OpenAQ are never exported, whatever station they sit on.
-READINGS_NOT_OPENAQ = " AND r.source <> 'openaq'"
+# Requires aliases: s = stations, p = providers.
+MEMBERSHIP_WHERE = "\n      (s.metadata_json->'export'->>'openaq')::boolean IS TRUE\n" + "".join(
+    f"  AND p.code <> '{c}'\n"
+    f"  AND COALESCE(p.metadata->>'origin', '') <> '{c}'\n"
+    f"  AND COALESCE(s.metadata_json->>'origin', '') <> '{c}'\n" for c in SHADOW_PROVIDER_CODES)
+
+# Readings whose source is a shadow provider are never exported, whatever station they sit on.
+READINGS_NOT_OPENAQ = "".join(f" AND r.source <> '{c}'" for c in SHADOW_PROVIDER_CODES)
 
 POLLUTANT_PARAMS = ("pm25", "pm10", "no2", "so2", "o3", "co")
 UNKNOWN_UNIT = "unknown"

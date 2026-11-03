@@ -17,7 +17,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from app.services.ingestion.openaq.models import Location
 
 PROVIDER_HINTS: Dict[str, List[str]] = {
-    "punjab": ["epa punjab", "punjab environmental", "epd punjab", "environment protection department"],
+    "punjab": ["epa punjab", "punjab environmental", "epd punjab", "epccd", "environment protection department"],
     "bam": ["sfl"],
     "airvisual": ["iqair", "airvisual"],
 }

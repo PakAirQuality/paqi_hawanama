@@ -31,8 +31,10 @@ def test_unit_or_unknown_never_guesses():
 
 def test_membership_sql_fragments():
     assert "(s.metadata_json->'export'->>'openaq')::boolean IS TRUE" in em.MEMBERSHIP_WHERE
-    assert "p.code <> 'openaq'" in em.MEMBERSHIP_WHERE and "origin" in em.MEMBERSHIP_WHERE
-    assert em.READINGS_NOT_OPENAQ.strip() == "AND r.source <> 'openaq'"
+    for code in ("openaq", "icimod"):
+        assert f"p.code <> '{code}'" in em.MEMBERSHIP_WHERE and f"origin', '') <> '{code}'" in em.MEMBERSHIP_WHERE
+        assert f"AND r.source <> '{code}'" in em.READINGS_NOT_OPENAQ
+    assert em.READINGS_NOT_OPENAQ.startswith(" AND ")
     assert "ORDER BY r.ts_utc DESC, r.scope_key DESC" in em.KEYSET_ORDER
 
 
