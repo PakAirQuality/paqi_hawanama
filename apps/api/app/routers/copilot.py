@@ -17,6 +17,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.usage import UsageLimits
 
 from app.core.config import settings
@@ -35,7 +36,11 @@ STRAY_BRACE_RE = re.compile(r"^\s*\}\s*$|(?<=[.!?])\s*\}", re.MULTILINE)
 SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 
 # One chat turn may need a few tool round-trips; cap requests and total tokens per turn.
-RUN_LIMITS = UsageLimits(request_limit=8, total_tokens_limit=60_000)
+# 120k: a province-wide station breakdown plus history ran past 60k (2026-10-31); the daily
+# global budget (COPILOT_GLOBAL_DAILY_TOKENS) is the real spend guard.
+RUN_LIMITS = UsageLimits(request_limit=8, total_tokens_limit=120_000)
+TOO_MUCH_DATA_MSG = ("That question needed more data than one answer allows. "
+                     "Try narrowing it, for example one city or a shorter period.")
 RUN_SETTINGS = {"max_tokens": 1024}
 
 
@@ -119,6 +124,10 @@ async def _stream_with_fallback(run_one, ip: str, label: str):
             agent = get_agent() if i == 0 else get_agent(model_name=model_name)
             async for event in run_one(agent):
                 yield event
+            break
+        except UsageLimitExceeded as e:
+            logger.warning("%s: %s", label, e)
+            yield _sse_event({"type": "error", "content": TOO_MUCH_DATA_MSG})
             break
         except Exception as e:
             if _is_rate_limit_error(e) and i < len(MODEL_FALLBACK_CHAIN) - 1:
