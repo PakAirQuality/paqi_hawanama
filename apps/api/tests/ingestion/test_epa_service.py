@@ -111,3 +111,11 @@ async def test_lease_held_is_skipped(tmp_path):
 
 def test_station_id_derivation_unchanged():
     assert epa.station_id_for_punjab("LHR1").startswith("pb_") and len(epa.station_id_for_punjab("LHR1")) == 15
+
+
+def test_origin_headers_follow_the_configured_base(tmp_path):
+    """The API rejects requests (403) whose Origin is not its own site; a domain move must carry the headers along."""
+    s = make_settings(tmp_path, PUNJAB_EPA_API_BASE="https://aqi.punjab.gov.pk/api/", PUNJAB_EPA_API_KEY="pk-SECRET-1234567")
+    h = epa.PunjabEPAClient(settings=s)._headers()
+    assert h["Origin"] == "https://aqi.punjab.gov.pk"
+    assert h["Referer"] == "https://aqi.punjab.gov.pk/"
