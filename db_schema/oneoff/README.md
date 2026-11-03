@@ -8,3 +8,4 @@ run it, check the counts, and only then run the write step.
 |------|---------|-----------------|
 | `2026-10_export_membership.sql` | mark the PAQI network stations as exportable (`metadata_json.export.openaq = true`) | deploying the export-membership change (routers/openaq_network.py, routers/public.py), or both exports return empty |
 | `2026-10_backfill_units_airvisual.sql` | optional: set `units_pm25/pm10 = 'µg/m³'` on historical airvisual rows that have a value but NULL units | nothing; optional and reversible |
+| `2026-11_epic_programme.sql` | mark the 70 station rows of the EPIC / PAQI monitors (`metadata_json.programme`); step 2b (adding the unexported ones to the PAQI export) is a commented proposal | nothing |

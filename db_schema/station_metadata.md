@@ -79,6 +79,7 @@ split into a second row. These keys are written by `app/ingestion/identity.py`:
 | `identity.alias_candidates[]` | OpenAQ discovery | machine-proposed matches with evidence (`distance_m`, `name_similarity`, provider hints), `reviewed: false`; never used for anything until promoted to `aliases` by a person |
 | `hardware` | humans / attested sources | `{manufacturer, model, confidence: "attested" \| "inferred" \| "unknown", evidence}`. Exports print `unknown` unless confidence is attested/inferred with a model. |
 | `export` | one-off SQL (`db_schema/oneoff/`) | `{openaq: bool, network: "PAQI", since, set_by}` — explicit export membership; replaces filtering on `providers.display_name`. |
+| `programme` | one-off SQL (`db_schema/oneoff/`) | `{name: "EPIC", partner: "PAQI", listed_as, duplicate_row?, source, since, set_by}` — the monitor belongs to the EPIC / PAQI deployment. `listed_as` is its name on the EPIC tracker. Independent of `export` and of the provider label (some EPIC monitors sit under plain "Airvisual"). |
 | `ingest_mode` | OpenAQ discovery | `"shadow"` while a station is ingested but not shown or exported |
 | `origin` | OpenAQ discovery | `"external"` or `"hawanama_loop"` (our own data seen via OpenAQ; never ingested) |
 
