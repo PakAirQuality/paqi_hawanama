@@ -1921,6 +1921,55 @@ async def get_station_history(
     }
 
 
+# Short forms analysts type for Pakistan's provinces/territories → the name in `states`.
+# The IQAir-era aliases in core.south_asia cover the other direction (long names → short).
+PROVINCE_ALIASES: dict[str, str] = {
+    "kp": "Khyber Pakhtunkhwa",
+    "kpk": "Khyber Pakhtunkhwa",
+    "nwfp": "Khyber Pakhtunkhwa",
+    "north-west frontier province": "Khyber Pakhtunkhwa",
+    "khyber": "Khyber Pakhtunkhwa",
+    "ict": "Islamabad",
+    "islamabad capital territory": "Islamabad",
+    "islamabad federal capital territory": "Islamabad",
+    "ajk": "Azad Kashmir",
+    "azad jammu and kashmir": "Azad Kashmir",
+    "azad jammu & kashmir": "Azad Kashmir",
+    "gb": "Gilgit-Baltistan",
+    "gilgit baltistan": "Gilgit-Baltistan",
+    "baluchistan": "Balochistan",
+}
+PROVINCE_COUNTRY = "Pakistan"   # "Punjab" alone must mean Punjab, Pakistan — never Punjab, India
+
+
+async def _resolve_province(db: AsyncSession, name: str) -> tuple[Optional[int], Optional[str], list[str]]:
+    """(state_id, canonical name, all Pakistan state names) for a typed province name.
+
+    Tries, in order: the alias table, an exact case-insensitive name or `states.code`
+    match, then difflib over the Pakistan state names (typos such as "Khyber Pakhtunkwa").
+    """
+    rows = (await db.execute(text("""
+        SELECT st.id, st.name, st.code
+        FROM states st JOIN countries co ON co.id = st.country_id
+        WHERE co.name = :country
+        ORDER BY st.name
+    """), {"country": PROVINCE_COUNTRY})).fetchall()
+    names = [r.name for r in rows]
+    wanted = (name or "").strip().lower()
+    if not wanted:
+        return None, None, names
+    wanted = PROVINCE_ALIASES.get(wanted, wanted).lower()
+    for r in rows:
+        if r.name.lower() == wanted or (r.code or "").lower() == wanted:
+            return r.id, r.name, names
+    import difflib
+    match = difflib.get_close_matches(wanted, [n.lower() for n in names], n=1, cutoff=0.75)
+    if match:
+        r = next(r for r in rows if r.name.lower() == match[0])
+        return r.id, r.name, names
+    return None, None, names
+
+
 async def get_data_coverage(
     db: AsyncSession,
     geography: str = "city",
@@ -1971,12 +2020,15 @@ async def get_data_coverage(
         if not station_ids:
             return {"data": {"message": f"No active stations found in {target_name}."}}
     elif geography == "province":
-        target_name = entity_name
-        q = text("SELECT s.station_id FROM stations s WHERE LOWER(s.state) = LOWER(:prov) AND s.active = true")
-        rows = (await db.execute(q, {"prov": entity_name})).fetchall()
+        state_id, target_name, known = await _resolve_province(db, entity_name)
+        if state_id is None:
+            return {"data": {"message": f"Province '{entity_name}' not found. "
+                                        f"Known provinces/territories: {', '.join(known)}."}}
+        q = text("SELECT s.station_id FROM stations s WHERE s.state_id = :sid AND s.active = true")
+        rows = (await db.execute(q, {"sid": state_id})).fetchall()
         station_ids = [r.station_id for r in rows]
         if not station_ids:
-            return {"data": {"message": f"No active stations found in {entity_name}."}}
+            return {"data": {"message": f"No active stations found in {target_name}."}}
     else:
         target_name = "National"
         q = text("SELECT station_id FROM stations WHERE active = true")

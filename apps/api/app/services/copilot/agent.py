@@ -1,9 +1,11 @@
 """PydanticAI agent for the analyst desk copilot."""
 
+import functools
 import logging
 import os
 
-from pydantic_ai import RunContext
+from fastapi import HTTPException
+from pydantic_ai import ModelRetry, RunContext
 
 from app.core.config import settings
 
@@ -11,6 +13,32 @@ from .context import CopilotSession
 from . import tools
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_tool(fn):
+    """Register `fn` so a failing lookup becomes a message the model can relay.
+
+    Without this, any exception inside a tool (a missing forecast file raising
+    HTTPException 404, a SQL error, a timeout) aborts the whole streamed reply as
+    "An internal error occurred." functools.wraps keeps the signature, annotations
+    and docstring, which is all pydantic-ai reads to build the tool schema.
+    ModelRetry is pydantic-ai's own retry signal and passes through untouched.
+    """
+    @functools.wraps(fn)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await fn(*args, **kwargs)
+        except ModelRetry:
+            raise
+        except HTTPException as exc:
+            logger.warning("copilot tool %s: %s %s", fn.__name__, exc.status_code, exc.detail)
+            return {"data": {"message": str(exc.detail)}, "followups": []}
+        except Exception as exc:  # noqa: BLE001 — the model must get an answer either way
+            logger.error("copilot tool %s failed (%s)", fn.__name__, type(exc).__name__, exc_info=True)
+            return {"data": {"message": f"The {fn.__name__} lookup failed ({type(exc).__name__}). "
+                                        "Answer from other evidence or tell the user this data is unavailable."},
+                    "followups": []}
+    return wrapper
 
 SYSTEM_PROMPT = """\
 You are the Hawanama Analyst Desk Copilot — an AI assistant for air-quality \
@@ -44,6 +72,7 @@ from the monitoring network — these show real current conditions, not predicti
 | @StationName or "tell me about station X" | `aq_station_focus` |
 | "Show trend" / "neighbors" (after station focus) | `aq_station_history` (hours param — any value supported; the DB has multi-year data) |
 | "How far back?" / "Earliest reading?" / "Data coverage?" / "How many stations?" | `aq_data_coverage` (summary includes oldest 3 stations; use detail_level="preview" for top_k; "station_breakdown" for full list) |
+| "How many monitors in KP / Sindh / Punjab?" / province questions | `aq_data_coverage` with geography="province" (short forms KP, KPK, ICT, AJK, GB are accepted; n_stations_total is the station count) |
 | "What is near that fire?" / nearby hospitals/schools | `aq_nearest_assets` (pass lat/lon from a previous tool result) |
 | "Show satellite image" / "Sentinel imagery" | `aq_satellite_image` (pass lat/lon, optional date range and cloud threshold) |
 | "How many people are exposed?" / "Population at risk?" | `aq_exposed_population` (city_name or lat/lon, returns pop by risk band) |
@@ -301,22 +330,25 @@ def get_agent(model_name: str | None = None):
                 )
         return "\n".join(lines)
 
-    agent.tool(tools.aq_hotspots_daily)
-    agent.tool(tools.aq_city_detail)
-    agent.tool(tools.aq_compare_dates)
-    agent.tool(tools.aq_explain_drivers)
-    agent.tool(tools.aq_incident_summary)
-    agent.tool(tools.aq_forecast_audit)
-    agent.tool(tools.aq_station_focus)
-    agent.tool(tools.aq_station_history)
-    agent.tool(tools.aq_data_coverage)
-    agent.tool(tools.aq_nearest_assets)
-    agent.tool(tools.aq_satellite_image)
-    agent.tool(tools.aq_exposed_population)
-    agent.tool(tools.aq_impact_brief)
-    agent.tool(tools.aq_historical_snapshot)
-    agent.tool(tools.aq_fire_activity)
-    agent.tool(tools.aq_trajectory)
+    for fn in (
+        tools.aq_hotspots_daily,
+        tools.aq_city_detail,
+        tools.aq_compare_dates,
+        tools.aq_explain_drivers,
+        tools.aq_incident_summary,
+        tools.aq_forecast_audit,
+        tools.aq_station_focus,
+        tools.aq_station_history,
+        tools.aq_data_coverage,
+        tools.aq_nearest_assets,
+        tools.aq_satellite_image,
+        tools.aq_exposed_population,
+        tools.aq_impact_brief,
+        tools.aq_historical_snapshot,
+        tools.aq_fire_activity,
+        tools.aq_trajectory,
+    ):
+        agent.tool(_safe_tool(fn))
 
     # ── Langfuse tracing via OTEL (opt-in via env var) ──
     if os.getenv("LANGFUSE_SECRET_KEY"):
