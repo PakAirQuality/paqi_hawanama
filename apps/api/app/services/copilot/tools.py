@@ -876,35 +876,181 @@ async def aq_historical_snapshot(
 # ── Tool 15: aq_fire_activity ────────────────────────────────────────────
 
 
+def _fire_basis(desc: str, extra: Optional[list] = None) -> dict:
+    return {"description": desc, "sources": ["firms_viirs_archive", "fire_aggregate_store"] + (extra or []),
+            "limitations": ["FIRMS NRT lags 3–12 h; the last Pakistan day may be incomplete until the night pass arrives",
+                            "Fire counts and FRP do not measure a contribution to PM2.5"]}
+
+
 async def aq_fire_activity(
     ctx: RunContext[CopilotSession],
     date: str,
     city: Optional[str] = None,
 ) -> dict:
-    """Get FIRMS satellite fire detection data for any date.
-
-    Returns fire counts, FRP statistics, high-confidence detections,
-    and city-level fire clusters from archived VIIRS satellite data.
+    """FIRMS fire detections for one Pakistan day: national totals with country split and top districts,
+    or (with a city) the fires within 50 km of that city and upwind of it.
 
     Args:
-        date: Date to query (YYYY-MM-DD).
-        city: Optional city name — filters fires within ~50km of city.
+        date: Pakistan day (YYYY-MM-DD).
+        city: Optional city name; without it the national picture is returned. For other radii or
+            the full upwind analysis use aq_fire_exposure.
     """
-    from app.services.analytics import get_fire_activity
+    from app.services.fire_analytics import fire_activity, parse_day
 
+    day = parse_day(date)
+    if day is None:
+        return {"date": date, "data": {"message": "date must be YYYY-MM-DD"}, "followups": []}
     db = await _get_db()
     try:
-        result = await get_fire_activity(date, city, db=db)
+        data = await fire_activity(db, day, city, radius_km=50.0)
     finally:
         await db.close()
+    _update_session(ctx, tool="aq_fire_activity", focus_type="city" if city else "national", focused_city=city, historical_date=date)
+    followups = ["How does this fire season compare with earlier years?"]
+    if city:
+        followups.append(f"What was the air quality in {city} on {date}?")
+    else:
+        followups.append(f"Where were the biggest fire clusters on {date}?")
+    return {"date": date, "data": data, "basis": _fire_basis(f"VIIRS fire detections for the Pakistan day {date}"), "followups": followups}
 
-    _update_session(
-        ctx, tool="aq_fire_activity",
-        focus_type="city" if city else "national",
-        focused_city=city,
-        historical_date=date,
-    )
-    return result
+
+# ── Tool 15b: aq_fire_exposure ───────────────────────────────────────────
+
+
+async def aq_fire_exposure(
+    ctx: RunContext[CopilotSession],
+    city: str = "",
+    date: str = "",
+    radius_km: float = 100.0,
+) -> dict:
+    """Fires around and upwind of a city on one Pakistan day: counts and FRP within 50/100/200 km split
+    by country (Pakistan, Indian Punjab/Haryana, other), the wind at the city with its source named
+    (ERA5, forecast pipeline, or station observations), the ±60° upwind cone, the nearest fire, the ten
+    strongest upwind fires with distance, bearing and a transport-time estimate, and the pipeline's own
+    fire driver when available.
+
+    Args:
+        city: City name (required, fuzzy matched).
+        date: Pakistan day (YYYY-MM-DD); defaults to the active date.
+        radius_km: Ring for the district breakdown (5–200; the 50/100/200 km rings are always returned).
+    """
+    from app.services.fire_analytics import fire_exposure, parse_day
+
+    if not city.strip():
+        return {"date": date, "data": {"message": "Which city? Fire exposure needs a city name."}, "followups": []}
+    dt = date or _effective_date(ctx)
+    day = parse_day(dt)
+    if day is None:
+        return {"date": dt, "data": {"message": "date must be YYYY-MM-DD"}, "followups": []}
+    db = await _get_db()
+    try:
+        data = await fire_exposure(db, city, day, radius_km=radius_km)
+    finally:
+        await db.close()
+    name = data.get("city", city)
+    _update_session(ctx, tool="aq_fire_exposure", focus_type="city", focused_city=name, entities=[name], historical_date=dt)
+    return {"date": dt, "data": data,
+            "basis": _fire_basis(f"VIIRS fires within 200 km of {name} on the Pakistan day {dt}, upwind cone from the named wind source",
+                                 ["era5_or_pipeline_or_station_wind"]),
+            "followups": [f"Is fire smoke consistent with {name}'s PM2.5 this week?", f"Where are the fire clusters near {name}?",
+                          "How does this fire season compare with earlier years?"]}
+
+
+# ── Tool 15c: aq_fire_trends ─────────────────────────────────────────────
+
+
+async def aq_fire_trends(
+    ctx: RunContext[CopilotSession],
+    region: str = "Pakistan",
+    start_date: str = "",
+    end_date: str = "",
+    season: str = "",
+    compare_years: bool = True,
+) -> dict:
+    """Daily (or weekly, for long windows) fire counts and FRP for a region, with the same calendar
+    window in 2020–2025 for comparison: totals, peak day, country share, top districts, and
+    "higher than k of n reference years". Regions: Pakistan, a province (KP, Punjab, Sindh, Balochistan,
+    GB, AJK, Islamabad), a Pakistan district, "Indian Punjab", "Haryana", "India", or "other".
+
+    Args:
+        region: Region name (default Pakistan; plain "Punjab" means Pakistan's).
+        start_date: YYYY-MM-DD, YYYY-MM or YYYY (start of the window).
+        end_date: YYYY-MM-DD, YYYY-MM or YYYY (end of the window); defaults to today.
+        season: "rice" (1 Oct–30 Nov, kharif residue) or "wheat" (15 Apr–31 May, rabi residue); season-to-date
+            when no dates are given. Without dates or a season: the current season, else the last 30 days.
+        compare_years: Compare with the same window in 2020–2025.
+    """
+    from app.services.copilot.station_queries import parse_period_date
+    from app.services.fire_analytics import REFERENCE_YEARS, fire_trends
+
+    start = parse_period_date(start_date) if start_date else None
+    end = parse_period_date(end_date, end=True) if end_date else None
+    if (start_date and start is None) or (end_date and end is None):
+        return {"date": end_date or start_date, "data": {"message": "dates must be YYYY-MM-DD, YYYY-MM or YYYY"}, "followups": []}
+    data = fire_trends(region, start, end, season=season, compare_years=REFERENCE_YEARS if compare_years else ())
+    _update_session(ctx, tool="aq_fire_trends", focus_type="national" if region.strip().lower() in ("", "pakistan") else "region",
+                    historical_date=(end or start).isoformat() if (end or start) else None)
+    return {"date": data.get("window", {}).get("end_pkt_day") or end_date, "data": data,
+            "basis": _fire_basis("daily region rollups of deduplicated VIIRS fires from the aggregate store"),
+            "followups": ["Which districts are burning most?", "Where are the persistent hotspots?", "What about Indian Punjab in the same window?"]}
+
+
+# ── Tool 15d: aq_fire_hotspots ───────────────────────────────────────────
+
+
+async def aq_fire_hotspots(
+    ctx: RunContext[CopilotSession],
+    area: str = "Pakistan",
+    date: str = "",
+    end_date: str = "",
+    group: str = "cluster",
+    min_days: int = 10,
+    radius_km: float = 0.0,
+) -> dict:
+    """Where the fires are: same-day clusters (~2 km cells merged) with FRP, extent, district and country;
+    a district league table; or persistent thermal sources (cells burning on >= min_days of the last 30
+    days: kilns, flares, landfills, industry rather than field burns). The area is a region (as in
+    aq_fire_trends) or a city name with radius_km.
+
+    Args:
+        area: Region name, or a city name (then radius_km applies, default 50).
+        date: Start Pakistan day (YYYY-MM-DD); defaults to the active date. Ignored for group=persistent.
+        end_date: End day (YYYY-MM-DD); defaults to the start day (persistent: the end of the 30-day window).
+        group: cluster | district | persistent.
+        min_days: For persistent: minimum active days out of 30 (default 10).
+        radius_km: Radius when area is a city (default 50).
+    """
+    from app.services.copilot.station_queries import _city_centroid, resolve_city
+    from app.services.fire_analytics import fire_hotspots, parse_day, resolve_region
+
+    dt = date or _effective_date(ctx)
+    start = parse_day(dt)
+    end = parse_day(end_date) if end_date else start
+    if start is None or (end_date and end is None):
+        return {"date": dt, "data": {"message": "dates must be YYYY-MM-DD"}, "followups": []}
+    resolved, _, _ = resolve_region(area)
+    center = None
+    focus_city = None
+    if resolved is None:
+        db = await _get_db()
+        try:
+            match, cands = await resolve_city(db, area)
+            if cands:
+                return {"date": dt, "data": {"message": f"'{area}' matches several cities: {', '.join(c.name for c in cands)}. Which one?"}, "followups": []}
+            if match is None:
+                return {"date": dt, "data": {"message": f"'{area}' is neither a known region nor an active Pakistan city."}, "followups": []}
+            lat, lon = await _city_centroid(db, match)
+        finally:
+            await db.close()
+        if lat is None:
+            return {"date": dt, "data": {"message": f"{match.name} has no coordinates in the registry."}, "followups": []}
+        center, focus_city = (lat, lon, match.name), match.name
+    data = fire_hotspots(region=None if center else area, center=center, radius_km=radius_km or 50.0, start=start, end=end,
+                         group=group, min_days=min_days)
+    _update_session(ctx, tool="aq_fire_hotspots", focus_type="city" if focus_city else "region", focused_city=focus_city,
+                    historical_date=end.isoformat() if end else dt)
+    return {"date": dt, "data": data, "basis": _fire_basis("deduplicated VIIRS fires on a 0.02° grid from the aggregate store and the day files"),
+            "followups": ["What is near that fire?", "How does this compare with earlier years?", "Which of these are upwind of Lahore?"]}
 
 
 # ── Tool 16: aq_trajectory ───────────────────────────────────────────────

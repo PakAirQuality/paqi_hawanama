@@ -2428,125 +2428,16 @@ async def get_fire_activity(
     db: AsyncSession | None = None,
     radius_km: float = 50.0,
 ) -> dict:
-    """FIRMS fire detection summary for a specific date, filtered to Pakistan.
+    """FIRMS fire summary for one Pakistan day; delegates to fire_analytics (a city never gets national totals)."""
+    from app.services.fire_analytics import fire_activity, parse_day
 
-    Reads from archived GCS CSVs. If city specified, filters to radius_km.
-    """
-    from app.services.geo_utils import (
-        load_firms_csv_from_gcs,
-        parse_firms_csv_pakistan,
-        resolve_city_centroid,
-        haversine_km,
-    )
-
-    csv_text, actual_date = load_firms_csv_from_gcs(date)
-    if not csv_text:
-        return _make_envelope(
-            date,
-            {
-                "date_requested": date,
-                "date_used": None,
-                "total_fires": 0,
-                "high_confidence": 0,
-                "message": f"No FIRMS fire detections stored for {date} or the two days before it; say so rather than inferring fire activity.",
-            },
-            tool="aq_fire_activity",
-            target=city or "national",
-            basis={"description": "No FIRMS data in archive", "sources": []},
-        )
-
-    fires = parse_firms_csv_pakistan(csv_text)
-
-    # Filter by city proximity if requested
-    city_centroid = None
-    if city and db:
-        city_centroid = await resolve_city_centroid(db, city)
-        if city_centroid:
-            clat, clon = city_centroid
-            fires = [
-                f for f in fires
-                if haversine_km(clat, clon, f["latitude"], f["longitude"]) <= radius_km
-            ]
-
-    # Compute summary stats
-    total = len(fires)
-    high_conf = sum(
-        1 for f in fires if f["confidence"].lower() in ("h", "high")
-    )
-    frp_values = [f["frp"] for f in fires if f["frp"] > 0]
-    frp_stats = {
-        "mean": _safe_round(sum(frp_values) / max(len(frp_values), 1)),
-        "max": _safe_round(max(frp_values)) if frp_values else 0,
-        "total": _safe_round(sum(frp_values)),
-    }
-
-    # Cluster fires by nearest city (for national view)
-    city_clusters = []
-    if not city and db:
-        # Get known city centroids
-        city_rows = await db.execute(text("""
-            SELECT c.name, AVG(s.lat) AS lat, AVG(s.lon) AS lon
-            FROM stations s
-            JOIN cities c ON s.city_id = c.id
-            LEFT JOIN countries co ON s.country_id = co.id
-            WHERE s.active = true AND LOWER(co.name) = 'pakistan'
-              AND s.lat IS NOT NULL AND s.lon IS NOT NULL
-            GROUP BY c.name
-        """))
-        known_cities = [
-            {"name": r["name"], "lat": float(r["lat"]), "lon": float(r["lon"])}
-            for r in city_rows.mappings().all()
-        ]
-        # Assign fires to nearest city within 50km
-        cluster_counts: dict[str, int] = {}
-        for f in fires:
-            best_city, best_dist = None, 50.0
-            for kc in known_cities:
-                d = haversine_km(kc["lat"], kc["lon"], f["latitude"], f["longitude"])
-                if d < best_dist:
-                    best_city, best_dist = kc["name"], d
-            if best_city:
-                cluster_counts[best_city] = cluster_counts.get(best_city, 0) + 1
-        city_clusters = sorted(
-            [{"city": k, "fire_count": v} for k, v in cluster_counts.items()],
-            key=lambda x: x["fire_count"],
-            reverse=True,
-        )[:10]
-
-    data = {
-        "date_requested": date,
-        "date_used": actual_date,
-        "scope": city or "national",
-        "total_fires": total,
-        "high_confidence": high_conf,
-        "frp_stats": frp_stats,
-    }
-    if actual_date != date:
-        data["note"] = (f"No detections stored for {date}; these are the latest available, for {actual_date}. "
-                        "Tell the user which day the fire data is from.")
-    if city_clusters:
-        data["city_clusters"] = city_clusters
-    if city and city_centroid:
-        data["city_filter"] = {"city": city, "radius_km": radius_km}
-
-    followups = []
-    if city:
-        followups.append(f"What was the air quality in {city} on {date}?")
-    else:
-        if city_clusters:
-            followups.append(f"Tell me about fires near {city_clusters[0]['city']}")
-        followups.append(f"What was the air quality on {date}?")
-
+    day = parse_day(date)
+    if day is None:
+        return _make_envelope(date, {"message": "date must be YYYY-MM-DD"}, tool="aq_fire_activity", target=city or "national")
+    data = await fire_activity(db, day, city, radius_km=radius_km)
     return _make_envelope(
-        date, data,
-        followups=followups,
-        provenance="firms_gcs_archive",
-        tool="aq_fire_activity",
-        target=city or "national",
-        basis={
-            "description": f"VIIRS fire detections for {actual_date} (filtered to Pakistan)",
-            "sources": ["firms_viirs_archive"],
-            "fire_date": actual_date,
-            "limitations": ["FIRMS has ~12h latency; data may lag by 1-2 days for recent dates"],
-        },
+        date, data, provenance="firms_gcs_archive", tool="aq_fire_activity", target=city or "national",
+        basis={"description": f"deduplicated VIIRS fire detections for the Pakistan day {date}",
+               "sources": ["firms_viirs_archive", "fire_aggregate_store"],
+               "limitations": ["FIRMS NRT lags 3–12 h", "fire counts and FRP do not measure a contribution to PM2.5"]},
     )

@@ -1,0 +1,6 @@
+How many fires were detected in Pakistan yesterday, and how many of them were across the border in Indian Punjab?
+Which fires were upwind of Lahore yesterday, and how far away were they?
+How does this year's October–November fire season in Indian Punjab compare with 2020–2025?
+Which districts of Punjab have had the most fires in the last two weeks?
+Where are the persistent hotspots in Sindh this month — anything that looks like kilns or flares rather than field burning?
+Show me the biggest fire clusters within 100 km of Faisalabad on 2026-11-03.

@@ -172,13 +172,7 @@ async def get_trajectory_for_copilot(
 
     Returns a dict with status, dominant corridor, and optional fire intersections.
     """
-    from app.services.geo_utils import (
-        resolve_city_centroid,
-        load_firms_csv_from_gcs,
-        parse_firms_csv_pakistan,
-        haversine_km,
-    )
-    import math
+    from app.services.geo_utils import resolve_city_centroid
 
     # 1. Check GCS cache
     cached = load_trajectory_from_gcs(city_name, date_str)
@@ -198,85 +192,42 @@ async def get_trajectory_for_copilot(
 
     city_lat, city_lon = centroid
 
-    # 3. Wind-based corridor estimation from station readings
+    # 3. Wind-based corridor estimation: speed-weighted vector mean of the city's station winds
+    #    over the Pakistan day (wind_dir_deg is the meteorological "from" direction, so the fires
+    #    that can reach the city lie *at* that bearing — the old code added 180° and looked downwind).
+    from app.services import fire_regions as fr
+    from app.services.fire_aggregates import agg_store
+    from app.services.fire_analytics import station_wind, parse_day
     from sqlalchemy import text as sa_text
 
-    wind_result = await db.execute(sa_text("""
-        SELECT r.wind_dir_deg, r.wind_speed_ms
-        FROM readings r
-        JOIN stations s ON r.scope_key = s.station_id
-        LEFT JOIN cities c ON s.city_id = c.id
-        WHERE r.scope_type = 'station'
-          AND r.ts_utc >= :start AND r.ts_utc <= :end
-          AND r.wind_dir_deg IS NOT NULL
-          AND r.wind_speed_ms IS NOT NULL
-          AND s.active = true
-          AND LOWER(c.name) = LOWER(:city)
-    """), {
-        "start": f"{date_str} 00:00:00",
-        "end": f"{date_str} 23:59:59",
-        "city": city_name,
-    })
-    wind_rows = wind_result.mappings().all()
-
-    if not wind_rows:
+    day = parse_day(date_str)
+    city_id = (await db.execute(sa_text("SELECT id FROM cities WHERE LOWER(name) = LOWER(:city) ORDER BY active DESC LIMIT 1"),
+                                {"city": city_name})).scalar() if day else None
+    wind = await station_wind(db, int(city_id), day) if city_id is not None else None
+    if wind is None or wind.from_deg is None:
         return {
             "status": "unavailable",
             "city": city_name,
             "date": date_str,
-            "reason": "No wind observations available for this city on this date.",
+            "reason": (wind.note if wind else "No wind observations available for this city on this date."),
         }
+    upwind_dir = wind.from_deg
+    upwind_label = fr.compass(upwind_dir)
 
-    # Compute vector-average wind direction
-    sin_sum = sum(math.sin(math.radians(r["wind_dir_deg"])) for r in wind_rows)
-    cos_sum = sum(math.cos(math.radians(r["wind_dir_deg"])) for r in wind_rows)
-    avg_dir = math.degrees(math.atan2(sin_sum, cos_sum)) % 360
-    avg_speed = sum(r["wind_speed_ms"] for r in wind_rows) / len(wind_rows)
-
-    # Upwind direction (opposite of wind direction — wind blows FROM upwind)
-    upwind_dir = (avg_dir + 180) % 360
-
-    # Map to compass label
-    _DIR_LABELS = [
-        (22.5, "N"), (67.5, "NE"), (112.5, "E"), (157.5, "SE"),
-        (202.5, "S"), (247.5, "SW"), (292.5, "W"), (337.5, "NW"), (360.1, "N"),
-    ]
-    upwind_label = "N"
-    for threshold, label in _DIR_LABELS:
-        if upwind_dir < threshold:
-            upwind_label = label
-            break
-
-    # 4. Check for fires upwind (within 500km in upwind semicircle)
+    # 4. Fires upwind (5–500 km, within ±60° of the wind's "from" bearing), cross-border included
     fire_intersections = []
-    csv_text, _ = load_firms_csv_from_gcs(date_str)
-    if csv_text:
-        fires = parse_firms_csv_pakistan(csv_text)
-        for f in fires:
-            dist = haversine_km(city_lat, city_lon, f["latitude"], f["longitude"])
-            if dist > 500 or dist < 5:
-                continue
-            # Bearing from city to fire
-            dlat = math.radians(f["latitude"] - city_lat)
-            dlon = math.radians(f["longitude"] - city_lon)
-            x = math.sin(dlon) * math.cos(math.radians(f["latitude"]))
-            y = (math.cos(math.radians(city_lat)) * math.sin(math.radians(f["latitude"]))
-                 - math.sin(math.radians(city_lat)) * math.cos(math.radians(f["latitude"])) * math.cos(dlon))
-            bearing = math.degrees(math.atan2(x, y)) % 360
-            # Check if fire is in upwind semicircle (±90° from upwind direction)
-            angle_diff = abs(bearing - upwind_dir)
-            if angle_diff > 180:
-                angle_diff = 360 - angle_diff
-            if angle_diff <= 90:
-                fire_intersections.append({
-                    "lat": f["latitude"],
-                    "lon": f["longitude"],
-                    "frp": f["frp"],
-                    "distance_km": round(dist, 1),
-                    "bearing_from_city": round(bearing, 0),
-                })
-
-    # Sort by distance, keep top 10
+    built = agg_store().day_from_csv(day)
+    if built is not None and not built.detections.empty:
+        det = built.detections[built.detections["is_primary"] & built.detections["grp_hn"]]
+        km = fr.haversine_km_vec(city_lat, city_lon, det["lat"].to_numpy(), det["lon"].to_numpy())
+        brg = fr.bearing_deg(city_lat, city_lon, det["lat"].to_numpy(), det["lon"].to_numpy())
+        keep = (km >= 5) & (km <= 500) & fr.in_cone(brg, upwind_dir)
+        for (_, f), d, b in zip(det[keep].iterrows(), km[keep], brg[keep]):
+            fire_intersections.append({
+                "lat": round(float(f["lat"]), 4), "lon": round(float(f["lon"]), 4), "frp": round(float(f["frp"]), 1),
+                "distance_km": round(float(d), 1), "bearing_from_city": round(float(b), 0),
+                "country": fr.COUNTRY_LABELS.get(f["country"], f["country"]), "district": f["district"],
+            })
     fire_intersections.sort(key=lambda x: x["distance_km"])
     fire_intersections = fire_intersections[:10]
 
@@ -285,21 +236,22 @@ async def get_trajectory_for_copilot(
         "source": "wind_observation_fallback",
         "city": city_name,
         "date": date_str,
-        "wind_observations": len(wind_rows),
-        "dominant_wind_dir": round(avg_dir, 0),
-        "avg_wind_speed_ms": round(avg_speed, 1),
+        "wind_observations": wind.n,
+        "wind_from_deg": round(upwind_dir, 0),
+        "dominant_wind_dir": round(upwind_dir, 0),
+        "avg_wind_speed_ms": round(wind.speed_ms or 0.0, 1),
         "upwind_corridor": upwind_label,
         "corridor_description": (
             f"Air mass arriving from the {upwind_label} "
-            f"(avg wind {round(avg_speed * 3.6, 1)} km/h from {round(avg_dir, 0)}°)"
+            f"(wind from {round(upwind_dir, 0)}°, {round((wind.speed_ms or 0.0) * 3.6, 1)} km/h, speed-weighted station mean over the Pakistan day)"
         ),
         "fire_intersections_upwind": fire_intersections,
         "n_fires_upwind": len(fire_intersections),
         "confidence": "low",
         "caveat": (
-            "This is a wind-based estimate from surface station observations, "
-            "not a full HYSPLIT back-trajectory. Upper-level transport patterns "
-            "may differ from surface wind."
+            "This is a wind-based estimate from surface station observations within a ±60° cone, "
+            "not a full HYSPLIT back-trajectory. Upper-level transport patterns may differ from surface wind. "
+            "Fires across the border are included and labelled by country."
         ),
     }
 
