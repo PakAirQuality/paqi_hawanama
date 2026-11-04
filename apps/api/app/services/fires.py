@@ -45,8 +45,10 @@ Operations runbook
   satellite is retired, change ``DEFAULT_SOURCES``/``sources_for`` and the test
   ``test_sources_drop_snpp_after_its_end_date``; a source that keeps returning errors makes
   every run ``partial`` and shows as such on the dashboard.
-* Backfill: ``POST /fires/ingest?window_days=10&date=YYYY-MM-DD`` refetches a past window
-  (the FIRMS area API serves at most 10 days per request).
+* Backfill: ``POST /fires/ingest?window_days=5&date=YYYY-MM-DD`` refetches a past window
+  (the FIRMS area API serves at most 5 days per request; the first Pakistan day of a window
+  is skipped, so chain windows ending every 4 days). Windows older than NRT_RETENTION_DAYS
+  are fetched from the standard-processing products, which lag about three months.
 """
 
 from __future__ import annotations
@@ -65,17 +67,24 @@ logger = logging.getLogger(__name__)
 PK_TZ = ZoneInfo("Asia/Karachi")
 FIRMS_API_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
 FIRMS_KEY_STATUS_URL = "https://firms.modaps.eosdis.nasa.gov/mapserver/mapkey_status/"
-FIRMS_MAX_WINDOW_DAYS = 10  # the area API serves at most 10 days per request
+FIRMS_MAX_WINDOW_DAYS = 5   # the area API serves at most 5 days per request ("Invalid day range. Expects [1..5]", 2026-11)
+NRT_RETENTION_DAYS = 90     # NRT products keep roughly the last three months; older days come from the SP products
 RETRY_DELAY_S = 5.0
 # South Asia bounding box (west,south,east,north): Pakistan plus neighbours for context
 FIRMS_BBOX = "60,23,78,37"
 SNPP_END = date(2026, 11, 1)  # NOAA ends Suomi NPP product delivery 2026-11-01 13:00 UTC
 DEFAULT_SOURCES = ("VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT")
+SP_SOURCES = ("VIIRS_NOAA20_SP", "VIIRS_NOAA21_SP", "VIIRS_SNPP_SP")   # standard processing: lags ~3 months, no retention limit
 FIELDNAMES = ["latitude", "longitude", "frp", "confidence", "acq_date", "acq_time", "acq_datetime_utc", "satellite"]
 LAYER_NAME = "Satellite fire detections"
 
 
-def sources_for(day: date) -> List[str]:
+def sources_for(day: date, today: Optional[date] = None) -> List[str]:
+    """Products to request for a window starting on ``day``: NRT for the last NRT_RETENTION_DAYS
+    (Suomi NPP NRT until SNPP_END), the standard-processing products for older days."""
+    today = today or datetime.now(timezone.utc).date()
+    if day < today - timedelta(days=NRT_RETENTION_DAYS):
+        return list(SP_SOURCES)
     srcs = list(DEFAULT_SOURCES)
     if day < SNPP_END:
         srcs.append("VIIRS_SNPP_NRT")
@@ -257,6 +266,7 @@ async def ingest_window(
     now_utc: Optional[datetime] = None,
     window_days: int = 2,
     sources: Optional[List[str]] = None,
+    real_today: Optional[date] = None,
 ) -> IngestOutcome:
     """Fetch the last ``window_days`` UTC days (ending today) from every source, re-key by
     Pakistan acquisition day and (re)write every day file in the window plus its sidecar."""
@@ -264,7 +274,7 @@ async def ingest_window(
     window_days = max(1, min(int(window_days), FIRMS_MAX_WINDOW_DAYS))
     today_utc = now_utc.date()
     start_utc = today_utc - timedelta(days=window_days - 1)
-    srcs = sources or sources_for(today_utc)
+    srcs = sources or sources_for(start_utc, real_today)      # real_today: the clock, not the as-of date of a backfill
     outcome = IngestOutcome()
 
     outcome.key = await check_key(http, key)
