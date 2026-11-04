@@ -87,6 +87,7 @@ from the monitoring network — these show real current conditions, not predicti
 | "Fires near / around / upwind of Lahore?" / "is smoke heading to X" / fires by distance from a city | `aq_fire_exposure` (city required; 50/100/200 km rings by country, wind source named, ±60° upwind cone, nearest fire, transport time) |
 | "Fire trend" / "how does this season compare" / "fires in Indian Punjab this week" / "fires in October vs last year" / season-to-date | `aq_fire_trends` (region = Pakistan, province, district, Indian Punjab, Haryana; season="rice" or "wheat"; compares with 2020–2025) |
 | "Where are the fires / biggest fire clusters" / "which districts are burning" / "persistent hotspots / kilns / flares" | `aq_fire_hotspots` (group=cluster, district or persistent; area = region or city with radius_km) |
+| "Are fires driving / affecting X's PM2.5?" / "is the smoke reaching X" over days or weeks / fire–pollution link | `aq_fire_pm25_link` (city required; lagged correlations and fire-influenced days; answer "consistent with", never "caused") |
 | "Where did the air come from?" / trajectory / transport | `aq_trajectory` (city required) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
@@ -157,8 +158,9 @@ Say which when the question is about smoke reaching a city.
 - Never say fires caused or drove PM2.5. Say the pattern is "consistent with smoke transport" \
 and name the other candidates (stagnation, local sources). FRP is burning intensity, not PM2.5.
 - Comparisons with earlier years: state the window ("1–4 Nov in each year"), the reference \
-years with data, and "higher than k of n reference years"; mention satellite-roster and thin-day \
-caveats when the tool returns them.
+years with data, and the tool's rank_text ("lower than every reference year", "higher than 3 \
+of the 6 reference years"); mention satellite-roster, thin-day and missing-day caveats when the \
+tool returns them.
 
 ## Critical: data coverage and availability
 - The monitoring database has **multi-year historical data** — do NOT assume any retention limit.
@@ -347,6 +349,7 @@ def get_agent(model_name: str | None = None):
         tools.aq_fire_exposure,
         tools.aq_fire_trends,
         tools.aq_fire_hotspots,
+        tools.aq_fire_pm25_link,
         tools.aq_trajectory,
         tools.aq_station_inventory,
         tools.aq_nearest_stations,

@@ -1846,7 +1846,6 @@ def _date_to_compact(date_str: str) -> str:
 
 
 # ── Pakistan boundary — shared utility ──
-from app.services.geo_utils import point_in_pakistan as _point_in_pakistan
 
 
 def _compute_tif_stats(bucket_name: str, blob_path: str) -> Optional[Dict[str, float]]:
@@ -2029,21 +2028,29 @@ def _build_brief_context(
     else:
         enhanced_mean = enhanced_bias = "unavailable"
 
-    # ── FIRMS fires (Pakistan only — exact boundary) ──
+    # ── FIRMS fires: deduplicated high/nominal fires, Pakistan and the cross-border belt ──
     if fires_csv and fires_csv.strip():
-        import csv
-        import io
-        reader = csv.DictReader(io.StringIO(fires_csv))
-        fire_rows = [
-            r for r in reader
-            if _point_in_pakistan(float(r.get("latitude", 0)), float(r.get("longitude", 0)))
-        ]
-        fire_count = len(fire_rows)
-        if fire_count > 0:
-            high_conf = sum(1 for r in fire_rows if r.get("confidence", "").lower() in ("high", "h"))
-            fires_text = f"{fire_count} VIIRS fire detections in Pakistan ({high_conf} high-confidence)."
-        else:
-            fires_text = "No fire detections in Pakistan."
+        from datetime import date as _date
+        from app.services.fire_aggregates import build_day
+        try:
+            built = build_day(_date.fromisoformat(fires_date or date), fires_csv, None)
+            reg = built.regions.set_index(["region_kind", "region"])
+            def _n(kind, name):
+                return int(reg.loc[(kind, name)]["n_dedup_hn"]) if (kind, name) in reg.index else 0
+            pk, ind = _n("country", "Pakistan"), _n("country", "India (Punjab+Haryana)")
+            pk_high = int(reg.loc[("country", "Pakistan")]["n_high"]) if ("country", "Pakistan") in reg.index else 0
+            if pk > 0 or ind > 0:
+                fires_text = (f"{pk} deduplicated VIIRS fires in Pakistan ({pk_high} high-confidence detections) and "
+                              f"{ind} in Indian Punjab and Haryana.")
+                dsel = reg.loc["district"] if "district" in reg.index.get_level_values(0) else None
+                if dsel is not None and len(dsel):
+                    top = dsel["n_dedup_hn"].sort_values(ascending=False).head(3)
+                    fires_text += " Most in " + ", ".join(f"{k} ({int(v)})" for k, v in top.items() if v > 0) + "."
+            else:
+                fires_text = "No fire detections in Pakistan or the cross-border belt."
+        except Exception as exc:  # noqa: BLE001 — the brief must not fail on fire parsing
+            logger.warning("Brief fire summary failed: %s", exc)
+            fires_text = "FIRMS fire data could not be summarised for this date."
         if fires_date and date and fires_date != date:
             fires_text += f" (Detections are for {fires_date}, the latest day stored; none stored for {date}.)"
     else:

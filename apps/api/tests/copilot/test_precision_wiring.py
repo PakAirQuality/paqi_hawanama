@@ -84,14 +84,15 @@ async def test_fire_tools_have_defaulted_schemas_survive_a_db_failure_and_are_ro
         raise RuntimeError("no database in tests")
     monkeypatch.setattr(tools, "_get_db", broken_db)
     agent = Agent(TestModel(), deps_type=CopilotSession)
-    for fn in (tools.aq_fire_exposure, tools.aq_fire_trends, tools.aq_fire_hotspots):
+    for fn in (tools.aq_fire_exposure, tools.aq_fire_trends, tools.aq_fire_hotspots, tools.aq_fire_pm25_link):
         agent.tool(agent_mod._safe_tool(fn))
     schemas = {n: t.function_schema.json_schema for n, t in agent._function_toolset.tools.items()}
     assert set(schemas["aq_fire_exposure"]["properties"]) == {"city", "date", "radius_km"}
     assert set(schemas["aq_fire_trends"]["properties"]) == {"region", "start_date", "end_date", "season", "compare_years"}
     assert set(schemas["aq_fire_hotspots"]["properties"]) == {"area", "date", "end_date", "group", "min_days", "radius_km"}
+    assert set(schemas["aq_fire_pm25_link"]["properties"]) == {"city", "start_date", "end_date"}
     assert all(s.get("required", []) == [] for s in schemas.values())
     p = agent_mod.SYSTEM_PROMPT
-    assert "aq_fire_exposure" in p and "aq_fire_trends" in p and "aq_fire_hotspots" in p and "## Fire wording" in p
+    assert "aq_fire_exposure" in p and "aq_fire_trends" in p and "aq_fire_hotspots" in p and "aq_fire_pm25_link" in p and "## Fire wording" in p
     assert "consistent with smoke transport" in p and "Never say fires caused" in p
     assert tools.aq_fire_exposure in agent_mod._TOOL_FUNCTIONS if hasattr(agent_mod, "_TOOL_FUNCTIONS") else True

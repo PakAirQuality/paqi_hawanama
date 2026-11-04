@@ -4,6 +4,7 @@ import math
 from datetime import date, timedelta
 from types import SimpleNamespace as NS
 
+import numpy as np
 import pandas as pd
 import pytest
 
@@ -96,6 +97,8 @@ class FakeDB:
             return NS(fetchall=lambda: self.wind_rows)
         if "AVG(s.lat) AS lat" in sql:
             return NS(fetchone=lambda: NS(lat=None, lon=None))
+        if "AT TIME ZONE 'Asia/Karachi')::date AS d" in sql:
+            return NS(fetchall=lambda: [])                       # no station wind unless a subclass provides it
         raise AssertionError("unexpected SQL: " + sql[:120])
 
 
@@ -175,7 +178,13 @@ def test_trends_daily_rows_summary_country_share_and_comparison():
     c = out["comparison"]
     assert c["window"] == "11-01 to 11-03 in each year" and [y["fires"] for y in c["years"] if y["fires"] is not None] == [15, 27]
     assert c["reference_mean"] == 21.0 and c["higher_than_n_of"] == [0, 2] and c["ratio_to_mean"] == pytest.approx(3 / 21, abs=0.01)
+    assert c["days_compared"] == 3 and "note" not in c and c["rank_text"] == "lower than every reference year"
     assert any("satellite roster" in cv for cv in out["caveats"])
+    # a gap in the current window → reference years are summed over the same calendar days only
+    gap = x.fire_trends("Pakistan", date(2026, 10, 30), D3, store=store, today=D3)
+    cg = gap["comparison"]
+    assert cg["days_compared"] == 3 and "no 2026 file" in cg["note"] and [y["fires"] for y in cg["years"] if y["fires"] is not None] == [15, 27]
+    assert gap["summary"]["days_missing"] == 2
 
 
 def test_trends_regions_seasons_weeks_and_messages():
@@ -244,3 +253,59 @@ async def test_fire_activity_city_is_exposure_and_national_is_trends():
     assert nat["summary"]["fires"] == 1 and nat["summary"]["by_country"]["India (Punjab+Haryana)"] == 2 and nat["passes"]["status"] == "ok"
     missing = await x.fire_activity(FakeDB(), date(2026, 10, 20), None, store=store)
     assert "No fire file" in missing["message"] and missing["summary"]["days_missing"] == 1
+
+
+# ── fire vs PM2.5 linkage ─────────────────────────────────────────────────────
+
+def test_correlations_rank_ties_and_small_n():
+    c = x.correlations([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], [1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6])
+    assert c["n"] == 11 and c["spearman"] > 0.95 and c["strength"] == "strong"
+    assert x.correlations([1, 2, 3], [1, 2, 3])["strength"] == "insufficient"
+    assert x.correlations([1] * 12, list(range(12)))["strength"] == "undefined"
+    assert x._rank(np.array([3.0, 1.0, 3.0, 2.0])).tolist() == [3.5, 1.0, 3.5, 2.0]
+
+
+async def test_fire_pm25_link_lag_one_series_flags_and_wording(monkeypatch):
+    """Fires upwind on day d, PM2.5 jumps on day d+1: the lag-1 correlation is the strongest and the jump days are flagged."""
+    from app.services.copilot import station_queries as sq
+    days = [date(2026, 10, 1) + timedelta(days=i) for i in range(30)]
+    fire_days = {days[9], days[19]}                      # two burning days (upwind, NW)
+    builds = {}
+    for d in days:
+        rows = [(A, 300.0, "h", "N20", "0815"), (A, 280.0, "h", "N21", "0905")] if d in fire_days else [(B, 5.0, "n", "N20", "0815")]
+        builds[d] = fa.build_day(d, _csv(d, rows), META)
+    store = FakeStore(builds)
+    pm = {d: 60.0 for d in days}
+    pm[days[10]] = 110.0; pm[days[20]] = 125.0            # the day after each burn
+    pm[days[25]] = 95.0                                    # a rise with no upwind fire → not flagged
+
+    async def fake_period_stats(db, *, entity, name, start, end, bucket, same_calendar_date=False):
+        return {"statistic": "reporting-station mean of station daily means",
+                "rows": [{"bucket": d.isoformat(), "mean": pm[d], "n_stations": 20} for d in days if start <= d.isoformat() <= end]}
+    monkeypatch.setattr(sq, "period_stats", fake_period_stats)
+
+    class WindDB(FakeDB):
+        async def execute(self, stmt, params=None):
+            sql = " ".join(str(stmt).split())
+            if "AT TIME ZONE 'Asia/Karachi')::date AS d" in sql:
+                return NS(fetchall=lambda: [NS(d=d, wd=315.0, ws=2.0) for d in days])        # NW wind every day
+            return await super().execute(stmt, params)
+
+    out = await x.fire_pm25_link(WindDB(), "Lahore", days[0], days[-1], store=store, today=days[-1])
+    assert out["city"] == "Lahore" and out["days"] == 30 and out["days_with_pm25"] == 30 and out["days_with_upwind"] == 30
+    rows = {r["day"]: r for r in out["rows"]}
+    assert rows[days[9].isoformat()]["frp_upwind"] == 300.0 and rows[days[9].isoformat()]["fires_100"] == 1       # deduplicated, max FRP
+    assert rows[days[0].isoformat()]["frp_upwind"] == 0.0 and rows[days[0].isoformat()]["frp_200"] == 5.0            # B is SE, not upwind
+    assert out["fire_influenced_days"] == [days[10].isoformat(), days[20].isoformat()] and rows[days[10].isoformat()]["pm25_prior3"] == 60.0
+    c = out["correlations"]["frp_upwind"]
+    assert c["lag1"]["spearman"] > c["lag0"]["spearman"] and c["lag1"]["strength"] in ("moderate", "strong") and c["lag1"]["n"] == 29
+    assert "consistent with smoke transport" in out["summary"] and "caused" not in out["summary"] and "lag1" in out["summary"]
+    assert out["upwind_p75_mw"] == 0.0 and out["definitions"]["not_causation"] and out["rows_truncated"] is False
+    # guards
+    assert "after end" in (await x.fire_pm25_link(WindDB(), "Lahore", days[5], days[0], store=store, today=days[-1]))["message"]
+    assert "limited to 120" in (await x.fire_pm25_link(WindDB(), "Lahore", date(2026, 1, 1), days[-1], store=store, today=days[-1]))["message"]
+    assert "not found" in (await x.fire_pm25_link(WindDB(), "Atlantis", days[0], days[-1], store=store, today=days[-1]))["message"]
+    # no wind at all → upwind undefined, the ring series still correlates, and the caveat says so
+    out2 = await x.fire_pm25_link(FakeDB(), "Lahore", days[0], days[-1], store=store, today=days[-1])
+    assert out2["days_with_upwind"] == 0 and out2["fire_influenced_days"] == [] and out2["correlations"]["frp_200"]["lag1"]["n"] == 29
+    assert any("Upwind FRP is defined on 0" in cv for cv in out2["caveats"])

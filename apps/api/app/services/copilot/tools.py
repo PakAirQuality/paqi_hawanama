@@ -1053,6 +1053,48 @@ async def aq_fire_hotspots(
             "followups": ["What is near that fire?", "How does this compare with earlier years?", "Which of these are upwind of Lahore?"]}
 
 
+# ── Tool 15e: aq_fire_pm25_link ──────────────────────────────────────────
+
+
+async def aq_fire_pm25_link(
+    ctx: RunContext[CopilotSession],
+    city: str = "",
+    start_date: str = "",
+    end_date: str = "",
+) -> dict:
+    """Is fire smoke consistent with a city's PM2.5? Daily upwind fire FRP (±60° cone on that day's
+    station wind, 200 km) and whole-ring FRP against the city's daily PM2.5 over the window, Pearson and
+    Spearman at lags 0/1/2 days, and "fire-influenced days" (upwind FRP above the window's 75th percentile
+    and PM2.5 ≥ 20 % and ≥ 10 µg/m³ above the prior three days). Never an attribution: report as
+    "consistent with smoke transport" and name stagnation and local sources as alternatives.
+
+    Args:
+        city: City name (required).
+        start_date: YYYY-MM-DD; default 60 days before end_date.
+        end_date: YYYY-MM-DD; default today. Window ≤ 120 days.
+    """
+    from app.services.fire_analytics import fire_pm25_link, parse_day
+
+    if not city.strip():
+        return {"date": end_date, "data": {"message": "Which city? The fire–PM2.5 linkage needs a city name."}, "followups": []}
+    start = parse_day(start_date) if start_date else None
+    end = parse_day(end_date) if end_date else None
+    if (start_date and start is None) or (end_date and end is None):
+        return {"date": end_date or start_date, "data": {"message": "dates must be YYYY-MM-DD"}, "followups": []}
+    db = await _get_db()
+    try:
+        data = await fire_pm25_link(db, city, start, end)
+    finally:
+        await db.close()
+    name = data.get("city", city)
+    _update_session(ctx, tool="aq_fire_pm25_link", focus_type="city", focused_city=name, entities=[name],
+                    historical_date=data.get("window", {}).get("end_pkt_day"))
+    return {"date": data.get("window", {}).get("end_pkt_day") or end_date, "data": data,
+            "basis": _fire_basis(f"daily upwind fire FRP vs reporting-station PM2.5 for {name}", ["station_wind_observations", "readings"]),
+            "followups": [f"Which fires were upwind of {name} on the flagged days?", f"What else was driving PM2.5 in {name}?",
+                          "How does this fire season compare with earlier years?"]}
+
+
 # ── Tool 16: aq_trajectory ───────────────────────────────────────────────
 
 
