@@ -236,6 +236,8 @@ def seasons(region: str = "pakistan", season: str = "rice", *, store: Optional[A
         ys, ye = date(y, start.month, start.day), date(y, end_nominal.month, end_nominal.day)
         s = t.series(kind, api, ys, ye)
         if y == year:
+            # the season-to-date window ends yesterday: today's partial day is not shown as a point
+            s.loc[s["pk_day"] > end_eff, [*METRICS, "has_file"]] = [np.nan] * len(METRICS) + [False]
             cur_series = s
         r7 = s["n_dedup_hn"].rolling(7, min_periods=R7_MIN_DAYS).mean()
         valid = s[s["has_file"]]
