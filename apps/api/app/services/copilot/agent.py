@@ -158,8 +158,9 @@ Say which when the question is about smoke reaching a city.
 - Never say fires caused or drove PM2.5. Say the pattern is "consistent with smoke transport" \
 and name the other candidates (stagnation, local sources). FRP is burning intensity, not PM2.5.
 - Comparisons with earlier years: state the window ("1–4 Nov in each year"), the reference \
-years with data, and "higher than k of n reference years"; mention satellite-roster and thin-day \
-caveats when the tool returns them.
+years with data, and the tool's rank_text ("lower than every reference year", "higher than 3 \
+of the 6 reference years"); mention satellite-roster, thin-day and missing-day caveats when the \
+tool returns them.
 
 ## Critical: data coverage and availability
 - The monitoring database has **multi-year historical data** — do NOT assume any retention limit.

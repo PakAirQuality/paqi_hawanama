@@ -532,6 +532,10 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
                 "ratio_to_mean": _r(total / float(np.mean(vals)), 2) if np.mean(vals) > 0 else None,
                 "higher_than_n_of": [sum(1 for v in vals if total > v), len(vals)],
             })
+            k, n = comparison["higher_than_n_of"]
+            comparison["rank_text"] = ("higher than every reference year" if k == n else
+                                       "lower than every reference year" if k == 0 else
+                                       f"higher than {k} of the {n} reference years")
     caveats = [FIRE_DEFINITIONS["headline_count"]]
     if any(d.year < 2026 for d in s["pk_day"]) or (comparison and ref):
         caveats.append("Archive days before the 2026 ingester are keyed by UTC date and lack pass times; the satellite roster differs by year "

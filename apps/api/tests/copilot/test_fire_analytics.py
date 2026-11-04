@@ -178,7 +178,7 @@ def test_trends_daily_rows_summary_country_share_and_comparison():
     c = out["comparison"]
     assert c["window"] == "11-01 to 11-03 in each year" and [y["fires"] for y in c["years"] if y["fires"] is not None] == [15, 27]
     assert c["reference_mean"] == 21.0 and c["higher_than_n_of"] == [0, 2] and c["ratio_to_mean"] == pytest.approx(3 / 21, abs=0.01)
-    assert c["days_compared"] == 3 and "note" not in c
+    assert c["days_compared"] == 3 and "note" not in c and c["rank_text"] == "lower than every reference year"
     assert any("satellite roster" in cv for cv in out["caveats"])
     # a gap in the current window → reference years are summed over the same calendar days only
     gap = x.fire_trends("Pakistan", date(2026, 10, 30), D3, store=store, today=D3)
