@@ -5,6 +5,7 @@ import type {
   WatchlistResponse,
   SummaryResponse,
   CurrentStation,
+  NowcastResponse,
 } from './types'
 import { filterToPakistan } from './pakistan'
 
@@ -48,6 +49,17 @@ export async function fetchAvailableDates(): Promise<{ dates: string[]; count: n
     cache: 'no-store',
   })
   if (!res.ok) throw new Error('Failed to load available forecast dates')
+  return res.json()
+}
+
+/** Latest hourly nowcast (+3/+6/+12/+24 h); null before the first cycle has been published. */
+export async function fetchNowcast(): Promise<NowcastResponse | null> {
+  const res = await fetch(`${API_BASE}/api/v1/nowcast/latest`, {
+    headers,
+    cache: 'no-store',
+  })
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error('Failed to load the nowcast')
   return res.json()
 }
 

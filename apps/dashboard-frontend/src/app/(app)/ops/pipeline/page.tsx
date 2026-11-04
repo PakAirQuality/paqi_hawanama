@@ -16,11 +16,11 @@ import { IconRail, type RailTab } from '@/components/analyst-desk/IconRail'
 import { CopilotChat } from '@/components/analyst-desk/CopilotChat'
 import type { CopilotAction } from '@/components/analyst-desk/types'
 import { LayersPanel } from '@/components/analyst-desk/LayersPanel'
-import { fetchAvailableDates, fetchCurrentStations, fetchFires, fetchForecast } from '@/components/analyst-desk/api'
+import { fetchAvailableDates, fetchCurrentStations, fetchFires, fetchForecast, fetchNowcast } from '@/components/analyst-desk/api'
 import { bandKey } from '@/lib/aqi'
 import { cityCentre } from '@/lib/chat/actions'
 import { firesShortLabel, firesStatus } from '@/lib/fires'
-import { availableLeads, daysBetween, forecastReadings, isForecastLead, latestReading, leadForDaysAhead, liveReadings, rampCount, targetDate, type ForecastLead, type FutureStep, type TimelineStep } from '@/lib/timeline'
+import { availableHours, availableLeads, daysBetween, forecastReadings, hourStep, isForecastLead, isHourStep, latestReading, leadForDaysAhead, liveReadings, nowcastAgeMin, nowcastReadings, nowcastValidTime, parseViewParam, rampCount, sameStep, stepKey, targetDate, type ForecastLead, type FutureStep, type TimelineStep } from '@/lib/timeline'
 import { loadPakBoundary, isInsidePakistan } from '@/components/analyst-desk/pakistan'
 import { useSelection } from '@/lib/selection'
 import { formatDateOnly, formatPkt, pktToday } from '@/lib/time'
@@ -108,7 +108,7 @@ export default function OpsPipelinePage() {
   const [mapKey, setMapKey] = useState(0)
   const retryMap = () => { setMapUnavailable(null); setMapKey(k => k + 1) }
 
-  // Shareable URLs: ?date=YYYY-MM-DD or ?view=today|1|2|3, &model=support_aware&layers=kilns,industry,fires
+  // Shareable URLs: ?date=YYYY-MM-DD or ?view=today|h3|h6|h12|h24|1|2|3, &model=support_aware&layers=kilns,industry,fires
   const urlApplied = useRef(false)
   useEffect(() => {
     if (urlApplied.current || typeof window === 'undefined') return
@@ -116,7 +116,9 @@ export default function OpsPipelinePage() {
     const q = new URLSearchParams(window.location.search)
     const d = q.get('date')
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setSelectedPredDate(d); setFutureStep(null) }
-    const v = q.get('view'); if (v === '1' || v === '2' || v === '3') setLinkedDaysAhead(Number(v))
+    const view = parseViewParam(q.get('view'))
+    if (view?.daysAhead) setLinkedDaysAhead(view.daysAhead)
+    else if (view?.hour) setFutureStep(hourStep(view.hour))
     const m = q.get('model'); if (m === 'support_aware' || m === 'backbone') setModel(m)
     const layers = q.get('layers')
     if (layers != null) {
@@ -186,6 +188,17 @@ export default function OpsPipelinePage() {
     return date ? daysBetween(today, date) : lead
   }
   const leads = useMemo(() => availableLeads(forecasts, today), [forecasts, today])
+
+  // The latest hourly nowcast (+3/+6/+12/+24 h), issued every 3 h; null until the first cycle is published
+  const { data: nowcastData } = useQuery({
+    queryKey: ['nowcast-latest'],
+    queryFn: fetchNowcast,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
+  })
+  const hours = useMemo(() => availableHours(nowcastData, new Date().toISOString()), [nowcastData])
+  const hourSteps = useMemo(() => hours.map(hourStep), [hours])
   useEffect(() => {
     if (linkedDaysAhead == null || !forecastData) return
     setLinkedDaysAhead(null)
@@ -197,6 +210,7 @@ export default function OpsPipelinePage() {
     const q = new URLSearchParams()
     if (futureStep === null) q.set('date', selectedPredDate)
     else if (futureStep === 'now') q.set('view', 'today')
+    else if (isHourStep(futureStep)) q.set('view', stepKey(futureStep))
     else q.set('view', String(daysAheadOf(futureStep)))
     if (model !== 'backbone') q.set('model', model)
     const industry = industryKeys.length === ALL_INDUSTRY.length ? ['industry'] : industryKeys
@@ -211,12 +225,16 @@ export default function OpsPipelinePage() {
   useEffect(() => {
     if (isForecastLead(futureStep) && forecastData && !leads.includes(futureStep)) setFutureStep('now')
   }, [futureStep, forecastData, leads])
+  useEffect(() => {
+    if (isHourStep(futureStep) && nowcastData !== undefined && !hours.includes(futureStep.h)) setFutureStep('now')
+  }, [futureStep, nowcastData, hours])
 
   const readings = useMemo<StationReading[]>(() => {
     if (futureStep === 'now') return liveReadings(liveData?.stations ?? [])
+    if (isHourStep(futureStep)) return nowcastReadings(nowcastData, futureStep.h)
     if (isForecastLead(futureStep)) return forecastReadings(forecasts, futureStep)
     return stationData?.stations ?? []
-  }, [futureStep, liveData, forecasts, stationData])
+  }, [futureStep, liveData, nowcastData, forecasts, stationData])
 
   // Grid stats for the model the map is showing (area average over the model domain)
   const { data: predictionData } = useQuery({
@@ -445,11 +463,11 @@ export default function OpsPipelinePage() {
   const currentIndex = selectedPredDate ? dates.indexOf(selectedPredDate) : -1
 
   // One timeline: past days, today, then the forecast days
-  const steps = useMemo<TimelineStep[]>(() => [...dates, 'now', ...leads], [dates, leads])
-  const stepIndex = steps.indexOf(futureStep ?? selectedPredDate ?? '')
+  const steps = useMemo<TimelineStep[]>(() => [...dates, 'now', ...hourSteps, ...leads], [dates, hourSteps, leads])
+  const stepIndex = steps.findIndex(s => sameStep(s, futureStep ?? selectedPredDate ?? ''))
   const goToStep = (step: TimelineStep | undefined) => {
     if (step === undefined) return
-    if (step === 'now' || isForecastLead(step)) { setFutureStep(step); return }
+    if (step === 'now' || isForecastLead(step) || isHourStep(step)) { setFutureStep(step); return }
     setFutureStep(null)
     setSelectedPredDate(step)
   }
@@ -466,7 +484,7 @@ export default function OpsPipelinePage() {
   }, [dates, selectedPredDate])
 
   const viewDay = futureStep === null ? selectedPredDate
-    : futureStep === 'now' ? today
+    : futureStep === 'now' || isHourStep(futureStep) ? today
     : targetDate(forecasts, futureStep)
 
   // Mirror the page's choices into the shared selection (map, cards, chat all read it)
@@ -481,23 +499,36 @@ export default function OpsPipelinePage() {
   const formatDisplayDate = (dateStr: string) => formatDateOnly(dateStr)
 
   // ── How the page words the day in view ──
-  const mode = futureStep === null ? 'day' : futureStep === 'now' ? 'now' : 'forecast'
+  const mode = futureStep === null ? 'day' : futureStep === 'now' ? 'now' : isHourStep(futureStep) ? 'nowcast' : 'forecast'
+  const hourAhead = isHourStep(futureStep) ? futureStep.h : null
+  const nowcastValid = hourAhead ? nowcastValidTime(nowcastData, hourAhead) : null
   const longDay = (d: string | null) => d ? formatDateOnly(d, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' }) : ''
   const timelineLabel = mode === 'day' ? (selectedPredDate ? formatDisplayDate(selectedPredDate) : '')
     : mode === 'now' ? 'Today'
+    : mode === 'nowcast' ? (nowcastValid ? formatPkt(nowcastValid) : `+${hourAhead} h`)
     : viewDay ? formatDateOnly(viewDay, { weekday: 'short', month: 'short', day: 'numeric' }) : ''
-  const dayLabel = mode === 'now' ? `Today, ${longDay(today)}` : mode === 'forecast' ? `Forecast for ${longDay(viewDay)}` : undefined
-  const readingLabel = mode === 'now' ? 'Latest hourly PM2.5' : mode === 'forecast' ? 'Forecast PM2.5' : 'PM2.5 daily mean'
+  const dayLabel = mode === 'now' ? `Today, ${longDay(today)}`
+    : mode === 'nowcast' ? `Nowcast for ${nowcastValid ? formatPkt(nowcastValid) : `${hourAhead} hours ahead`}`
+    : mode === 'forecast' ? `Forecast for ${longDay(viewDay)}` : undefined
+  const readingLabel = mode === 'now' ? 'Latest hourly PM2.5' : mode === 'nowcast' ? 'Nowcast hourly PM2.5' : mode === 'forecast' ? 'Forecast PM2.5' : 'PM2.5 daily mean'
 
   // Today's run lands in the afternoon, so yesterday's is normal until then; two days means one was missed
   const issueLag = forecastIssue ? daysBetween(forecastIssue, today) : 0
-  const forecastNotice = mode !== 'day' && issueLag > 1 && forecastIssue
-    ? `Forecasts last issued ${formatDateOnly(forecastIssue, { month: 'short', day: 'numeric' })}, ${issueLag} days old`
-    : null
+  // A nowcast cycle is due every 3 h; one older than 4 h means cycles were missed
+  const nowcastAge = nowcastAgeMin(nowcastData, new Date().toISOString())
+  const forecastNotice = mode === 'nowcast'
+    ? (nowcastData && nowcastAge != null && nowcastAge > 240
+      ? `Nowcast last issued ${formatPkt(nowcastData.init_time)}, ${Math.round(nowcastAge / 60)} h old`
+      : null)
+    : mode !== 'day' && issueLag > 1 && forecastIssue
+      ? `Forecasts last issued ${formatDateOnly(forecastIssue, { month: 'short', day: 'numeric' })}, ${issueLag} days old`
+      : null
 
   const lastReading = latestReading(liveData?.stations ?? [])
   const viewDetail = mode === 'now'
     ? `${lastReading ? `Latest hourly readings, last observation ${formatPkt(lastReading)}.` : 'Latest hourly readings.'}${selectedPredDate ? ` Map shading is the satellite estimate for ${formatDisplayDate(selectedPredDate)}.` : ''}`
+    : mode === 'nowcast'
+      ? `Hourly PM2.5 expected ${nowcastValid ? `at ${formatPkt(nowcastValid)}` : `${hourAhead} hours ahead`}${nowcastData ? `, issued ${formatPkt(nowcastData.init_time)}` : ''}. Stations without recent readings are estimated from nearby stations; those with none nearby are left out.`
     : mode === 'forecast' ? 'Station forecasts only: there is no satellite estimate for days ahead.' : null
 
   const fireCount = firesGeoJSON?.features?.length ?? 0
@@ -603,6 +634,7 @@ export default function OpsPipelinePage() {
             onClose={() => setRailTab(null)}
             stationCaption={readingLabel}
             stationForecast={mode === 'forecast' ? { forecasts, today, date: viewDay } : undefined}
+            stationNowcast={futureStep !== null ? nowcastData ?? undefined : undefined}
           />
         </div>
 
@@ -805,21 +837,25 @@ export default function OpsPipelinePage() {
             />
           </div>
 
-          {/* Today and the forecast days */}
-          <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-slate-900/[0.06] p-0.5" role="group" aria-label="Today and forecast days">
-            {(['now', ...leads] as FutureStep[]).map(step => {
-              const active = futureStep === step
+          {/* Today, the next hours (nowcast) and the forecast days */}
+          <div className="ml-auto flex shrink-0 items-center gap-0.5 rounded-full bg-slate-900/[0.06] p-0.5" role="group" aria-label="Today, the next hours and forecast days">
+            {(['now', ...hourSteps, ...leads] as FutureStep[]).map(step => {
+              const active = sameStep(futureStep, step)
               const date = isForecastLead(step) ? targetDate(forecasts, step) : null
+              const valid = isHourStep(step) ? nowcastValidTime(nowcastData, step.h) : null
+              const title = step === 'now' ? 'Latest readings'
+                : isHourStep(step) ? `Nowcast for ${valid ? formatPkt(valid) : `${step.h} hours ahead`}`
+                : `Forecast for ${longDay(date)}`
               return (
                 <button
-                  key={step}
+                  key={stepKey(step)}
                   onClick={() => goToStep(step)}
                   aria-pressed={active}
-                  aria-label={step === 'now' ? 'Today' : `Forecast for ${longDay(date)}`}
-                  title={step === 'now' ? 'Latest readings' : `Forecast for ${longDay(date)}`}
+                  aria-label={step === 'now' ? 'Today' : title}
+                  title={title}
                   className={`rounded-full px-2 py-2 text-xs font-medium tabular-nums transition-colors md:px-2.5 md:py-1 ${active ? 'bg-slate-900 text-white' : 'text-slate-700 hover:bg-slate-900/[0.06]'}`}
                 >
-                  {step === 'now' ? 'Today' : `+${daysAheadOf(step)}`}
+                  {step === 'now' ? 'Today' : isHourStep(step) ? `+${step.h}h` : `+${daysAheadOf(step)}`}
                 </button>
               )
             })}

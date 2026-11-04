@@ -25,6 +25,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 FORECAST_TASK = "daily-forecast"
+NOWCAST_TASK = "nowcast"
+# The nowcast job (every 3 h) reports through the same route with data_quality.task == "nowcast"
+_TASKS = {"nowcast": NOWCAST_TASK, "daily-forecast": FORECAST_TASK, "daily_forecast": FORECAST_TASK}
 _STATUS_MAP = {"success": "success", "degraded": "partial", "failed": "failed"}
 
 
@@ -50,10 +53,11 @@ async def post_forecast_run_status(
     from app.ingestion.runs import RunOutcome, RunRecorder, RunStatus, new_run_id, trigger_from_headers
 
     status = _STATUS_MAP.get(body.status, "failed")
+    task = _task_for(body.data_quality)
     now = datetime.now(timezone.utc)
     outcome = RunOutcome(
-        run_id=new_run_id(FORECAST_TASK),
-        task=FORECAST_TASK,
+        run_id=new_run_id(task),
+        task=task,
         provider_code="forecast",
         scope="pakistan",
         trigger=trigger_from_headers(request.headers),
@@ -64,6 +68,8 @@ async def post_forecast_run_status(
     outcome.counts.rows_written = int(body.n_stations or 0) * max(len(body.horizons), 1) if status != "failed" else 0
     outcome.details = {
         "init_date": body.init_date,
+        "init_time": (body.data_quality or {}).get("init_time"),
+        "task": task,
         "reported_status": body.status,
         "data_quality": body.data_quality,
         "horizons": body.horizons,
@@ -86,19 +92,32 @@ async def post_forecast_run_status(
     elif status == "partial":
         outcome.status = RunStatus.partial
         outcome.error_class = "degraded"
-        outcome.error_message = _degraded_reason(body.data_quality)
+        outcome.error_message = _degraded_reason(body.data_quality, task)
     else:
         outcome.status = RunStatus.success
     outcome.finished_at = now
     await recorder.finish(outcome)
 
-    logger.info("forecast run recorded: init=%s status=%s stations=%s run_id=%s",
-                body.init_date, status, body.n_stations, outcome.run_id)
-    return {"ok": True, "run_id": outcome.run_id, "status": status}
+    logger.info("%s run recorded: init=%s status=%s stations=%s run_id=%s",
+                task, body.init_date, status, body.n_stations, outcome.run_id)
+    return {"ok": True, "run_id": outcome.run_id, "status": status, "task": task}
 
 
-def _degraded_reason(dq: Dict[str, Any]) -> str:
+def _task_for(dq: Optional[Dict[str, Any]]) -> str:
+    """ops.ingest_runs task for a report: data_quality.task selects the nowcast, default daily."""
+    name = str((dq or {}).get("task") or "").strip().lower()
+    return _TASKS.get(name, FORECAST_TASK)
+
+
+def _degraded_reason(dq: Dict[str, Any], task: str = FORECAST_TASK) -> str:
     parts = []
+    if task == NOWCAST_TASK:
+        if dq.get("source_ifs") is False:
+            parts.append("ifs missing")
+        f = dq.get("forecastable_fraction")
+        if isinstance(f, (int, float)) and f < 0.3:
+            parts.append(f"forecastable fraction {f:.2f}")
+        return "; ".join(parts) or "degraded"
     for k in ("ifs", "cams", "geos_cf"):
         if dq.get(k) is False:
             parts.append(f"{k} missing")
@@ -108,11 +127,13 @@ def _degraded_reason(dq: Dict[str, Any]) -> str:
     return "; ".join(parts) or "degraded"
 
 
-@router.get("/latest", summary="Most recent daily-forecast runs")
+@router.get("/latest", summary="Most recent forecast runs (daily-forecast, or task=nowcast)")
 async def get_latest_forecast_runs(
     limit: int = Query(7, ge=1, le=60),
+    task: str = Query(FORECAST_TASK, description="daily-forecast | nowcast"),
     db: AsyncSession = Depends(get_database),
 ) -> Dict[str, Any]:
+    task = _TASKS.get(task.strip().lower(), FORECAST_TASK)
     sql = text("""
         SELECT run_id, status, started_at, finished_at, error_class, error_message,
                expected_count, details
@@ -122,9 +143,9 @@ async def get_latest_forecast_runs(
         LIMIT :limit
     """)
     try:
-        rows = (await db.execute(sql, {"task": FORECAST_TASK, "limit": limit})).fetchall()
+        rows = (await db.execute(sql, {"task": task, "limit": limit})).fetchall()
     except Exception as exc:  # ops schema missing
-        return {"runs": [], "error": str(exc)[:200]}
+        return {"runs": [], "task": task, "error": str(exc)[:200]}
     runs = []
     for r in rows:
         m = dict(r._mapping)
@@ -133,8 +154,8 @@ async def get_latest_forecast_runs(
             "run_id": m["run_id"], "status": m["status"],
             "started_at": m["started_at"].isoformat() if m.get("started_at") else None,
             "finished_at": m["finished_at"].isoformat() if m.get("finished_at") else None,
-            "init_date": d.get("init_date"), "n_stations": m.get("expected_count"),
+            "init_date": d.get("init_date"), "init_time": d.get("init_time"), "n_stations": m.get("expected_count"),
             "error_class": m.get("error_class"), "error_message": m.get("error_message"),
             "data_quality": d.get("data_quality"),
         })
-    return {"runs": runs}
+    return {"runs": runs, "task": task}

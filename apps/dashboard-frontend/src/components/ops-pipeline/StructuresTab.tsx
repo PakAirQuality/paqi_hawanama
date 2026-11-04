@@ -8,8 +8,9 @@ import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
 import { ChevronRight, ChevronLeft, ChevronDown, Search, MapPin } from 'lucide-react'
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
-import { stationForecastDays, type StationForecastDay } from '@/lib/timeline'
-import type { ForecastEntry } from '@/components/analyst-desk/types'
+import { stationForecastDays, stationNowcastPoints, type StationForecastDay } from '@/lib/timeline'
+import { formatPkt } from '@/lib/time'
+import type { ForecastEntry, NowcastResponse } from '@/components/analyst-desk/types'
 
 // ── Category icons (Google Material Symbols, weight 300, filled) ──
 const CATEGORY_ICONS: Record<string, React.ReactNode> = {
@@ -126,6 +127,8 @@ export interface StructuresTabProps {
   stationCaption?: string
   /** Set on a forecast day: the run, today, and the day in view */
   stationForecast?: { forecasts: ForecastEntry[]; today: string; date: string | null }
+  /** The latest hourly nowcast: the station chart gets a dashed +3/+6/+12/+24 h tail */
+  stationNowcast?: NowcastResponse
 }
 
 // Health classification: one implementation for the whole dashboard (lib/aqi)
@@ -141,7 +144,7 @@ function pm25BarColor(v: number): string {
 }
 
 // ── Interactive 24h PM2.5 bar chart: hover, touch or arrow keys to read any hour ──
-function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] }) {
+function PM25BarChart({ data }: { data: { hour: string; pm25: number | null; forecast?: boolean; lead?: number }[] }) {
   const wrapRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const [active, setActive] = useState<number | null>(null)
@@ -190,8 +193,17 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
     const band = classifyPm25(a.pm25)
     const cx = pad.left + (active as number) * slot + slot / 2
     const left = Math.max(0, Math.min(cx - tipWidth / 2, width - tipWidth))
-    return { left, label: `${a.hour}:00`, value: Math.round(a.pm25), band }
+    return { left, label: a.forecast ? `${a.hour}:00 (+${a.lead} h)` : `${a.hour}:00`, value: Math.round(a.pm25), band }
   })() : null
+
+  // The dashed tail: from the last observed hour through each nowcast point
+  const cxOf = (i: number) => pad.left + i * slot + slot / 2
+  const cyOf = (v: number) => pad.top + h - Math.max(2, (v / maxVal) * h)
+  const lastObs = data.map((d, i) => ({ d, i })).filter(x => !x.d.forecast && x.d.pm25 != null).at(-1)
+  const tailIdx = data.map((d, i) => ({ d, i })).filter(x => x.d.forecast && x.d.pm25 != null)
+  const tailPath = tailIdx.length
+    ? [...(lastObs ? [lastObs] : []), ...tailIdx].map(x => `${cxOf(x.i)},${cyOf(x.d.pm25 as number)}`).join(' ')
+    : null
 
   return (
     <div ref={wrapRef} className="relative select-none" style={{ height: H }}>
@@ -201,7 +213,7 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
           height={H}
           tabIndex={0}
           role="img"
-          aria-label={`Hourly PM2.5 for the last 24 hours. Use the left and right arrow keys to read each hour.`}
+          aria-label={tailIdx.length ? `Hourly PM2.5 for the last 24 hours and the expected values ${tailIdx.map(x => `${x.d.lead} hours`).join(', ')} ahead (dashed). Use the left and right arrow keys to read each hour.` : `Hourly PM2.5 for the last 24 hours. Use the left and right arrow keys to read each hour.`}
           onKeyDown={e => {
             if (e.key === 'ArrowRight') { e.preventDefault(); move(1) }
             else if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1) }
@@ -211,13 +223,22 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
           onPointerLeave={() => setActive(null)}
           className="block outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-slate-900/30"
         >
+          {tailPath && <polyline points={tailPath} fill="none" stroke="#475569" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" />}
           {data.map((d, i) => {
             const x = pad.left + i * slot + (slot - barW) / 2
             const bh = d.pm25 == null ? 0 : Math.max(2, (d.pm25 / maxVal) * h)
             const y = pad.top + h - bh
             return (
               <g key={i}>
-                {d.pm25 != null && (
+                {d.pm25 != null && d.forecast && (
+                  <circle
+                    cx={cxOf(i)} cy={cyOf(d.pm25)} r={Math.min(4, Math.max(2.5, barW / 2))}
+                    fill="#fff" stroke={pm25BarColor(d.pm25)} strokeWidth="2"
+                    opacity={active == null || active === i ? 1 : 0.4}
+                    style={{ transition: 'opacity 120ms' }}
+                  />
+                )}
+                {d.pm25 != null && !d.forecast && (
                   <rect
                     x={x} y={y} width={barW} height={bh} rx={Math.min(2.5, barW / 2)}
                     fill={pm25BarColor(d.pm25)}
@@ -232,8 +253,8 @@ function PM25BarChart({ data }: { data: { hour: string; pm25: number | null }[] 
                   onPointerEnter={() => d.pm25 != null && setActive(i)}
                   onPointerDown={() => d.pm25 != null && setActive(i)}
                 />
-                {i % step === 0 && (
-                  <text x={pad.left + i * slot + slot / 2} y={H - 6} textAnchor="middle" fontSize="11" fill="#64748b">{d.hour}</text>
+                {(d.forecast ? i === data.length - 1 || !data[i + 1]?.forecast || i % 2 === 0 : i % step === 0) && (
+                  <text x={pad.left + i * slot + slot / 2} y={H - 6} textAnchor="middle" fontSize="11" fill={d.forecast ? '#475569' : '#64748b'} fontStyle={d.forecast ? 'italic' : undefined}>{d.forecast ? `+${d.lead}h` : d.hour}</text>
                 )}
               </g>
             )
@@ -271,7 +292,7 @@ type View =
 
 export type StructuresFocus = Extract<View, { type: 'station-detail' | 'kiln-detail' | 'industry-detail' }>
 
-export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus, onClose, stationCaption, stationForecast }: StructuresTabProps) {
+export function StructuresTab({ stations, kilns, industryCategories, selectedDate, onFlyTo, initialView, focus, onClose, stationCaption, stationForecast, stationNowcast }: StructuresTabProps) {
   const [view, setView] = useState<View>(focus ?? (initialView === 'stations' ? { type: 'stations' } : { type: 'categories' }))
   // Follow a new focus from the map (state adjusted during render, not in an effect)
   const [prevFocus, setPrevFocus] = useState(focus)
@@ -503,6 +524,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
         selectedDate={selectedDate}
         caption={stationCaption}
         forecast={stationForecast}
+        nowcast={stationNowcast}
         onBack={() => (onClose ? onClose() : setView({ type: 'stations' }))}
         onFlyTo={onFlyTo}
       />
@@ -910,11 +932,12 @@ interface StationDetailProps {
   selectedDate: string | null
   caption?: string
   forecast?: StructuresTabProps['stationForecast']
+  nowcast?: NowcastResponse
   onBack: () => void
   onFlyTo: (lng: number, lat: number, zoom?: number) => void
 }
 
-function StationDetailView({ station, selectedDate, caption, forecast, onBack }: StationDetailProps) {
+function StationDetailView({ station, selectedDate, caption, forecast, nowcast, onBack }: StationDetailProps) {
   const { data: hourlyData, isLoading: hourlyLoading } = useQuery({
     queryKey: ['station-hourly', station.station_id, selectedDate],
     queryFn: async () => {
@@ -954,6 +977,25 @@ function StationDetailView({ station, selectedDate, caption, forecast, onBack }:
   const forecastDays = useMemo(
     () => (forecast ? stationForecastDays(forecast.forecasts, forecast.today, station.name, station.city) : []),
     [forecast, station.name, station.city],
+  )
+  // Hourly nowcast points still ahead of now (as of opening the panel), drawn as a dashed tail after the last 24 hours
+  const [openedAt] = useState(() => Date.now())
+  const nowcastPoints = useMemo(
+    () => stationNowcastPoints(nowcast, { station_id: station.station_id, name: station.name, city: station.city })
+      .filter(p => Date.parse(p.valid_time) > openedAt),
+    [nowcast, station.station_id, station.name, station.city, openedAt],
+  )
+  const chartWithTail = useMemo(
+    () => [
+      ...chartData,
+      ...nowcastPoints.map(p => ({
+        hour: new Date(p.valid_time).toLocaleTimeString('en-US', { hour: '2-digit', hour12: false, timeZone: 'Asia/Karachi' }),
+        pm25: p.pm25,
+        forecast: true,
+        lead: p.lead,
+      })),
+    ],
+    [chartData, nowcastPoints],
   )
 
   const poll = overview?.pollutant_summary
@@ -1054,12 +1096,19 @@ function StationDetailView({ station, selectedDate, caption, forecast, onBack }:
             <div className="flex h-[150px] items-end gap-1 px-1 pb-6" aria-busy="true" aria-label="Loading chart">
               {Array.from({ length: 24 }, (_, i) => <Skeleton key={i} className="flex-1 rounded-t-md" style={{ height: `${30 + ((i * 37) % 70)}%` }} />)}
             </div>
-          ) : chartData.length ? (
-            <PM25BarChart data={chartData} />
+          ) : chartWithTail.length ? (
+            <PM25BarChart data={chartWithTail} />
           ) : (
             <div className="h-[150px] flex items-center justify-center text-xs text-slate-600">No hourly data available</div>
           )}
         </div>
+        {nowcastPoints.length > 0 && (
+          <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
+            Dashed: expected hourly PM2.5 {nowcastPoints.map(p => `+${p.lead} h`).join(', ')} ahead
+            {nowcast ? `, issued ${formatPkt(nowcast.init_time)}` : ''}.
+            {nowcastPoints[0].basis === 'neighbours' ? ' Estimated from nearby stations: this station had no recent readings.' : ''}
+          </p>
+        )}
         {insight && <p className="mt-2 text-[13px] leading-relaxed text-slate-700">{insight}</p>}
 
         {/* Location */}
