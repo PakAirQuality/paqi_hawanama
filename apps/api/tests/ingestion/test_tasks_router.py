@@ -76,3 +76,24 @@ async def test_full_pipeline_reports_worst_status(monkeypatch):
         r = await c.post("/api/v1/tasks/full-pipeline")
     assert r.status_code == 500 and r.json()["status"] == "failed"
     assert set(r.json()["summary"]) == {"discovery", "station_ingestion", "city_ingestion"}
+
+
+async def test_registry_provinces_defaults_to_dry_run_and_passes_the_flag(monkeypatch):
+    import app.ingestion.registry_provinces as rp
+    captured = []
+
+    async def fake_run(self, *, dry_run=True, trigger="http"):
+        captured.append((dry_run, trigger))
+        o = _outcome(RunStatus.success)
+        o.task = "registry-provinces"
+        return o
+    monkeypatch.setattr(rp.RegistryProvincesTask, "__init__", lambda self, **kw: None)
+    monkeypatch.setattr(rp.RegistryProvincesTask, "run", fake_run)
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://t") as c:
+        r1 = await c.post("/api/v1/tasks/registry/provinces")
+        r2 = await c.post("/api/v1/tasks/registry/provinces", params={"dry_run": "false"}, headers={"X-CloudScheduler": "true"})
+        status = await c.get("/api/v1/tasks/status")
+    assert r1.status_code == 200 and "planned" in r1.json()["message"]
+    assert r2.status_code == 200 and "applied" in r2.json()["message"]
+    assert captured == [(True, "http"), (False, "scheduler")]
+    assert "POST /tasks/registry/provinces?dry_run=true|false" in status.json()["available_endpoints"]

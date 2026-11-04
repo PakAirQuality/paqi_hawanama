@@ -119,3 +119,21 @@ def test_origin_headers_follow_the_configured_base(tmp_path):
     h = epa.PunjabEPAClient(settings=s)._headers()
     assert h["Origin"] == "https://aqi.punjab.gov.pk"
     assert h["Referer"] == "https://aqi.punjab.gov.pk/"
+
+
+@respx.mock
+async def test_station_upsert_carries_the_province_of_its_coordinates(tmp_path, monkeypatch):
+    """Punjab EPA rows used to be registered with state_id NULL; the insert now resolves it from the polygon."""
+    respx.get(f"{BASE}/stations").mock(return_value=httpx.Response(200, json={"success": True, "data": [[_stations()["data"][0][0]]]}))
+    respx.get(f"{BASE}/historical/24hours").mock(return_value=httpx.Response(200, json=_24h()))
+
+    async def fake_state_ids(_db):
+        return {"Punjab": 9, "Sindh": 33}
+    monkeypatch.setattr(epa, "pakistan_state_ids", fake_state_ids)
+    s = make_settings(tmp_path, PUNJAB_EPA_API_BASE=BASE, PUNJAB_EPA_API_KEY="pk-SECRET-1234567")
+    session = FakeSession()
+    await epa.collect_once(session, settings=s, client=epa.PunjabEPAClient(settings=s), db_service=FakeDatabaseService(),
+                           archiver=NullArchiver(), recorder=CapturingRecorder(tmp_path / "runs"), leases=FakeLeases(), sleep=SleepSpy())
+    sql, params = next((sql, p) for sql, p in session.executed if "INSERT INTO stations" in sql)
+    assert params["state_id"] == 9 and params["lat"] == 31.5                               # Lahore One → Punjab
+    assert "state_id = COALESCE(stations.state_id, EXCLUDED.state_id)" in sql           # never overwrites a curated link

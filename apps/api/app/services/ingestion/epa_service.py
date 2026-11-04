@@ -38,6 +38,7 @@ from app.ingestion.reconcile import ReconcilePolicy
 from app.ingestion.runs import EntityFailure, RunOutcome, RunRecorder, new_run_id
 from app.ingestion.units import apply_units
 from app.ingestion.validation import validate_reading
+from app.services.geo_utils import pakistan_state_ids, province_for_point
 
 logger = logging.getLogger(__name__)
 
@@ -142,6 +143,7 @@ async def collect_once(db: AsyncSession, *, trigger: str = "http", settings=None
 
         provider_id = await dbs.get_or_create_provider(db, PROVIDER_CODE, PROVIDER_DISPLAY_NAME)
         country_id = await dbs.resolve_country_id(db, COUNTRY_NAME, "PK")
+        state_ids = await pakistan_state_ids(db)
         await db.commit()
 
         try:
@@ -183,8 +185,10 @@ async def collect_once(db: AsyncSession, *, trigger: str = "http", settings=None
                 await archiver.record(AsyncSessionLocal, pref)
 
                 station_id = station_id_for_punjab(code)
+                province = province_for_point(lat, lon)
                 await _upsert_station(db, provider_id=provider_id, country_id=country_id, station_id=station_id,
-                                      source_station_id=code, name=st.get("station_name") or code, lat=lat, lon=lon)
+                                      source_station_id=code, name=st.get("station_name") or code, lat=lat, lon=lon,
+                                      state_id=state_ids.get(province) if province else None)
 
                 rows: List[Dict[str, Any]] = []
                 for _, row in (data.get("hourly_data") or {}).items():
@@ -245,12 +249,15 @@ async def collect_once(db: AsyncSession, *, trigger: str = "http", settings=None
 
 
 async def _upsert_station(db: AsyncSession, *, provider_id: int, country_id: int, station_id: str,
-                          source_station_id: str, name: str, lat: float, lon: float, tz: str = DEFAULT_TZ) -> None:
+                          source_station_id: str, name: str, lat: float, lon: float, tz: str = DEFAULT_TZ,
+                          state_id: Optional[int] = None) -> None:
+    """state_id: the province containing the coordinates (geo_utils rule); filled on insert, never overwritten."""
     from sqlalchemy import text
     await db.execute(text("""
-        INSERT INTO stations (station_id, country_id, name, lat, lon, provider_id, source_station_id, timezone, active)
-        VALUES (:station_id, :country_id, :name, :lat, :lon, :provider_id, :source_station_id, :tz, true)
+        INSERT INTO stations (station_id, country_id, state_id, name, lat, lon, provider_id, source_station_id, timezone, active)
+        VALUES (:station_id, :country_id, :state_id, :name, :lat, :lon, :provider_id, :source_station_id, :tz, true)
         ON CONFLICT (provider_id, source_station_id) DO UPDATE
-        SET name = EXCLUDED.name, lat = EXCLUDED.lat, lon = EXCLUDED.lon, active = true, updated_at = NOW()
-    """), dict(station_id=station_id, country_id=country_id, name=name, lat=lat, lon=lon,
+        SET name = EXCLUDED.name, lat = EXCLUDED.lat, lon = EXCLUDED.lon, active = true, updated_at = NOW(),
+            state_id = COALESCE(stations.state_id, EXCLUDED.state_id)
+    """), dict(station_id=station_id, country_id=country_id, state_id=state_id, name=name, lat=lat, lon=lon,
                provider_id=provider_id, source_station_id=source_station_id, tz=tz))

@@ -235,6 +235,26 @@ async def run_icimod_ingest(
         raise HTTPException(status_code=500, detail=f"ICIMOD ingestion failed: {e}")
 
 
+# ---------------------------------------------------------------------------
+# Station registry: province links by one rule (city first, geography second)
+# ---------------------------------------------------------------------------
+
+@router.post("/tasks/registry/provinces")
+async def run_registry_provinces(
+    request: Request,
+    dry_run: bool = Query(True, description="Plan only (default). dry_run=false writes stations.state_id / cities.state_id"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Reconcile stations.state_id and cities.state_id for Pakistan; the run's details list every change and flag."""
+    from app.ingestion.registry_provinces import RegistryProvincesTask
+    try:
+        outcome = await RegistryProvincesTask().run(dry_run=dry_run, trigger=_trigger(request))
+        return _outcome_response(outcome, "Registry province reconcile " + ("planned" if dry_run else "applied"))
+    except Exception as e:
+        logger.error("Registry province reconcile failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Registry province reconcile failed: {e}")
+
+
 @router.post("/tasks/twitter-lahore-pm25")
 async def run_twitter_lahore_pm25(
     request: Request,
@@ -312,6 +332,7 @@ async def get_task_status(
                 "POST /tasks/openaq/ingest",
                 "POST /tasks/openaq/reconcile",
                 "POST /tasks/icimod/ingest?dry_run=true|false",
+                "POST /tasks/registry/provinces?dry_run=true|false",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
             ],

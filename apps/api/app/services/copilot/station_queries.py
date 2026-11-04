@@ -9,15 +9,15 @@ Definitions
 - active: registered and stations.active = true.
 - reporting: active with at least one valid PM2.5 reading (qc_state not INVALID)
   in the window (last 24 h, or the asked Pakistan day).
-- Province: by the station's coordinates inside the province boundary
-  (geoBoundaries PAK ADM1 2019, CC0, commit 9469f09, simplified file at
-  apps/api/data/pakistan_provinces.geojson). The registry link (stations.state_id,
-  else the city's state) is used only for rows without coordinates. The registry
-  is wrong for 76+ rows (Karachi, Islamabad, Peshawar … stations filed under
-  Punjab; probe 2026-11-04), so province answers must not rely on it.
+- Province: the registry link (stations.state_id, else the city's state), which the
+  registry-provinces task keeps consistent with one rule (city first, geography
+  second; app.services.geo_utils). The province polygon containing the coordinates
+  (geoBoundaries PAK ADM1 2019, CC0, apps/api/data/pakistan_provinces.geojson) is
+  only a fallback for rows with no link at all, and a data-quality signal: results
+  report how many stations' coordinates fall in another province's polygon
+  (twin-city border cases such as Rawalpindi/Islamabad).
 - City: stations.city_id when set, else the nearest city (station-average centroid)
-  within 25 km. Punjab EPA and BAM rows are registered without a state_id, and
-  some without a city_id; the database has no province or city polygons.
+  within 25 km; the database has no city polygons.
 - Days are Pakistan days (Asia/Karachi). A station-day needs >= 6 valid hours.
 """
 
@@ -35,6 +35,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ingestion.export_membership import SHADOW_PROVIDER_CODES
+from app.services.geo_utils import PROVINCE_SHAPE_TO_STATE, province_for_point, province_polygons  # noqa: F401 — shared rule
 
 PKT = ZoneInfo("Asia/Karachi")
 COUNTRY = "Pakistan"
@@ -49,7 +50,7 @@ DEFINITIONS = {
     "registered": "a station row for Pakistan that is not a shadow-provider row (OpenAQ, ICIMOD) and not a test station",
     "active": "registered and flagged active by its provider catalogue",
     "reporting": "active with at least one valid PM2.5 reading (qc not INVALID) inside the window",
-    "membership": "province by the station's coordinates inside the province boundary (geoBoundaries ADM1 2019); the registry link only for rows without coordinates; city by registry link, else the nearest city (station-average centroid) within 25 km",
+    "membership": "province by the station registry (its city's province, else the province containing its coordinates); city by registry link, else the nearest city (station-average centroid) within 25 km",
     "day": "Pakistan calendar day (Asia/Karachi); a station-day needs at least 6 valid hours",
     "statistic": "reporting-station mean: unweighted across stations that reported, never an area or population average",
 }
@@ -102,7 +103,6 @@ NEAREST_CITY_LATERAL = f"""
 PROVINCE_NAME = "COALESCE(st.name, cst.name, ncst.name)"
 CITY_NAME = "COALESCE(c.name, nc.city_name)"
 NEAREST_CITY_ID = f"(SELECT cc.city_id FROM city_centroids cc WHERE ST_DWithin(cc.g, s.geom, {NEAREST_CITY_M}) ORDER BY ST_Distance(cc.g, s.geom) LIMIT 1)"
-NEAREST_CITY_STATE_ID = f"(SELECT cc.state_id FROM city_centroids cc WHERE ST_DWithin(cc.g, s.geom, {NEAREST_CITY_M}) ORDER BY ST_Distance(cc.g, s.geom) LIMIT 1)"
 
 
 # ── small helpers ─────────────────────────────────────────────────────────────
@@ -150,7 +150,7 @@ class Area:
     lat: Optional[float] = None
     lon: Optional[float] = None
     radius_km: Optional[float] = None
-    mismatch: Optional[int] = None   # province areas: stations the registry files under another province
+    mismatch: Optional[int] = None   # province areas: stations whose coordinates fall in another province's polygon
 
     def __post_init__(self):
         self.params = dict(self.params or {})
@@ -258,45 +258,19 @@ def resolve_district(name: str) -> Optional[Tuple[str, float, float]]:
     return next((r for r in rows if r[0].lower() == match[0]), None) if match else None
 
 
-# ── provinces by geography ─────────────────────────────────────────────────────
+# ── provinces ──────────────────────────────────────────────────────────────────
 
-PROVINCE_SHAPE_TO_STATE = {"Islamabad Capital Territory": "Islamabad", "Azad Jammu and Kashmir": "Azad Kashmir"}
-_PROVINCE_POLYS: Optional[List[Tuple[str, Any]]] = None
 PROVINCE_CACHE_TTL_S = 600
 _STATION_PROVINCES: Dict[str, Any] = {"at": 0.0, "map": {}}
 
 
-def province_polygons() -> List[Tuple[str, Any]]:
-    """[(states.name, prepared polygon)] from apps/api/data/pakistan_provinces.geojson."""
-    global _PROVINCE_POLYS
-    if _PROVINCE_POLYS is None:
-        try:
-            import json
-            from pathlib import Path
-            from shapely.geometry import shape
-            from shapely.prepared import prep
-            path = Path(__file__).resolve().parents[3] / "data" / "pakistan_provinces.geojson"
-            feats = json.loads(path.read_text())["features"]
-            _PROVINCE_POLYS = [(PROVINCE_SHAPE_TO_STATE.get(f["properties"]["shapeName"], f["properties"]["shapeName"]),
-                                prep(shape(f["geometry"]))) for f in feats]
-        except Exception:  # noqa: BLE001 — without polygons the registry link is used
-            _PROVINCE_POLYS = []
-    return _PROVINCE_POLYS
-
-
-def province_for_point(lat: Optional[float], lon: Optional[float]) -> Optional[str]:
-    if lat is None or lon is None:
-        return None
-    from shapely.geometry import Point
-    pt = Point(float(lon), float(lat))
-    for name, poly in province_polygons():
-        if poly.contains(pt):
-            return name
-    return None
-
-
 async def station_provinces(db: AsyncSession) -> Dict[str, Dict[str, Any]]:
-    """station_id → {province, registry_province, city_id} for every registered station (cached 10 min)."""
+    """station_id → {province, registry_province, geo_province, city_id} for every registered station (cached 10 min).
+
+    province is the registry's (stations.state_id, else the city's state); only a row with no link
+    at all takes the polygon containing its coordinates. geo_province is the polygon, for the
+    boundary note.
+    """
     import time
     now = time.monotonic()
     if _STATION_PROVINCES["map"] and now - _STATION_PROVINCES["at"] < PROVINCE_CACHE_TTL_S:
@@ -310,22 +284,23 @@ async def station_provinces(db: AsyncSession) -> Dict[str, Dict[str, Any]]:
     out: Dict[str, Dict[str, Any]] = {}
     for r in rows:
         geo = province_for_point(r.lat, r.lon)
-        out[r.station_id.strip()] = {"province": geo or r.registry_province, "registry_province": r.registry_province,
-                                     "geo": geo is not None, "city_id": r.city_id}
+        out[r.station_id.strip()] = {"province": r.registry_province or geo, "registry_province": r.registry_province,
+                                     "geo_province": geo, "city_id": r.city_id}
     _STATION_PROVINCES.update(at=now, map=out)
     return out
 
 
 def _attach_province(rows: List[Dict[str, Any]], pmap: Dict[str, Dict[str, Any]]) -> None:
-    """Replace the registry province in result rows with the geographic one; keep the registry's when it differs."""
+    """Fill a missing province from the map and note when the coordinates fall in another province's polygon."""
     for row in rows:
         info = pmap.get(row.get("station_id", ""))
         if not info:
             continue
-        registry = row.get("province")
-        row["province"] = info["province"]
-        if registry and info["province"] and registry != info["province"]:
-            row["registry_province"] = registry
+        if not row.get("province") and info["province"]:
+            row["province"] = info["province"]
+        geo = info.get("geo_province")
+        if geo and row.get("province") and geo != row["province"]:
+            row["polygon_province"] = geo
 
 
 async def resolve_place(db: AsyncSession, place: str) -> Dict[str, Any]:
@@ -374,18 +349,11 @@ async def resolve_area(db: AsyncSession, area: str, name: str = "", lat: Optiona
         if sid is None:
             return {"message": f"Province '{name}' not found. Known provinces/territories: {', '.join(known)}."}
         pmap = await station_provinces(db)
-        if pmap and any(v["geo"] for v in pmap.values()):
-            ids = sorted(k for k, v in pmap.items() if v["province"] == sname)
-            city_ids = sorted({v["city_id"] for k, v in pmap.items() if v["province"] == sname and v["city_id"] is not None})
-            mismatch = sum(1 for k in ids if pmap[k]["registry_province"] not in (None, sname))
-            return Area("province", sname, "s.station_id = ANY(:area_ids)",
-                        {"area_ids": ids, "area_city_ids": city_ids, "area_sid": sid}, mismatch=mismatch)
-        # polygons unavailable: registry link, then the city's province, then the nearest city's province
-        return Area("province", sname, f"""
-            (s.state_id = :area_sid
-             OR (s.state_id IS NULL AND c.state_id = :area_sid)
-             OR (s.state_id IS NULL AND s.city_id IS NULL AND {NEAREST_CITY_STATE_ID} = :area_sid))
-        """, {"area_sid": sid})
+        ids = sorted(k for k, v in pmap.items() if v["province"] == sname)
+        city_ids = sorted({v["city_id"] for k, v in pmap.items() if v["province"] == sname and v["city_id"] is not None})
+        mismatch = sum(1 for k in ids if pmap[k]["geo_province"] not in (None, sname))
+        return Area("province", sname, "s.station_id = ANY(:area_ids)",
+                    {"area_ids": ids, "area_city_ids": city_ids, "area_sid": sid}, mismatch=mismatch)
     if kind == "city":
         city, cands = await resolve_city(db, name)
         if cands:
@@ -460,10 +428,10 @@ async def station_inventory(db: AsyncSession, area: Area, *, as_of_day: Optional
         "definitions": DEFINITIONS,
     }
     if area.mismatch is not None:
-        out["registry_mismatch"] = area.mismatch
+        out["polygon_mismatch"] = area.mismatch
         if area.mismatch:
-            out["registry_note"] = (f"{area.mismatch} of these stations are filed under a different province in the station "
-                                    f"registry; the counts here follow the station coordinates.")
+            out["polygon_note"] = (f"{area.mismatch} of these stations have coordinates inside another province's boundary "
+                                   f"polygon (twin-city border cases); the counts follow the station registry.")
     if area.kind in ("national", "province"):
         by_city = (await db.execute(text(f"""
             WITH {CITY_CENTROIDS_CTE}
