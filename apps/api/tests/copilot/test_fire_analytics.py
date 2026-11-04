@@ -299,7 +299,7 @@ async def test_fire_pm25_link_lag_one_series_flags_and_wording(monkeypatch):
     assert out["fire_influenced_days"] == [days[10].isoformat(), days[20].isoformat()] and rows[days[10].isoformat()]["pm25_prior3"] == 60.0
     c = out["correlations"]["frp_upwind"]
     assert c["lag1"]["spearman"] > c["lag0"]["spearman"] and c["lag1"]["strength"] in ("moderate", "strong") and c["lag1"]["n"] == 29
-    assert "consistent with smoke transport" in out["summary"] and "caused" not in out["summary"] and "lag1" in out["summary"]
+    assert "consistent with smoke transport" in out["summary"] and "caused" not in out["summary"] and "upwind fire FRP with PM2.5 the next day" in out["summary"]
     assert out["upwind_p75_mw"] == 0.0 and out["definitions"]["not_causation"] and out["rows_truncated"] is False
     # guards
     assert "after end" in (await x.fire_pm25_link(WindDB(), "Lahore", days[5], days[0], store=store, today=days[-1]))["message"]

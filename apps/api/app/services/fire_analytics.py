@@ -877,7 +877,10 @@ async def fire_pm25_link(db, city: str, start: Optional[date] = None, end: Optio
     else:
         summary = f"No PM2.5 reporting days for {match.name} in this window."
     if best:
-        summary += f" Strongest association: {best[0]} vs PM2.5 at {best[1]}, Spearman {best[2]['spearman']} ({best[2]['strength']}, n={best[2]['n']})."
+        series_name = {"frp_upwind": "upwind fire FRP", "frp_200": "fire FRP within 200 km (any direction)"}[best[0]]
+        lag_name = {"lag0": "the same day", "lag1": "the next day", "lag2": "two days later"}[best[1]]
+        summary += (f" Strongest association: {series_name} with PM2.5 {lag_name}, Spearman {best[2]['spearman']} "
+                    f"({best[2]['strength']}, n={best[2]['n']}).")
     rows = series if len(series) <= MAX_ROWS else sorted(series, key=lambda r: (not r["flag"], r["day"]))[:MAX_ROWS]
     rows = sorted(rows, key=lambda r: r["day"])
     out_rows = [{**{k: v for k, v in r.items() if k not in ("has_fire_file",)}, "day": r["day"].isoformat()} for r in rows]

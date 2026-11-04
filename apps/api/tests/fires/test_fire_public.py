@@ -53,6 +53,10 @@ def test_seasons_alignment_headline_and_comparison():
     assert set(years) == {2020, 2021, 2022, 2023, 2024, 2025, 2026}
     cur = years[2026]
     assert cur["role"] == "current" and cur["fires"][:31] == [None] * 31 and cur["fires"][31:34] == [1, 1, 1] and cur["fires"][34] is None
+    # today's partial day is cut: with today = 3 Nov the 3 Nov file exists but the series ends on 2 Nov
+    cut = fp.seasons("pakistan", "rice", store=_store(), today=D3)
+    cur_cut = next(y for y in cut["years"] if y["year"] == 2026)
+    assert cur_cut["fires"][33] is None and cur_cut["fires"][32] == 1 and cut["headline"]["fires"] == 2 and cut["today_index"] == 32
     assert cur["r7"][31:34] == [None, None, None]                       # fewer than 4 days with a file
     assert cur["total"] == 3 and cur["total_to_date"] == 3 and cur["days_with_data"] == 3 and cur["first_day_with_data"] == "2026-11-01"
     assert years[2025]["role"] == "last" and years[2025]["total"] == 27 and years[2025]["total_to_date"] == 27
