@@ -414,9 +414,10 @@ def current_season(today: Optional[date] = None) -> Optional[str]:
 
 def _series(daily: pd.DataFrame, kind: str, region: str, start: date, end: date, days_with_file: set) -> pd.DataFrame:
     sel = daily[(daily["region_kind"] == kind) & (daily["region"] == region) & (daily["pk_day"] >= start) & (daily["pk_day"] <= end)]
+    sel = sel.groupby("pk_day", as_index=False)[["n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"]].sum()   # older builds may hold split rows
     idx = pd.date_range(start, end, freq="D").date
     out = pd.DataFrame({"pk_day": idx})
-    out = out.merge(sel[["pk_day", "n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"]], on="pk_day", how="left")
+    out = out.merge(sel, on="pk_day", how="left")
     out["has_file"] = [d in days_with_file for d in out["pk_day"]]
     for c in ("n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"):
         out[c] = np.where(out["has_file"], out[c].fillna(0), np.nan)
@@ -622,6 +623,9 @@ def fire_hotspots(*, region: Optional[str] = None, center: Optional[Tuple[float,
         lat, lon, label = center
         area_desc = {"kind": "radius", "name": f"within {radius_km:g} km of {label}", "lat": _r(lat, 4), "lon": _r(lon, 4), "radius_km": radius_km}
         kind = rname = None
+    elif (region or "").strip().lower() in ("bbox", "whole box", "box"):
+        kind, rname = "bbox", "whole box"
+        area_desc = {"kind": "bbox", "name": "whole box (Pakistan, North India, Afghanistan, Iran)"}
     else:
         resolved, note, _ = resolve_region(region or "Pakistan", store)
         if resolved is None:
@@ -637,6 +641,8 @@ def fire_hotspots(*, region: Optional[str] = None, center: Optional[Tuple[float,
         km = fr.haversine_km_vec(lat, lon, head["lat"].to_numpy(), head["lon"].to_numpy()) if len(head) else np.zeros(0)
         head = head.assign(km=km)
         head = head[head["km"] <= radius_km]
+    elif kind == "bbox":
+        pass
     elif kind == "country":
         code = {v: k for k, v in fr.COUNTRY_LABELS.items()}[rname]
         head = head[head["country"] == code]

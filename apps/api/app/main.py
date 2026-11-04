@@ -25,7 +25,7 @@ configure_logging(
         settings.POSTGRES_PASSWORD,
     ),
 )
-from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest, reports, forecast_runs, nowcast
+from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest, reports, forecast_runs, nowcast, fires
 
 # True only on the dedicated ingestion Cloud Run service (hawanama-ingest).
 # Public read API does not expose POST /tasks/* — schedulers call ingest directly.
@@ -124,6 +124,8 @@ else:
     app.include_router(ops_downscaler.router, prefix=f"{settings.API_V1_STR}/ops/downscaler", tags=["ops-downscaler"], dependencies=tile_limit)
     app.include_router(data_sources.router, prefix=f"{settings.API_V1_STR}/data-sources", tags=["data-sources"], dependencies=tile_limit)
     app.include_router(analyst_desk.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["analyst-desk"], dependencies=json_limit)
+    # Fire trends page (hawanama.org/fires): public reads over the FIRMS aggregate store
+    app.include_router(fires.router, prefix=f"{settings.API_V1_STR}/fires", tags=["fires"], dependencies=json_limit)
     app.include_router(copilot.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["copilot"])
     app.include_router(analytics.router, prefix=f"{settings.API_V1_STR}/ops/analyst-desk", tags=["analytics"], dependencies=json_limit)
 

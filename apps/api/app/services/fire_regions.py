@@ -120,6 +120,7 @@ def attribute_points(lats: Sequence[float], lons: Sequence[float], idx: Optional
             country[rows] = "PK"
         elif kind == "province":
             province[rows] = vals
+            country[rows] = "PK"          # ADM1 wins over slivers of the simplified ADM0 outline
         elif kind == "india_state":
             country[rows] = "IN"
             province[rows] = vals
