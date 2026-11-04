@@ -77,6 +77,21 @@ def test_plan_reproduces_the_live_cases():
     assert s["by_transition"]["Punjab -> Khyber Pakhtunkhwa"] == 2
 
 
+def test_plan_skips_a_row_whose_corrected_key_another_station_holds():
+    cities, stations = _rows()
+    # the CSV import copied an IQAir station: same name, coordinates and city, filed under Punjab
+    stations.append(rp.StationRow("pes1dup", "US Consulate", "other", 34.0, 71.55, 11, PB))
+    # a Punjab EPA device that IQAir also carries: identical key once its NULL state is filled
+    stations.append(rp.StationRow("pb_x", "DC Office Lahore", "punjab", 31.55, 74.33, 10, None))
+    stations.append(rp.StationRow("iq_x", "DC Office Lahore", "airvisual", 31.55, 74.33, 10, PB))
+    p = rp.plan(cities, stations)
+    ids = {s.station_id for s in p.stations}
+    assert "pes1dup" not in ids and "pb_x" not in ids and "pes2" in ids
+    dups = {f.key: f.detail for f in p.flags if f.kind == "duplicate_registration"}
+    assert set(dups) == {"pes1dup", "pb_x"} and "pes1" in dups["pes1dup"] and "iq_x" in dups["pb_x"]
+    assert p.summary()["flags"]["duplicate_registration"] == 2
+
+
 def test_plan_refuses_to_move_a_city_with_city_scope_readings():
     cities, stations = _rows()
     cities[4] = rp.CityRow(5139, "Charsadda", PB, has_city_readings=True)
