@@ -140,6 +140,14 @@ async def test_resolve_place_city_centroid_falls_back_to_station_average_then_st
     assert "not found" in (await q.resolve_place(FakeDB(), "Atlantis"))["message"]
 
 
+async def test_resolve_place_falls_back_to_a_district_centroid_for_towns_without_stations():
+    out = await q.resolve_place(FakeDB(), "Swat")                  # not a registry city, is an ADM2 district
+    assert out["kind"] == "district centroid" and out["name"] == "Swat district"
+    assert 34.5 < out["lat"] < 35.5 and 72.0 < out["lon"] < 73.0
+    assert (await q.resolve_place(FakeDB(), "sawat"))["name"] == "Swat district"      # typo within 0.8
+    assert len(q.district_centroids()) == 126
+
+
 # ── inventory ────────────────────────────────────────────────────────────────
 
 async def test_inventory_counts_window_and_sql():

@@ -213,11 +213,50 @@ async def _city_centroid(db: AsyncSession, city: CityMatch) -> Tuple[Optional[fl
     return None, None
 
 
+_DISTRICTS: Optional[List[Tuple[str, float, float]]] = None
+
+
+def district_centroids() -> List[Tuple[str, float, float]]:
+    """(name, lat, lon) for Pakistan's 126 ADM2 districts (apps/api/data/pakistan_districts.geojson).
+
+    The registry only knows places that have stations; a town like Mardan is reachable
+    only through its district polygon's centroid.
+    """
+    global _DISTRICTS
+    if _DISTRICTS is None:
+        try:
+            import json
+            from pathlib import Path
+            from shapely.geometry import shape
+            path = Path(__file__).resolve().parents[3] / "data" / "pakistan_districts.geojson"
+            feats = json.loads(path.read_text())["features"]
+            out = []
+            for f in feats:
+                c = shape(f["geometry"]).centroid
+                out.append((str(f["properties"].get("shapeName") or "").strip(), round(c.y, 5), round(c.x, 5)))
+            _DISTRICTS = sorted(t for t in out if t[0])
+        except Exception:  # noqa: BLE001 — the gazetteer is a convenience, never a crash
+            _DISTRICTS = []
+    return _DISTRICTS
+
+
+def resolve_district(name: str) -> Optional[Tuple[str, float, float]]:
+    wanted = (name or "").strip().lower()
+    if not wanted:
+        return None
+    rows = district_centroids()
+    for r in rows:
+        if r[0].lower() == wanted or _norm(r[0]) == _norm(wanted):
+            return r
+    match = difflib.get_close_matches(wanted, [r[0].lower() for r in rows], n=1, cutoff=0.8)
+    return next((r for r in rows if r[0].lower() == match[0]), None) if match else None
+
+
 async def resolve_place(db: AsyncSession, place: str) -> Dict[str, Any]:
     """A place name → {lat, lon, name, kind} for nearest/radius questions.
 
-    Order: city (exact or close), then a station name, then a province centroid.
-    Returns {"message": …} when nothing matches or the city name is ambiguous.
+    Order: city (exact or close), then a station name, then a province centroid, then a
+    district centroid. Returns {"message": …} when nothing matches or the city name is ambiguous.
     """
     from app.services.analytics import _resolve_province, _resolve_station
 
@@ -240,7 +279,10 @@ async def resolve_place(db: AsyncSession, place: str) -> Dict[str, Any]:
             FROM states WHERE id = :sid"""), {"sid": sid})).fetchone()
         if row and row.lat is not None:
             return {"lat": _r(row.lat, 5), "lon": _r(row.lon, 5), "name": sname, "kind": "province"}
-    return {"message": f"Place '{place}' not found as a city, station or province in Pakistan."}
+    d = resolve_district(place)
+    if d:
+        return {"lat": d[1], "lon": d[2], "name": f"{d[0]} district", "kind": "district centroid"}
+    return {"message": f"Place '{place}' not found as a city, station, province or district in Pakistan."}
 
 
 async def resolve_area(db: AsyncSession, area: str, name: str = "", lat: Optional[float] = None,
