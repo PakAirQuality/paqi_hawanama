@@ -589,7 +589,7 @@ export default function OpsPipelinePage() {
         activeTab={railTab}
         onTabChange={setRailTab}
         isStreaming={isStreaming}
-        tabs={['chat', 'layers', 'sources', 'fires']}
+        tabs={['chat', 'layers', 'sources']}
       />
 
       {/* Sliding panel: width springs open, content stays 370px wide so it never reflows mid-animation */}

@@ -10,7 +10,7 @@ import { LazyMotion, MotionConfig, domMax, m } from 'motion/react'
 // Hidden modules stay open by direct link, with no tab in the header
 const modules = [
   { id: 'aqi-tracker', name: 'Tracker', href: '/' },
-  { id: 'fires', name: 'Fires', href: '/fires' },
+  { id: 'fires', name: 'Fires', href: '/fires', hidden: true },   // open by direct link for now
   { id: 'stations', name: 'Stations', href: '/stations', hidden: true },
   { id: 'data-quality', name: 'Data Quality', href: '/data-quality', hidden: true },
 ]

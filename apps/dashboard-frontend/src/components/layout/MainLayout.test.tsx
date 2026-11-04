@@ -21,11 +21,9 @@ describe('MainLayout', () => {
     expect(screen.getByRole('link', { name: 'Tracker' }).getAttribute('target')).toBeNull()
   })
 
-  it('shows Fires in the header and keeps it inside Hawanama', () => {
+  it('keeps Fires off the header for now (the page stays reachable by direct link)', () => {
     render(<MainLayout><p>Page</p></MainLayout>)
-    const link = screen.getByRole('link', { name: 'Fires' })
-    expect(link.getAttribute('href')).toBe('/fires')
-    expect(link.getAttribute('target')).toBeNull()
+    expect(screen.queryByRole('link', { name: 'Fires' })).toBeNull()
   })
 
   it('hides Stations and Data Quality from the header', () => {
