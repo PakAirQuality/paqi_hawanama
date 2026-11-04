@@ -96,7 +96,7 @@ function Body({ data, date }: { data: ExposureResponse; date: string }) {
           <ul className="divide-y divide-slate-100 text-[12px]">
             {data.top_upwind_fires.slice(0, 6).map((f, i) => (
               <li key={i} className="flex items-center gap-3 py-1.5 tabular-nums">
-                <span className="w-16 shrink-0 text-slate-700">{f.km} km {f.direction}</span>
+                <span className="w-24 shrink-0 whitespace-nowrap text-slate-700">{f.km} km {f.direction}</span>
                 <span className="min-w-0 flex-1 truncate text-slate-800">{f.district ?? f.province ?? shortCountry(f.country)}{f.country !== 'Pakistan' ? ` (${shortCountry(f.country)})` : ''}</span>
                 <span className="text-slate-500">{fmtMw(f.frp_mw)}</span>
                 <span className="text-slate-500 max-sm:hidden">{f.transport_h_at_10m_wind != null ? `~${f.transport_h_at_10m_wind} h` : ''}</span>

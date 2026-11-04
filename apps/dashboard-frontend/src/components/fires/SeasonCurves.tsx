@@ -4,12 +4,15 @@ import { useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { SeasonsResponse, SeasonYear } from './api'
 import { dayLabel, fmtCompact, fmtInt } from './format'
-import { axisTicks, endLabelOffsets, lastNonNullIndex, niceMax, toChartRows, yearKey } from './seasonAlign'
+import { axisTicks, lastNonNullIndex, niceMax, stackPx, toChartRows, yearKey } from './seasonAlign'
 
 const COLORS = { current: '#dc2626', last: '#0f172a', reference: '#cbd5e1' } as const
 const WIDTHS = { current: 2.25, last: 1.75, reference: 1.25 } as const
 const CHART_H = 340
-const MARGIN = { top: 16, right: 48, bottom: 4, left: 0 }
+const X_AXIS_H = 30                                                      // Recharts default
+const MARGIN = { top: 14, right: 46, bottom: 4, left: 0 }
+const PLOT_TOP = MARGIN.top
+const PLOT_H = CHART_H - MARGIN.top - MARGIN.bottom - X_AXIS_H
 
 export function SeasonCurves({ data }: { data: SeasonsResponse }) {
   const [showTable, setShowTable] = useState(false)
@@ -17,12 +20,18 @@ export function SeasonCurves({ data }: { data: SeasonsResponse }) {
   const ticks = useMemo(() => axisTicks(data.days), [data.days])
   const yMax = useMemo(() => niceMax(data.years), [data.years])
   const years = useMemo(() => [...data.years].sort((a, b) => rank(a) - rank(b)), [data.years])     // references first, current last (on top)
-  const ends = useMemo(() => years.map(y => ({ key: yearKey(y.year), idx: lastNonNullIndex(y.r7), value: y.r7[lastNonNullIndex(y.r7)] ?? 0 }))
-    .filter(e => e.idx >= 0), [years])
-  const plotPx = CHART_H - MARGIN.top - MARGIN.bottom - 24                 // minus the x-axis band
-  const offsets = useMemo(() => endLabelOffsets(ends, yMax, plotPx), [ends, yMax, plotPx])
-  const pxPerUnit = plotPx / yMax
-  const endByKey = Object.fromEntries(ends.map(e => [e.key, e]))
+  const current = years.find(y => y.role === 'current')
+  const currentEnd = current ? lastNonNullIndex(current.r7) : -1
+  // year labels for the finished seasons sit in a column at the right edge, stacked so they never overlap
+  const column = useMemo(() => {
+    const items = years.filter(y => y.role !== 'current').map(y => {
+      const idx = lastNonNullIndex(y.r7)
+      const v = idx >= 0 ? (y.r7[idx] ?? 0) : 0
+      return { key: yearKey(y.year), y: PLOT_TOP + (1 - v / yMax) * PLOT_H, year: y }
+    })
+    const pos = stackPx(items.map(i => ({ key: i.key, y: i.y })), 12, PLOT_TOP + PLOT_H)
+    return items.map(i => ({ ...i, top: pos[i.key] }))
+  }, [years, yMax])
 
   return (
     <div>
@@ -32,40 +41,46 @@ export function SeasonCurves({ data }: { data: SeasonsResponse }) {
           <span className="font-semibold text-[#dc2626]">{data.season.year}</span> in red · {data.season.year - 1} in black · earlier years grey · dashed = thin archive year
         </p>
       </div>
-      <div className="rounded-lg border border-slate-100 bg-white p-2" style={{ width: '100%', height: CHART_H }}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={rows} margin={MARGIN}>
-            <CartesianGrid horizontal vertical={false} strokeDasharray="4 4" stroke="#e2e8f0" />
-            <XAxis dataKey="d" type="number" domain={[0, data.days.length - 1]} ticks={ticks} tickFormatter={i => dayLabel(data.days[i] ?? '')}
-              axisLine={{ stroke: '#e2e8f0' }} tickLine={false} stroke="#9ca3af" tick={{ fontSize: 10 }} />
-            <YAxis orientation="right" domain={[0, yMax]} axisLine={false} tickLine={false} stroke="#9ca3af" tick={{ fontSize: 10 }} width={40}
-              tickFormatter={v => fmtCompact(Number(v))} />
-            <Tooltip content={<CurvesTooltip years={data.years} days={data.days} />} cursor={{ stroke: '#cbd5e1' }} />
-            {data.today_index != null && !data.season.complete && (
-              <ReferenceLine x={data.today_index} stroke="#94a3b8" strokeDasharray="3 3" label={{ value: 'yesterday', position: 'top', fontSize: 10, fill: '#64748b' }} />
-            )}
-            {years.map(y => {
-              const key = yearKey(y.year)
-              const end = endByKey[key]
-              return (
-                <Line key={key} dataKey={key} type="monotone" dot={false} isAnimationActive={false} connectNulls={false}
-                  stroke={COLORS[y.role]} strokeWidth={WIDTHS[y.role]} strokeDasharray={y.suspect_days > 0 ? '4 3' : undefined}
-                  activeDot={{ r: 3, strokeWidth: 0 }}
-                  label={(props: { x?: number | string; y?: number | string; index?: number }) => {
-                    if (!end || props.index !== end.idx || props.x == null || props.y == null) return <g key={`${key}-${props.index}`} />
-                    const px = Number(props.x), py = Number(props.y)
-                    const dy = -(offsets[key] ?? 0) * pxPerUnit
-                    return (
-                      <text key={`${key}-label`} x={px + 6} y={py + dy + 3} fontSize={10} fontWeight={y.role === 'reference' ? 500 : 700}
-                        fill={y.role === 'reference' ? '#94a3b8' : COLORS[y.role]}>
-                        {y.year}{y.suspect_days > 0 ? '*' : ''}
-                      </text>
-                    )
-                  }} />
-              )
-            })}
-          </LineChart>
-        </ResponsiveContainer>
+      <div className="relative rounded-lg border border-slate-100 bg-white p-2" style={{ width: '100%', height: CHART_H + 16 }}>
+        <div style={{ width: '100%', height: CHART_H }}>
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={rows} margin={MARGIN}>
+              <CartesianGrid horizontal vertical={false} strokeDasharray="4 4" stroke="#e2e8f0" />
+              <XAxis dataKey="d" type="number" domain={[0, data.days.length - 1]} ticks={ticks} tickFormatter={i => dayLabel(data.days[i] ?? '')}
+                axisLine={{ stroke: '#e2e8f0' }} tickLine={false} stroke="#9ca3af" tick={{ fontSize: 10 }} height={X_AXIS_H} />
+              <YAxis orientation="left" domain={[0, yMax]} axisLine={false} tickLine={false} stroke="#9ca3af" tick={{ fontSize: 10 }} width={40}
+                tickFormatter={v => fmtCompact(Number(v))} />
+              <Tooltip content={<CurvesTooltip years={data.years} days={data.days} />} cursor={{ stroke: '#cbd5e1' }} />
+              {data.today_index != null && !data.season.complete && (
+                <ReferenceLine x={data.today_index} stroke="#94a3b8" strokeDasharray="3 3" label={{ value: 'yesterday', position: 'top', fontSize: 10, fill: '#64748b' }} />
+              )}
+              {years.map(y => {
+                const key = yearKey(y.year)
+                const isCurrent = y.role === 'current'
+                return (
+                  <Line key={key} dataKey={key} type="monotone" dot={false} isAnimationActive={false} connectNulls={false}
+                    stroke={COLORS[y.role]} strokeWidth={WIDTHS[y.role]} strokeDasharray={y.suspect_days > 0 ? '4 3' : undefined}
+                    activeDot={{ r: 3, strokeWidth: 0 }}
+                    label={isCurrent ? (props: { x?: number | string; y?: number | string; index?: number }) => {
+                      if (props.index !== currentEnd || props.x == null || props.y == null) return <g key={`${key}-${props.index}`} />
+                      return (
+                        <text key={`${key}-label`} x={Number(props.x) + 6} y={Number(props.y) + 3} fontSize={10} fontWeight={700} fill={COLORS.current}>
+                          {y.year}
+                        </text>
+                      )
+                    } : undefined} />
+                )
+              })}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="pointer-events-none absolute right-2 top-2 w-10 text-[10px] leading-none" aria-hidden style={{ height: CHART_H }}>
+          {column.map(c => (
+            <span key={c.key} className="absolute right-0" style={{ top: c.top - 5, fontWeight: c.year.role === 'last' ? 700 : 500, color: c.year.role === 'last' ? COLORS.last : '#94a3b8' }}>
+              {c.year.year}{c.year.suspect_days > 0 ? '*' : ''}
+            </span>
+          ))}
+        </div>
       </div>
       <button type="button" onClick={() => setShowTable(v => !v)} className="mt-2 text-[12px] text-slate-600 underline-offset-2 hover:underline" aria-expanded={showTable}>
         {showTable ? 'Hide season totals' : 'Show season totals as a table'}

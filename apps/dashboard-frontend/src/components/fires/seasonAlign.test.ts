@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { axisTicks, endLabelOffsets, lastNonNullIndex, niceMax, toChartRows } from './seasonAlign'
+import { axisTicks, endLabelOffsets, lastNonNullIndex, niceMax, stackPx, toChartRows } from './seasonAlign'
 import type { SeasonsResponse } from './api'
 
 const days = Array.from({ length: 61 }, (_, i) => {
@@ -33,5 +33,8 @@ describe('seasonAlign', () => {
     expect(off.c).toBe(0)
     const top = endLabelOffsets([{ key: 'a', value: 995 }, { key: 'b', value: 998 }], 1000, 300, 11)
     expect(998 + top.b).toBeLessThanOrEqual(1000)
+    const px = stackPx([{ key: 'a', y: 100 }, { key: 'b', y: 104 }, { key: 'c', y: 150 }], 12, 160)
+    expect(px).toEqual({ a: 100, b: 112, c: 150 })
+    expect(stackPx([{ key: 'a', y: 155 }, { key: 'b', y: 158 }], 12, 160)).toEqual({ a: 148, b: 160 })
   })
 })

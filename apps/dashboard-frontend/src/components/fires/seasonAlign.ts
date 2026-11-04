@@ -65,3 +65,19 @@ export function endLabelOffsets(ends: { key: string; value: number }[], yMax: nu
   sorted.forEach((e, i) => { out[e.key] = placed[i] - e.value })
   return out
 }
+
+/** Pixel positions for stacked labels: keeps the order, enforces a minimum gap, stays within [0, maxPx]. */
+export function stackPx(items: { key: string; y: number }[], minPx = 12, maxPx = Infinity): Record<string, number> {
+  const sorted = [...items].sort((a, b) => a.y - b.y)
+  const placed: number[] = []
+  for (let i = 0; i < sorted.length; i++) {
+    let y = sorted[i].y
+    if (i > 0 && y - placed[i - 1] < minPx) y = placed[i - 1] + minPx
+    placed.push(y)
+  }
+  const over = placed.length ? placed[placed.length - 1] - maxPx : 0
+  if (over > 0) for (let i = 0; i < placed.length; i++) placed[i] -= over
+  const out: Record<string, number> = {}
+  sorted.forEach((e, i) => { out[e.key] = placed[i] })
+  return out
+}
