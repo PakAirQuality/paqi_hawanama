@@ -9,9 +9,10 @@ Definitions
 - active: registered and stations.active = true.
 - reporting: active with at least one valid PM2.5 reading (qc_state not INVALID)
   in the window (last 24 h, or the asked Pakistan day).
-- Province/city membership: stations.state_id / city_id when set; otherwise the
-  station point is placed by the province/city polygon (Punjab EPA and BAM rows
-  are registered without a state_id or city_id).
+- Province/city membership: stations.state_id / city_id when set; else the city's
+  province; else the nearest city (station-average centroid) within 25 km. Punjab
+  EPA and BAM rows are registered without a state_id, and some without a city_id;
+  the database has no province or city polygons (probe 2026-11-04).
 - Days are Pakistan days (Asia/Karachi). A station-day needs >= 6 valid hours.
 """
 
@@ -43,7 +44,7 @@ DEFINITIONS = {
     "registered": "a station row for Pakistan that is not a shadow-provider row (OpenAQ, ICIMOD) and not a test station",
     "active": "registered and flagged active by its provider catalogue",
     "reporting": "active with at least one valid PM2.5 reading (qc not INVALID) inside the window",
-    "membership": "province/city from the station's registry link, else by the province/city polygon containing the station point",
+    "membership": "province/city from the station's registry link, else its city's province, else the nearest city (station-average centroid) within 25 km",
     "day": "Pakistan calendar day (Asia/Karachi); a station-day needs at least 6 valid hours",
     "statistic": "reporting-station mean: unweighted across stations that reported, never an area or population average",
 }
@@ -68,14 +69,35 @@ REPORTING_EXISTS = f"""
               WHERE r.scope_type = 'station' AND r.scope_key = s.station_id
                 AND r.ts_utc >= :w0 AND r.ts_utc < :w1 AND {VALID_PM25})
 """
-# province name for rows without state_id (polygon containment), used only in station lists
-PROVINCE_LATERAL = """
-    LEFT JOIN LATERAL (
-        SELECT sp.name FROM states sp
-        WHERE sp.country_id = co.id AND sp.geom IS NOT NULL AND ST_Intersects(sp.geom, s.geom)
-        LIMIT 1
-    ) sp ON s.state_id IS NULL
+# Cities have no polygons or centroids in the database, so a city's position is the mean of its
+# registered stations. Rows without a city link (Punjab EPA, BAM) are assigned to the nearest
+# such centroid within 25 km; rows without a province link take their city's province.
+CITY_CENTROIDS_CTE = f"""
+    city_centroids AS (
+        SELECT c.id AS city_id, c.state_id, c.name AS city_name,
+               ST_SetSRID(ST_MakePoint(AVG(s.lon), AVG(s.lat)), 4326)::geography AS g
+        FROM cities c
+        JOIN countries co ON co.id = c.country_id
+        JOIN stations s ON s.city_id = c.id
+        WHERE co.name = '{COUNTRY}' AND c.active = true AND s.lat IS NOT NULL AND s.lon IS NOT NULL
+          AND COALESCE(s.metadata_json->>'ingest_mode', '') <> 'shadow'
+        GROUP BY c.id, c.state_id, c.name)
 """
+NEAREST_CITY_M = 25_000
+# the nearest city for rows without a city link; joined only when needed
+NEAREST_CITY_LATERAL = f"""
+    LEFT JOIN LATERAL (
+        SELECT cc.city_id, cc.state_id, cc.city_name FROM city_centroids cc
+        WHERE ST_DWithin(cc.g, s.geom, {NEAREST_CITY_M})
+        ORDER BY ST_Distance(cc.g, s.geom) LIMIT 1
+    ) nc ON s.city_id IS NULL
+    LEFT JOIN states cst ON cst.id = c.state_id
+    LEFT JOIN states ncst ON ncst.id = nc.state_id
+"""
+PROVINCE_NAME = "COALESCE(st.name, cst.name, ncst.name)"
+CITY_NAME = "COALESCE(c.name, nc.city_name)"
+NEAREST_CITY_ID = f"(SELECT cc.city_id FROM city_centroids cc WHERE ST_DWithin(cc.g, s.geom, {NEAREST_CITY_M}) ORDER BY ST_Distance(cc.g, s.geom) LIMIT 1)"
+NEAREST_CITY_STATE_ID = f"(SELECT cc.state_id FROM city_centroids cc WHERE ST_DWithin(cc.g, s.geom, {NEAREST_CITY_M}) ORDER BY ST_Distance(cc.g, s.geom) LIMIT 1)"
 
 
 # ── small helpers ─────────────────────────────────────────────────────────────
@@ -233,9 +255,10 @@ async def resolve_area(db: AsyncSession, area: str, name: str = "", lat: Optiona
         sid, sname, known = await _resolve_province(db, name)
         if sid is None:
             return {"message": f"Province '{name}' not found. Known provinces/territories: {', '.join(known)}."}
-        return Area("province", sname, """
-            (s.state_id = :area_sid OR (s.state_id IS NULL AND EXISTS (
-                SELECT 1 FROM states sp WHERE sp.id = :area_sid AND sp.geom IS NOT NULL AND ST_Intersects(sp.geom, s.geom))))
+        return Area("province", sname, f"""
+            (s.state_id = :area_sid
+             OR (s.state_id IS NULL AND c.state_id = :area_sid)
+             OR (s.state_id IS NULL AND s.city_id IS NULL AND {NEAREST_CITY_STATE_ID} = :area_sid))
         """, {"area_sid": sid})
     if kind == "city":
         city, cands = await resolve_city(db, name)
@@ -243,11 +266,8 @@ async def resolve_area(db: AsyncSession, area: str, name: str = "", lat: Optiona
             return {"message": f"'{name}' matches several cities: {', '.join(c.name for c in cands)}. Which one?"}
         if city is None:
             return {"message": f"City '{name}' not found among active Pakistan cities."}
-        return Area("city", city.name, """
-            (s.city_id = :area_cid OR (s.city_id IS NULL AND EXISTS (
-                SELECT 1 FROM cities cp WHERE cp.id = :area_cid AND (
-                    (cp.geom IS NOT NULL AND ST_Intersects(cp.geom, s.geom))
-                    OR (cp.geom IS NULL AND cp.centroid IS NOT NULL AND ST_DWithin(cp.centroid, s.geom, 25000))))))
+        return Area("city", city.name, f"""
+            (s.city_id = :area_cid OR (s.city_id IS NULL AND {NEAREST_CITY_ID} = :area_cid))
         """, {"area_cid": city.id}, lat=city.lat, lon=city.lon)
     if kind in ("radius", "near", "around"):
         if lat is None or lon is None:
@@ -287,6 +307,7 @@ async def station_inventory(db: AsyncSession, area: Area, *, as_of_day: Optional
         params["prov"] = provider
 
     totals = (await db.execute(text(f"""
+        WITH {CITY_CENTROIDS_CTE}
         SELECT COUNT(*) AS registered,
                COUNT(*) FILTER (WHERE s.active) AS active,
                COUNT(*) FILTER (WHERE s.active AND {REPORTING_EXISTS}) AS reporting
@@ -294,6 +315,7 @@ async def station_inventory(db: AsyncSession, area: Area, *, as_of_day: Optional
         WHERE {where}
     """), params)).fetchone()
     by_provider = (await db.execute(text(f"""
+        WITH {CITY_CENTROIDS_CTE}
         SELECT COALESCE(p.code, 'unknown') AS code, COALESCE(p.display_name, p.code, 'unknown') AS display_name,
                COUNT(*) AS registered, COUNT(*) FILTER (WHERE s.active) AS active,
                COUNT(*) FILTER (WHERE s.active AND {REPORTING_EXISTS}) AS reporting
@@ -313,10 +335,12 @@ async def station_inventory(db: AsyncSession, area: Area, *, as_of_day: Optional
     }
     if area.kind in ("national", "province"):
         by_city = (await db.execute(text(f"""
-            SELECT COALESCE(c.name, '(no city link)') AS city, COUNT(*) AS registered,
+            WITH {CITY_CENTROIDS_CTE}
+            SELECT COALESCE({CITY_NAME}, '(no city within 25 km)') AS city, COUNT(*) AS registered,
                    COUNT(*) FILTER (WHERE s.active) AS active,
                    COUNT(*) FILTER (WHERE s.active AND {REPORTING_EXISTS}) AS reporting
             {BASE_FROM}
+            {NEAREST_CITY_LATERAL}
             WHERE {where}
             GROUP BY 1 ORDER BY registered DESC, city LIMIT 40
         """), params)).fetchall()
@@ -325,12 +349,13 @@ async def station_inventory(db: AsyncSession, area: Area, *, as_of_day: Optional
     if list_stations:
         lim = max(1, min(int(limit or 50), MAX_LIST))
         rows = (await db.execute(text(f"""
-            SELECT s.station_id, s.name, c.name AS city, COALESCE(st.name, sp.name) AS province,
+            WITH {CITY_CENTROIDS_CTE}
+            SELECT s.station_id, s.name, {CITY_NAME} AS city, {PROVINCE_NAME} AS province,
                    COALESCE(p.code, 'unknown') AS provider, s.lat, s.lon, s.active,
                    ({REPORTING_EXISTS}) AS reporting,
                    obs.first_obs, obs.last_obs
             {BASE_FROM}
-            {PROVINCE_LATERAL}
+            {NEAREST_CITY_LATERAL}
             LEFT JOIN LATERAL (
                 SELECT MIN(r.ts_utc) AS first_obs, MAX(r.ts_utc) AS last_obs FROM readings r
                 WHERE r.scope_type = 'station' AND r.scope_key = s.station_id
@@ -361,14 +386,15 @@ async def nearest_stations(db: AsyncSession, lat: float, lon: float, *, k: int =
     w1 = datetime.now(timezone.utc).replace(microsecond=0)
     w0 = w1 - timedelta(hours=24)
     rows = (await db.execute(text(f"""
-        WITH pt AS (SELECT ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography AS g)
-        SELECT s.station_id, s.name, c.name AS city, COALESCE(st.name, sp.name) AS province,
+        WITH pt AS (SELECT ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography AS g),
+        {CITY_CENTROIDS_CTE}
+        SELECT s.station_id, s.name, {CITY_NAME} AS city, {PROVINCE_NAME} AS province,
                COALESCE(p.code, 'unknown') AS provider, s.lat, s.lon, s.active,
                ST_Distance(s.geom, pt.g) AS dist_m,
                degrees(ST_Azimuth(pt.g::geometry, s.geom::geometry)) AS bearing,
                latest.pm25 AS latest_pm25, latest.ts_utc AS latest_ts
         {BASE_FROM}
-        {PROVINCE_LATERAL}
+        {NEAREST_CITY_LATERAL}
         CROSS JOIN pt
         LEFT JOIN LATERAL (
             SELECT r.pm25, r.ts_utc FROM readings r
@@ -537,7 +563,8 @@ async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: 
             per_station = False
         else:
             source_sql = f"""
-                WITH members AS (
+                WITH {CITY_CENTROIDS_CTE},
+                members AS (
                     SELECT s.station_id {BASE_FROM} WHERE {where}),
                 hourly AS (
                     SELECT r.scope_key AS sk, time_bucket('1 hour', r.ts_utc) AS h, AVG(r.pm25) AS v

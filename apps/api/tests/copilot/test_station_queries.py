@@ -111,12 +111,13 @@ async def test_resolve_city_returns_candidates_when_ambiguous_and_none_when_unkn
 async def test_resolve_area_province_uses_state_id_or_polygon_containment():
     area = await q.resolve_area(FakeDB(), "province", "KPK")
     assert isinstance(area, q.Area) and area.name == "Khyber Pakhtunkhwa" and area.params == {"area_sid": 5}
-    assert "s.state_id = :area_sid" in area.where and "ST_Intersects(sp.geom, s.geom)" in area.where
+    assert "s.state_id = :area_sid" in area.where and "c.state_id = :area_sid" in area.where
+    assert "FROM city_centroids cc WHERE ST_DWithin(cc.g, s.geom, 25000)" in area.where     # Punjab EPA / BAM rows
 
 
 async def test_resolve_area_city_and_unknown_and_ambiguous():
     area = await q.resolve_area(FakeDB(), "city", "Peshawar")
-    assert area.name == "Peshawar" and area.params == {"area_cid": 11} and "ST_DWithin(cp.centroid, s.geom, 25000)" in area.where
+    assert area.name == "Peshawar" and area.params == {"area_cid": 11} and "s.city_id IS NULL AND (SELECT cc.city_id FROM city_centroids" in area.where
     assert "not found" in (await q.resolve_area(FakeDB(), "city", "Atlantis"))["message"]
     assert "several cities" in (await q.resolve_area(FakeDB(), "city", "Kotl"))["message"]
     assert "Known provinces" in (await q.resolve_area(FakeDB(), "province", "Narnia"))["message"]
@@ -173,7 +174,9 @@ async def test_inventory_list_is_capped_and_flags_truncation():
                                   "provider": "airvisual", "lat": 34.0, "lon": 71.5, "active": True, "reporting": True,
                                   "first_obs": "2026-11-03", "last_obs": "2026-11-03 12:00Z"}
     sql, params = db.sql("obs.first_obs")
-    assert params["lim"] == 101 and "ST_Intersects(sp.geom, s.geom)" in sql and "ORDER BY s.active DESC, s.name" in sql
+    assert params["lim"] == 101 and "ORDER BY s.active DESC, s.name" in sql
+    assert sql.startswith("WITH city_centroids AS") and "COALESCE(st.name, cst.name, ncst.name) AS province" in sql
+    assert "nc ON s.city_id IS NULL" in sql
 
 
 # ── nearest ──────────────────────────────────────────────────────────────────
