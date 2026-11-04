@@ -87,6 +87,7 @@ def test_seasons_r7_and_complete_season():
     assert out["season"]["complete"] is True and out["today_index"] is None and len(out["days"]) == 47
     cur = next(y for y in out["years"] if y["year"] == 2026)
     assert cur["fires"][5:12] == [1] * 7 and cur["r7"][5:8] == [None, None, None] and cur["r7"][8] == 1.0
+    assert cur["r7"][12] is None and cur["r7"][13] is None                 # the mean stops with the data, no run-on
     assert out["headline"]["window"]["end"] == "2026-05-31" and out["headline"]["fires"] == 7
 
 
