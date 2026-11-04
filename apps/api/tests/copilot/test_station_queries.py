@@ -34,12 +34,15 @@ class Result:
         return NS(first=lambda: dicts[0] if dicts else None, all=lambda: dicts)
 
 
-# registered stations as station_provinces() reads them: coordinates decide the province,
-# the registry (st/cst) is wrong for the Karachi and Peshawar rows on purpose
-REGISTRY = [NS(station_id="k" * 16, lat=24.86, lon=67.0, city_id=20, registry_province="Punjab"),      # Karachi filed under Punjab
-            NS(station_id="p" * 16, lat=34.0, lon=71.55, city_id=11, registry_province="Punjab"),      # Peshawar filed under Punjab
+# registered stations as station_provinces() reads them: the registry link decides the province
+# (the registry-provinces task keeps it right); the polygon only fills a row with no link and
+# flags twin-city border cases such as the Rawalpindi row inside the simplified ICT polygon
+REGISTRY = [NS(station_id="k" * 16, lat=24.86, lon=67.0, city_id=20, registry_province="Sindh"),
+            NS(station_id="p" * 16, lat=34.0, lon=71.55, city_id=11, registry_province="Khyber Pakhtunkhwa"),
             NS(station_id="q" * 16, lat=34.01, lon=71.56, city_id=11, registry_province="Khyber Pakhtunkhwa"),
             NS(station_id="l" * 16, lat=31.52, lon=74.35, city_id=10, registry_province="Punjab"),
+            NS(station_id="r" * 16, lat=33.60, lon=73.14, city_id=30, registry_province="Punjab"),     # Rawalpindi, ICT polygon
+            NS(station_id="z" * 16, lat=31.5, lon=74.3, city_id=None, registry_province=None),         # EPA row with no link
             NS(station_id="n" * 16, lat=None, lon=None, city_id=None, registry_province="Sindh")]       # no coordinates
 
 
@@ -126,44 +129,33 @@ async def test_resolve_city_returns_candidates_when_ambiguous_and_none_when_unkn
     assert await q.resolve_city(FakeDB(), "Atlantis") == (None, [])
 
 
-@pytest.mark.parametrize("place, lat, lon, expected", [
-    ("Peshawar", 34.0, 71.55, "Khyber Pakhtunkhwa"), ("Charsadda", 34.1529, 71.7475, "Khyber Pakhtunkhwa"),
-    ("Karachi", 24.86, 67.0, "Sindh"), ("Islamabad F-6", 33.72, 73.06, "Islamabad"), ("Skardu", 35.3, 75.6, "Gilgit-Baltistan"),
-    ("Muzaffarabad", 34.37, 73.47, "Azad Kashmir"), ("Quetta", 30.2, 67.0, "Balochistan"), ("Lahore", 31.52, 74.35, "Punjab"),
-    ("Arabian Sea", 23.0, 66.0, None), ("Delhi", 28.6, 77.2, None), ("no coordinates", None, None, None)])
-def test_province_for_point_uses_the_adm1_boundaries(place, lat, lon, expected):
-    assert q.province_for_point(lat, lon) == expected
-    assert {n for n, _ in q.province_polygons()} == {"Azad Kashmir", "Balochistan", "Gilgit-Baltistan", "Islamabad",
-                                                       "Khyber Pakhtunkhwa", "Punjab", "Sindh"}
-
-
-async def test_station_provinces_follow_coordinates_and_keep_the_registry_only_without_them():
+async def test_station_provinces_follow_the_registry_and_fall_back_to_the_polygon_only_without_a_link():
     db = FakeDB()
     m = await q.station_provinces(db)
-    assert m["k" * 16] == {"province": "Sindh", "registry_province": "Punjab", "geo": True, "city_id": 20}
-    assert m["p" * 16]["province"] == "Khyber Pakhtunkhwa" and m["n" * 16] == {"province": "Sindh", "registry_province": "Sindh", "geo": False, "city_id": None}
+    assert m["k" * 16] == {"province": "Sindh", "registry_province": "Sindh", "geo_province": "Sindh", "city_id": 20}
+    assert m["r" * 16] == {"province": "Punjab", "registry_province": "Punjab", "geo_province": "Islamabad", "city_id": 30}
+    assert m["z" * 16] == {"province": "Punjab", "registry_province": None, "geo_province": "Punjab", "city_id": None}
+    assert m["n" * 16] == {"province": "Sindh", "registry_province": "Sindh", "geo_province": None, "city_id": None}
     sql, _ = db.sql("AS registry_province")
     assert "co.name = 'Pakistan'" in sql and "'openaq'" in sql
     await q.station_provinces(db)
     assert sum(1 for s, _ in db.calls if "AS registry_province" in s) == 1          # cached
+    assert q.province_for_point(33.72, 73.06) == "Islamabad"                        # shared rule re-exported
 
 
-async def test_resolve_area_province_is_the_set_of_stations_inside_the_boundary():
+async def test_resolve_area_province_is_the_registry_set_with_a_polygon_mismatch_count():
     area = await q.resolve_area(FakeDB(), "province", "KPK")
     assert isinstance(area, q.Area) and area.name == "Khyber Pakhtunkhwa"
     assert area.where == "s.station_id = ANY(:area_ids)"
     assert area.params["area_ids"] == ["p" * 16, "q" * 16] and area.params["area_city_ids"] == [11] and area.params["area_sid"] == 5
-    assert area.mismatch == 1                                                        # the Peshawar row filed under Punjab
+    assert area.mismatch == 0
+    punjab = await q.resolve_area(FakeDB(), "province", "Punjab")
+    assert punjab.params["area_ids"] == ["l" * 16, "r" * 16, "z" * 16] and punjab.params["area_city_ids"] == [10, 30]
+    assert punjab.mismatch == 1                                                      # the Rawalpindi row inside the ICT polygon
+    islamabad = await q.resolve_area(FakeDB(), "province", "ICT")
+    assert islamabad.params["area_ids"] == []                                        # the registry, not the polygon, decides
     sindh = await q.resolve_area(FakeDB(), "province", "Sindh")
-    assert sindh.params["area_ids"] == ["k" * 16, "n" * 16]        # Karachi by coordinates; the no-coordinate row by its registry link
-    assert sindh.mismatch == 1 and sindh.params["area_city_ids"] == [20]   # the Karachi row is filed under Punjab
-
-
-async def test_resolve_area_province_falls_back_to_registry_links_without_polygons(monkeypatch):
-    monkeypatch.setattr(q, "_PROVINCE_POLYS", [])
-    area = await q.resolve_area(FakeDB(), "province", "KPK")
-    assert area.params == {"area_sid": 5} and "s.state_id = :area_sid" in area.where and "c.state_id = :area_sid" in area.where
-    assert "FROM city_centroids cc WHERE ST_DWithin(cc.g, s.geom, 25000)" in area.where     # Punjab EPA / BAM rows
+    assert sindh.params["area_ids"] == ["k" * 16, "n" * 16] and sindh.mismatch == 0
 
 
 async def test_resolve_area_city_and_unknown_and_ambiguous():
@@ -211,8 +203,10 @@ async def test_inventory_counts_window_and_sql():
     sql, params = db.sql("COUNT(*) AS registered")
     assert "co.name = 'Pakistan'" in sql and "s.station_id = ANY(:area_ids)" in sql and "EXISTS (SELECT 1 FROM readings r" in sql
     assert params["area_ids"] == ["p" * 16, "q" * 16] and (params["w1"] - params["w0"]).total_seconds() == 86400
-    assert out["registry_mismatch"] == 1 and "filed under a different province" in out["registry_note"]
+    assert out["polygon_mismatch"] == 0 and "polygon_note" not in out
     assert any("SET LOCAL statement_timeout" in s for s, _ in db.calls)
+    punjab = await q.station_inventory(db, await q.resolve_area(db, "province", "Punjab"))
+    assert punjab["polygon_mismatch"] == 1 and "inside another province's boundary" in punjab["polygon_note"]
 
 
 async def test_inventory_as_of_day_is_a_pakistan_day_and_provider_filter():
@@ -253,19 +247,22 @@ async def test_nearest_uses_the_geom_index_orders_by_distance_and_clamps():
     assert params == {**params, "k": 25, "max_m": 500000.0}
     assert out["stations"][0]["distance_km"] == 1.23 and out["stations"][0]["reporting"] is True
     assert out["stations"][1]["reporting"] is False and out["stations"][1]["latest_pm25"] is None
-    assert "registry_province" not in out["stations"][0]            # not a registered id in the fake map → row untouched
+    assert "polygon_province" not in out["stations"][0]             # not a registered id in the fake map → row untouched
     assert out["origin"]["name"] == "Mardan (city)" and out["message"] is None
 
 
-async def test_lists_report_the_geographic_province_and_flag_the_registry_when_it_differs():
-    rows = [NS(station_id="p" * 16, name="Peshawar Node", city="Peshawar", province="Punjab", provider="airvisual-paqi",
-               lat=34.0, lon=71.55, active=True, reporting=True, first_obs=T, last_obs=T),
+async def test_lists_keep_the_registry_province_fill_a_missing_one_and_note_the_polygon_when_it_differs():
+    rows = [NS(station_id="r" * 16, name="Gulberg Greens", city="Rawalpindi", province="Punjab", provider="airvisual-paqi",
+               lat=33.60, lon=73.14, active=True, reporting=True, first_obs=T, last_obs=T),
             NS(station_id="q" * 16, name="GT Road", city="Peshawar", province="Khyber Pakhtunkhwa", provider="airvisual",
-               lat=34.01, lon=71.56, active=True, reporting=False, first_obs=T, last_obs=T)]
-    out = await q.station_inventory(FakeDB(list_rows=rows), q.Area("city", "Peshawar", "s.city_id = :area_cid", {"area_cid": 11}), list_stations=True)
-    first, second = out["stations"]
-    assert first["province"] == "Khyber Pakhtunkhwa" and first["registry_province"] == "Punjab"
-    assert second["province"] == "Khyber Pakhtunkhwa" and "registry_province" not in second
+               lat=34.01, lon=71.56, active=True, reporting=False, first_obs=T, last_obs=T),
+            NS(station_id="z" * 16, name="EPA Lahore", city=None, province=None, provider="punjab",
+               lat=31.5, lon=74.3, active=True, reporting=True, first_obs=T, last_obs=T)]
+    out = await q.station_inventory(FakeDB(list_rows=rows), q.Area("national", "Pakistan"), list_stations=True)
+    first, second, third = out["stations"]
+    assert first["province"] == "Punjab" and first["polygon_province"] == "Islamabad"
+    assert second["province"] == "Khyber Pakhtunkhwa" and "polygon_province" not in second
+    assert third["province"] == "Punjab" and "polygon_province" not in third
 
 
 async def test_nearest_with_no_station_in_range_says_so():
@@ -301,7 +298,7 @@ async def test_long_range_city_uses_the_hourly_city_aggregate():
     db = FakeDB(period_rows=[NS(b=date(2025, 1, 1), mean=100.0, median=98.0, max=300.0, min=20.0, n_station_days=365, n_sk=1, n_st_max=50, n_days=365)])
     out = await q.period_stats(db, entity="province", name="Punjab", start="2025", end="2025", bucket="year")
     sql, params = db.sql("FROM daily")
-    assert "FROM city_hourly_from_stations h" in sql and "c.id = ANY(:area_city_ids)" in sql and params["area_city_ids"] == [10]
+    assert "FROM city_hourly_from_stations h" in sql and "c.id = ANY(:area_city_ids)" in sql and params["area_city_ids"] == [10, 30]
     assert out["rows"][0]["max_stations_per_hour"] == 50 and "hourly city aggregate" in out["statistic"]
     assert "leap" not in sql
     assert "limit is 120" not in out.get("message", "")

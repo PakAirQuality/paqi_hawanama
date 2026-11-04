@@ -16,6 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.services.aqi import AqiResult, aqi_provenance, pm25_to_aqi
+from app.services.geo_utils import pakistan_state_ids, province_for_point
 
 logger = logging.getLogger(__name__)
 
@@ -148,20 +149,24 @@ async def upsert_bam_station(
     name: str, lat: float, lon: float, tz: str = DEFAULT_TZ,
 ) -> str:
     station_id = station_id_for_bam(source_station_id)
+    # province from the coordinates (geo_utils rule); filled on insert, never overwritten
+    province = province_for_point(lat, lon)
+    state_id = (await pakistan_state_ids(db)).get(province) if province else None
     await db.execute(text("""
         INSERT INTO stations (
-          station_id, country_id, name, lat, lon,
+          station_id, country_id, state_id, name, lat, lon,
           provider_id, source_station_id, timezone, monitor_type, active
         )
         VALUES (
-          :station_id, :country_id, :name, :lat, :lon,
+          :station_id, :country_id, :state_id, :name, :lat, :lon,
           :provider_id, :source_station_id, :tz, 'BAM', true
         )
         ON CONFLICT (provider_id, source_station_id) DO UPDATE
         SET name=EXCLUDED.name, lat=EXCLUDED.lat, lon=EXCLUDED.lon,
-            monitor_type='BAM', active=true, station_id=EXCLUDED.station_id
+            monitor_type='BAM', active=true, station_id=EXCLUDED.station_id,
+            state_id=COALESCE(stations.state_id, EXCLUDED.state_id)
     """), dict(
-        station_id=station_id, country_id=COUNTRY_ID_PK, name=name,
+        station_id=station_id, country_id=COUNTRY_ID_PK, state_id=state_id, name=name,
         lat=lat, lon=lon, provider_id=provider_id,
         source_station_id=source_station_id, tz=tz,
     ))

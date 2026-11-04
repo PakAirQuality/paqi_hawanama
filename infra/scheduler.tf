@@ -577,3 +577,40 @@ resource "google_cloud_scheduler_job" "icimod_ingestion" {
     max_backoff_duration = "300s"
   }
 }
+
+# ---------------------------------------------------------------------------
+# Station registry: province links by one rule (city first, geography second).
+# Weekly dry run only — the run's details in ops.ingest_runs list what the rule would
+# change (e.g. a new import filed under the wrong province). Applying is a reviewed
+# POST ...?dry_run=false by an operator. Starts paused (house rule).
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_scheduler_job" "registry_provinces_weekly" {
+  name             = "registry-provinces-weekly"
+  description      = "Registry: weekly dry run of the province reconcile (details in ops.ingest_runs)"
+  schedule         = "20 2 * * 1"
+  time_zone        = "UTC"
+  attempt_deadline = "300s"
+  paused           = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/registry/provinces?dry_run=true"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "600s"
+    min_backoff_duration = "60s"
+    max_backoff_duration = "300s"
+  }
+}

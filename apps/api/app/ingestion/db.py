@@ -217,6 +217,8 @@ class DatabaseService:
                 name = EXCLUDED.name,
                 lat = EXCLUDED.lat,
                 lon = EXCLUDED.lon,
+                state_id = COALESCE(stations.state_id, EXCLUDED.state_id),
+                city_id = COALESCE(stations.city_id, EXCLUDED.city_id),
                 metadata_json = EXCLUDED.metadata_json,
                 updated_at = NOW(),
                 active = EXCLUDED.active,

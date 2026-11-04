@@ -252,6 +252,7 @@ class StationDiscoveryTask:
 
                                 logger.info("Found %d stations in %s, %s", len(stations), city, state)
                                 total_stations_discovered += len(stations)
+                                self._warn_if_city_province_disagrees(country, state, city, stations)
 
                                 seen_source_ids = set()
                                 seen_names = set()
@@ -411,6 +412,29 @@ class StationDiscoveryTask:
             # ------------------------------------------------------------------
 
             return final_summary
+
+    @staticmethod
+    def _warn_if_city_province_disagrees(country: str, state: str, city: str, stations: List[Dict[str, Any]]) -> None:
+        """IQAir's state is kept (it is the registry's source); log when the coordinates say otherwise.
+
+        Pakistan only. Uses the shared rule (geo_utils.resolve_city_province): the median of the
+        stations' coordinates inside a different province polygon, beyond the border tolerance.
+        """
+        if country != "Pakistan":
+            return
+        try:
+            from app.services.geo_utils import resolve_city_province
+            pts = []
+            for st in stations:
+                coords = (st.get("location") or {}).get("coordinates") or []
+                if len(coords) == 2:
+                    pts.append((coords[1], coords[0]))      # IQAir returns [lon, lat]
+            d = resolve_city_province(stored_state=state, station_points=pts)
+            if d.rule == "geography" and d.province != state:
+                logger.warning("Province check: IQAir files %s under %s but its %d stations sit in %s (%s km inside); "
+                               "run /tasks/registry/provinces to review", city, state, len(pts), d.province, d.border_km)
+        except Exception as exc:  # noqa: BLE001 — a check, never a reason to fail discovery
+            logger.debug("Province check skipped for %s: %s", city, exc)
 
     def _write_union_manifest_and_summary(self, run_id: str, rows: List[Dict[str, Any]], summary: Dict[str, Any], cities_successfully_fetched: set) -> None:
         """
