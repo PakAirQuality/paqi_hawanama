@@ -35,6 +35,37 @@ def test_sources_drop_snpp_after_its_end_date_and_use_sp_beyond_nrt_retention():
     assert fires.sources_for(date(2026, 5, 10), today) == ["VIIRS_NOAA20_SP", "VIIRS_NOAA21_SP", "VIIRS_SNPP_SP"]
 
 
+AVAIL = """data_id,min_date,max_date
+VIIRS_NOAA20_NRT,2026-08-01,2026-11-04
+VIIRS_NOAA20_SP,2018-04-01,2026-07-31
+VIIRS_NOAA21_NRT,2024-01-17,2026-11-04
+VIIRS_NOAA21_SP,2023-03-01,2026-07-31
+VIIRS_SNPP_NRT,2026-08-01,2026-11-02
+VIIRS_SNPP_SP,2012-01-20,2026-07-31
+"""
+
+
+async def test_availability_table_decides_sp_versus_nrt_per_satellite():
+    avail = await fires.data_availability(_Http({}, availability=AVAIL), "k")
+    assert avail["VIIRS_NOAA20_SP"] == (date(2018, 4, 1), date(2026, 7, 31)) and len(avail) == 6
+    today = date(2026, 11, 4)
+    assert fires.sources_for(date(2026, 7, 31), today, avail) == ["VIIRS_NOAA20_SP", "VIIRS_NOAA21_SP", "VIIRS_SNPP_SP"]
+    assert fires.sources_for(date(2026, 8, 1), today, avail) == ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "VIIRS_SNPP_NRT"]   # 95 days old but NRT covers it
+    assert fires.sources_for(date(2026, 11, 3), today, avail) == ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT"]                     # SNPP retired
+    assert fires.sources_for(date(2017, 1, 1), today, avail) == ["VIIRS_SNPP_SP"]                                            # only Suomi NPP flew
+    assert fires.sources_for(date(2010, 1, 1), today, avail) == list(fires.SP_SOURCES)                                        # nothing covers it: rule
+    assert await fires.data_availability(_Http({}, availability=None), "k") == {}
+    assert await fires.data_availability(_Http({}, availability="garbage"), "k") == {}
+
+
+async def test_ingest_window_uses_the_availability_table_when_it_answers():
+    http = _Http({"VIIRS_NOAA20_NRT": _Resp(200, RAW), "VIIRS_NOAA21_NRT": _Resp(200, RAW), "VIIRS_SNPP_NRT": _Resp(200, RAW)}, availability=AVAIL)
+    out = await fires.ingest_window(http=http, key="k", bucket=_Bucket(), gcs_client=None,
+                                    now_utc=datetime(2026, 8, 5, 23, 59, tzinfo=timezone.utc), window_days=5, real_today=date(2026, 11, 4))
+    assert out.sources_basis == "availability_table" and [s.source for s in out.sources] == ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT", "VIIRS_SNPP_NRT"]
+    assert all("/5/2026-08-01" in u for u in http.urls)
+
+
 def _store(files):
     return lambda path: files.get(path)
 
@@ -83,9 +114,10 @@ class _Http:
     """by_source maps a FIRMS source to a response (or a list of responses, one per attempt);
     the key-status call answers `key_status` (valid by default)."""
 
-    def __init__(self, by_source, key_status=KEY_OK):
+    def __init__(self, by_source, key_status=KEY_OK, availability=None):
         self.by_source = by_source
         self.key_status = key_status
+        self.availability = availability          # CSV text, or None → the endpoint answers 404
         self.urls = []
         self.key_calls = 0
 
@@ -94,6 +126,9 @@ class _Http:
             self.key_calls += 1
             assert params and "MAP_KEY" in params
             return _Resp(200, self.key_status)
+        if "data_availability" in url:
+            assert "/k/" in url or "/dead/" in url
+            return _Resp(200, self.availability) if self.availability else _Resp(404, "")
         self.urls.append(url)
         for src, resp in self.by_source.items():
             if f"/{src}/" in url:

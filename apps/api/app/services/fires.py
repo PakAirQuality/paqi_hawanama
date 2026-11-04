@@ -67,6 +67,8 @@ logger = logging.getLogger(__name__)
 PK_TZ = ZoneInfo("Asia/Karachi")
 FIRMS_API_BASE = "https://firms.modaps.eosdis.nasa.gov/api/area/csv"
 FIRMS_KEY_STATUS_URL = "https://firms.modaps.eosdis.nasa.gov/mapserver/mapkey_status/"
+FIRMS_AVAILABILITY_URL = "https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/{key}/ALL"
+PRODUCT_FAMILIES = ("VIIRS_NOAA20", "VIIRS_NOAA21", "VIIRS_SNPP")
 FIRMS_MAX_WINDOW_DAYS = 5   # the area API serves at most 5 days per request ("Invalid day range. Expects [1..5]", 2026-11)
 NRT_RETENTION_DAYS = 90     # NRT products keep roughly the last three months; older days come from the SP products
 RETRY_DELAY_S = 5.0
@@ -79,9 +81,23 @@ FIELDNAMES = ["latitude", "longitude", "frp", "confidence", "acq_date", "acq_tim
 LAYER_NAME = "Satellite fire detections"
 
 
-def sources_for(day: date, today: Optional[date] = None) -> List[str]:
-    """Products to request for a window starting on ``day``: NRT for the last NRT_RETENTION_DAYS
-    (Suomi NPP NRT until SNPP_END), the standard-processing products for older days."""
+def sources_for(day: date, today: Optional[date] = None,
+                availability: Optional[Dict[str, tuple]] = None) -> List[str]:
+    """Products to request for a window starting on ``day``.
+
+    With FIRMS' data-availability table (``data_availability``), each satellite's SP product is
+    used while it covers the day and its NRT product otherwise (Suomi NPP NRT until SNPP_END).
+    Without the table: NRT for the last NRT_RETENTION_DAYS, SP for older days."""
+    if availability:
+        srcs: List[str] = []
+        for fam in PRODUCT_FAMILIES:
+            sp, nrt = availability.get(f"{fam}_SP"), availability.get(f"{fam}_NRT")
+            if sp and sp[0] <= day <= sp[1]:
+                srcs.append(f"{fam}_SP")
+            elif nrt and nrt[0] <= day <= nrt[1] and not (fam == "VIIRS_SNPP" and day >= SNPP_END):
+                srcs.append(f"{fam}_NRT")
+        if srcs:
+            return srcs
     today = today or datetime.now(timezone.utc).date()
     if day < today - timedelta(days=NRT_RETENTION_DAYS):
         return list(SP_SOURCES)
@@ -89,6 +105,24 @@ def sources_for(day: date, today: Optional[date] = None) -> List[str]:
     if day < SNPP_END:
         srcs.append("VIIRS_SNPP_NRT")
     return srcs
+
+
+async def data_availability(http, key: str) -> Dict[str, tuple]:
+    """{product: (min_date, max_date)} from FIRMS' availability table; {} when it cannot be read."""
+    try:
+        resp = await http.get(FIRMS_AVAILABILITY_URL.format(key=key))
+        if resp.status_code != 200:
+            return {}
+        out: Dict[str, tuple] = {}
+        for row in csv.DictReader(io.StringIO(resp.text or "")):
+            try:
+                out[row["data_id"].strip()] = (date.fromisoformat(row["min_date"].strip()), date.fromisoformat(row["max_date"].strip()))
+            except (KeyError, ValueError, AttributeError):
+                continue
+        return out
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("FIRMS availability table unavailable (%s); using the retention rule", type(exc).__name__)
+        return {}
 
 
 def blob_paths(day: date) -> tuple[str, str]:
@@ -184,6 +218,7 @@ class IngestOutcome:
     rows_fetched: int = 0                          # rows parsed from every source
     rows_written: int = 0                          # rows in the day files rewritten
     latest_acq_utc: Optional[datetime] = None      # newest detection seen
+    sources_basis: str = "retention_rule"          # how the products were chosen
 
     @property
     def status(self) -> str:
@@ -274,10 +309,12 @@ async def ingest_window(
     window_days = max(1, min(int(window_days), FIRMS_MAX_WINDOW_DAYS))
     today_utc = now_utc.date()
     start_utc = today_utc - timedelta(days=window_days - 1)
-    srcs = sources or sources_for(start_utc, real_today)      # real_today: the clock, not the as-of date of a backfill
     outcome = IngestOutcome()
 
     outcome.key = await check_key(http, key)
+    availability = {} if sources else await data_availability(http, key)
+    srcs = sources or sources_for(start_utc, real_today, availability)   # real_today: the clock, not a backfill's as-of date
+    outcome.sources_basis = "availability_table" if availability else "retention_rule"
     if outcome.key.get("status") == "invalid":
         # Do not spend the (possibly rate-limited) area requests on a key FIRMS rejects.
         outcome.sources = [SourceResult(src, "error", error="invalid_key") for src in srcs]
