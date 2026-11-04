@@ -37,6 +37,45 @@ export interface ForecastEntry {
 
 export type ForecastBasis = 'model' | 'neighbours' | 'prior'
 
+/** One lead of the hourly nowcast (+3/+6/+12/+24 h); values are null when basis is "prior" */
+export interface NowcastLeadValue {
+  lead_hours: number
+  /** ISO UTC instant the value is for */
+  valid_time: string
+  pm25: number | null
+  q75: number | null
+  q90: number | null
+}
+
+export interface NowcastStation {
+  sensor_id: number
+  station_id: string | null
+  /** Hawanama station ids that map onto this site (renamed or re-keyed stations) */
+  member_station_ids: string[]
+  station_name: string | null
+  city: string | null
+  latitude: number
+  longitude: number
+  basis: ForecastBasis | string
+  /** Enough recent hourly readings (≥12 in 24 h, newest ≤3 h old) to run the model on this station */
+  forecastable: boolean
+  last_obs: number | null
+  obs_age_h: number | null
+  n_valid_24h: number
+  leads: NowcastLeadValue[]
+}
+
+/** nowcast/latest.json as published by the nowcast job every 3 h */
+export interface NowcastResponse {
+  init_time: string
+  generated_at: string
+  model_tag: string
+  leads: number[]
+  n_stations: number
+  data_quality: Record<string, unknown>
+  stations: NowcastStation[]
+}
+
 export const BASIS_LABEL: Record<string, string> = {
   model: 'From station observations',
   neighbours: 'Estimated from nearby stations (no live data here)',

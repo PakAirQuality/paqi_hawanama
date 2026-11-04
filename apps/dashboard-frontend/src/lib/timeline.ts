@@ -1,15 +1,39 @@
 // The Tracker's timeline: past days, then today's live readings, then the forecast days.
 
-import type { CurrentStation, ForecastEntry } from '@/components/analyst-desk/types'
+import type { CurrentStation, ForecastEntry, NowcastResponse, NowcastStation } from '@/components/analyst-desk/types'
 import type { StationReading } from '@/components/ops-pipeline/types'
 
 export type ForecastLead = 1 | 2 | 3
-/** Today or a forecast day; a past day is a plain YYYY-MM-DD date. */
-export type FutureStep = 'now' | ForecastLead
+/** Hours ahead the nowcast covers (issued every 3 h) */
+export type NowcastLead = 3 | 6 | 12 | 24
+export const NOWCAST_LEADS: readonly NowcastLead[] = [3, 6, 12, 24]
+/** An hourly nowcast step: the PM2.5 expected `h` hours after the cycle's init time */
+export interface HourStep { kind: 'hour'; h: NowcastLead }
+/** Today, an hourly nowcast step or a forecast day; a past day is a plain YYYY-MM-DD date. */
+export type FutureStep = 'now' | HourStep | ForecastLead
 export type TimelineStep = string | FutureStep
 
 export const isForecastLead = (step: TimelineStep | null): step is ForecastLead => typeof step === 'number'
+export const isHourStep = (step: TimelineStep | null | undefined): step is HourStep =>
+  typeof step === 'object' && step !== null && step.kind === 'hour'
 const isLead = (n: number): n is ForecastLead => n === 1 || n === 2 || n === 3
+const isNowcastLead = (n: number): n is NowcastLead => n === 3 || n === 6 || n === 12 || n === 24
+export const hourStep = (h: NowcastLead): HourStep => ({ kind: 'hour', h })
+
+/** Stable key for a step (object steps cannot be compared by identity): 'now' | 'h6' | '2' | a date */
+export const stepKey = (step: TimelineStep | null | undefined): string =>
+  step == null ? '' : isHourStep(step) ? `h${step.h}` : String(step)
+export const sameStep = (a: TimelineStep | null | undefined, b: TimelineStep | null | undefined) => stepKey(a) === stepKey(b)
+
+/** The `?view=` value for a step: today | h3..h24 | days ahead (given by the caller for forecast days) */
+export function parseViewParam(v: string | null): { today?: true; hour?: NowcastLead; daysAhead?: number } | null {
+  if (!v) return null
+  if (v === 'today') return { today: true }
+  const h = /^h(\d+)$/.exec(v)
+  if (h) { const n = Number(h[1]); return isNowcastLead(n) ? { hour: n } : null }
+  if (v === '1' || v === '2' || v === '3') return { daysAhead: Number(v) }
+  return null
+}
 
 /** Forecast days still ahead of `today`. A stalled forecast job then shows nothing, not old numbers. */
 export function availableLeads(forecasts: ForecastEntry[], today: string): ForecastLead[] {
@@ -86,6 +110,83 @@ export function stationForecastDays(forecasts: ForecastEntry[], today: string, n
     days.set(f.lead_days, { date: f.target_date, lead: f.lead_days, pm25: f.pm25_forecast, high: f.pm25_q90, basis: f.forecast_basis ?? undefined })
   }
   return [...days.values()].sort((a, b) => a.lead - b.lead)
+}
+
+// ── Hourly nowcast ──
+
+const leadValue = (s: NowcastStation, h: NowcastLead) => s.leads.find(l => l.lead_hours === h) ?? null
+
+/** When the nowcast's values for `h` hours ahead are for (ISO UTC), or null when the cycle lacks that lead. */
+export function nowcastValidTime(nowcast: NowcastResponse | null | undefined, h: NowcastLead): string | null {
+  if (!nowcast) return null
+  for (const s of nowcast.stations) {
+    const v = leadValue(s, h)
+    if (v) return v.valid_time
+  }
+  return null
+}
+
+/** Nowcast leads still ahead of `nowIso` with at least one station value. A stalled job then shows nothing. */
+export function availableHours(nowcast: NowcastResponse | null | undefined, nowIso: string): NowcastLead[] {
+  if (!nowcast) return []
+  const now = Date.parse(nowIso)
+  const out: NowcastLead[] = []
+  for (const h of NOWCAST_LEADS) {
+    const valid = nowcastValidTime(nowcast, h)
+    if (!valid || Date.parse(valid) <= now) continue
+    if (nowcast.stations.some(s => leadValue(s, h)?.pm25 != null)) out.push(h)
+  }
+  return out
+}
+
+/** Minutes between the cycle's init time and `nowIso`. */
+export const nowcastAgeMin = (nowcast: NowcastResponse | null | undefined, nowIso: string): number | null =>
+  nowcast ? Math.round((Date.parse(nowIso) - Date.parse(nowcast.init_time)) / 60_000) : null
+
+/** The nowcast `h` hours ahead as map readings; stations with no value (basis "prior") are left out. */
+export function nowcastReadings(nowcast: NowcastResponse | null | undefined, h: NowcastLead): StationReading[] {
+  if (!nowcast) return []
+  const out: StationReading[] = []
+  for (const s of nowcast.stations) {
+    const v = leadValue(s, h)
+    if (!v || v.pm25 == null || s.latitude == null || s.longitude == null) continue
+    out.push({
+      name: s.station_name ?? '', city: s.city ?? '', pm25: v.pm25, lat: s.latitude, lon: s.longitude,
+      station_id: s.station_id ?? s.member_station_ids?.[0] ?? undefined,
+      basis: s.basis ?? undefined,
+      obs_available: s.forecastable,
+    })
+  }
+  return out
+}
+
+export interface StationNowcastPoint {
+  lead: NowcastLead
+  /** ISO UTC instant the value is for */
+  valid_time: string
+  pm25: number
+  /** 90th percentile */
+  high: number | null
+  basis?: string
+}
+
+/** One station's nowcast points, soonest first. Matched by Hawanama id (own or member), else by name and city. */
+export function stationNowcastPoints(
+  nowcast: NowcastResponse | null | undefined,
+  station: { station_id?: string | null; name: string; city: string },
+): StationNowcastPoint[] {
+  if (!nowcast) return []
+  const id = station.station_id?.trim()
+  const byId = id ? nowcast.stations.find(s => s.station_id?.trim() === id || s.member_station_ids?.some(m => m.trim() === id)) : undefined
+  const entry = byId ?? nowcast.stations.find(s => s.station_name === station.name && s.city === station.city)
+  if (!entry) return []
+  const out: StationNowcastPoint[] = []
+  for (const h of NOWCAST_LEADS) {
+    const v = leadValue(entry, h)
+    if (!v || v.pm25 == null) continue
+    out.push({ lead: h, valid_time: v.valid_time, pm25: v.pm25, high: v.q90, basis: entry.basis ?? undefined })
+  }
+  return out
 }
 
 /** Latest hourly readings as map readings. */

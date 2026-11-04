@@ -26,7 +26,7 @@ interface OpsContextPanelProps {
   /** fly the map to a place (lng, lat, zoom) */
   onFlyTo?: (lng: number, lat: number, zoom?: number) => void
   /** Which part of the timeline the card describes */
-  mode?: 'day' | 'now' | 'forecast'
+  mode?: 'day' | 'now' | 'nowcast' | 'forecast'
   /** Replaces the date line, for today and forecast days */
   dayLabel?: string
   /** What a station's number means in this view */
@@ -97,7 +97,8 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
   const formattedDate = dayLabel ?? (selectedDate
     ? formatDateOnly(selectedDate, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
     : '—')
-  const forecast = mode === 'forecast'
+  // Hours or days ahead: the numbers are expected, not observed, and no satellite model applies
+  const forecast = mode === 'forecast' || mode === 'nowcast'
 
   const unhealthyCount = obs ? unhealthyOrWorse(obs.bands) : 0
 
