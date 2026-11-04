@@ -236,6 +236,33 @@ async def run_icimod_ingest(
 
 
 # ---------------------------------------------------------------------------
+# FIRMS aggregate store (attributed, deduplicated detections + daily region rollups)
+# ---------------------------------------------------------------------------
+
+@router.post("/tasks/fires/aggregate")
+async def run_fires_aggregate(
+    request: Request,
+    backfill: bool = Query(False, description="Rebuild every day file in the archive (minutes), not only changed days"),
+    dry_run: bool = Query(False, description="Report which days would be rebuilt and the current suspect days; write nothing"),
+    since: Optional[str] = Query(None, description="YYYY-MM-DD: only day files from this date on"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Update hindcast/firms/agg/ from the FIRMS day files (run after firms-fire-ingest)."""
+    from datetime import date as _date
+    from app.services.fire_aggregates import FireAggregateTask
+    try:
+        since_d = _date.fromisoformat(since) if since else None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="since must be YYYY-MM-DD")
+    try:
+        outcome = await FireAggregateTask().run(backfill=backfill, dry_run=dry_run, since=since_d, trigger=_trigger(request))
+        return _outcome_response(outcome, "FIRMS aggregate " + ("planned" if dry_run else "updated"))
+    except Exception as e:
+        logger.error("FIRMS aggregate failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"FIRMS aggregate failed: {e}")
+
+
+# ---------------------------------------------------------------------------
 # Station registry: province links by one rule (city first, geography second)
 # ---------------------------------------------------------------------------
 
@@ -332,6 +359,7 @@ async def get_task_status(
                 "POST /tasks/openaq/ingest",
                 "POST /tasks/openaq/reconcile",
                 "POST /tasks/icimod/ingest?dry_run=true|false",
+                "POST /tasks/fires/aggregate?backfill=true|false&dry_run=true|false&since=YYYY-MM-DD",
                 "POST /tasks/registry/provinces?dry_run=true|false",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"

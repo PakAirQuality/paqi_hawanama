@@ -614,3 +614,40 @@ resource "google_cloud_scheduler_job" "registry_provinces_weekly" {
     max_backoff_duration = "300s"
   }
 }
+
+# ---------------------------------------------------------------------------
+# FIRMS aggregate store: attributed, deduplicated detections and daily region rollups
+# under hindcast/firms/agg/, rebuilt for changed day files after each fire ingest
+# (ingest runs at :20 with a 300 s deadline). The one-time backfill is a manual
+# POST ...?backfill=true. Starts paused until one clean incremental run is reviewed.
+# ---------------------------------------------------------------------------
+
+resource "google_cloud_scheduler_job" "firms_fire_aggregate" {
+  name             = "firms-fire-aggregate"
+  description      = "FIRMS: update the fire aggregate store (hindcast/firms/agg) for changed day files"
+  schedule         = "40 */3 * * *"
+  time_zone        = "UTC"
+  attempt_deadline = "600s"
+  paused           = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/fires/aggregate?backfill=false"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 2
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "120s"
+    max_backoff_duration = "600s"
+  }
+}
