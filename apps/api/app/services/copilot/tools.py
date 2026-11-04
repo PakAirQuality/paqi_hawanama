@@ -374,11 +374,12 @@ async def aq_station_history(
     focused, asks the user to mention one first.
 
     Args:
-        hours: Number of hours of history to return (default 24).
+        hours: Number of hours of history to return (default 24, max 744 = 31 days;
+               readings are hourly means). For longer periods use aq_period_stats.
         date: Date anchor (YYYY-MM-DD). Window ends at 23:59:59 on this date.
               If omitted, uses the session's active historical date or current time.
     """
-    from app.services.analytics import get_station_history, get_station_neighbours
+    from app.services.analytics import MAX_HISTORY_HOURS, get_station_history, get_station_neighbours
 
     station_id = ctx.deps.focused_station_id
     if not station_id:
@@ -386,6 +387,11 @@ async def aq_station_history(
 
     anchor = date or ctx.deps.active_historical_date
     dt = anchor or _effective_date(ctx)
+    if hours > MAX_HISTORY_HOURS:
+        return {"date": dt, "data": {"message": f"aq_station_history covers at most {MAX_HISTORY_HOURS} hours (31 days) of hourly "
+                                                f"readings. For longer periods call aq_period_stats(entity=\"station\", "
+                                                f"name=\"{ctx.deps.focused_station_name or station_id}\", bucket=\"day\" or \"month\")."},
+                "followups": []}
 
     db = await _get_db()
     try:
@@ -966,3 +972,154 @@ async def aq_trajectory(
         },
         "followups": followups,
     }
+
+
+# ── Tool 17: aq_station_inventory ─────────────────────────────────────────
+
+
+async def aq_station_inventory(
+    ctx: RunContext[CopilotSession],
+    area: str = "national",
+    name: str = "",
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    radius_km: float = 10.0,
+    as_of_date: str = "",
+    provider: str = "",
+    list_stations: bool = False,
+    limit: int = 50,
+) -> dict:
+    """Exact station counts and lists for an area: how many monitors, which ones, where.
+
+    Use for any "how many stations/monitors", "which stations", "list the stations",
+    "stations with coordinates", "stations within N km of X" question. Counts come
+    back as registered / active / reporting with the definitions and the window
+    spelled out — quote them. Shadow providers (OpenAQ, ICIMOD) and test stations
+    are never counted; Punjab EPA and BAM monitors are.
+
+    Args:
+        area: "national", "province", "city" or "radius".
+        name: Province (KP, Sindh, ICT…), city, or the place at the centre of a radius query.
+        lat, lon: Centre for area="radius" when no place name is given.
+        radius_km: Radius for area="radius" (0.5–200, default 10).
+        as_of_date: YYYY-MM-DD → "reporting" means reported on that Pakistan day (default: last 24 h).
+        provider: Restrict to one provider code (airvisual, punjab, bam, …).
+        list_stations: True to include the station list (id, name, city, province, provider, lat, lon, first/last observation).
+        limit: Max stations in the list (default 50, max 100).
+    """
+    from datetime import date as _date
+    from app.services.copilot.station_queries import resolve_area, station_inventory
+
+    day = None
+    if as_of_date:
+        try:
+            day = _date.fromisoformat(as_of_date)
+        except ValueError:
+            return {"data": {"message": "as_of_date must be YYYY-MM-DD."}, "followups": []}
+    db = await _get_db()
+    try:
+        resolved = await resolve_area(db, area, name, lat, lon, radius_km)
+        if isinstance(resolved, dict):
+            return {"data": resolved, "followups": []}
+        data = await station_inventory(db, resolved, as_of_day=day, provider=provider,
+                                       list_stations=list_stations, limit=limit)
+    finally:
+        await db.close()
+    _update_session(ctx, tool="aq_station_inventory",
+                    focus_type=resolved.kind if resolved.kind in ("city", "province", "national") else None,
+                    focused_city=resolved.name if resolved.kind == "city" else None,
+                    entities=[resolved.name])
+    followups = [f"List the stations in {resolved.name} with coordinates" if not list_stations else f"Which of these in {resolved.name} are not reporting?",
+                 f"How many stations in {resolved.name} were reporting a year ago?",
+                 "Which provider operates most of them?"]
+    return {"date": _effective_date(ctx), "data": data, "followups": followups}
+
+
+# ── Tool 18: aq_nearest_stations ──────────────────────────────────────────
+
+
+async def aq_nearest_stations(
+    ctx: RunContext[CopilotSession],
+    place: str = "",
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    k: int = 5,
+    max_km: float = 50.0,
+) -> dict:
+    """The k nearest active stations to a place or coordinate, with distance in km and bearing.
+
+    Use for "nearest station to X", "how far is the closest monitor", "stations near
+    X". Resolves `place` as a city (centroid), a station name, or a province.
+
+    Args:
+        place: City, station or province name (ignored when lat/lon given).
+        lat, lon: Coordinates of the origin.
+        k: How many stations (1–25, default 5).
+        max_km: Search radius (default 50, max 500).
+    """
+    from app.services.copilot.station_queries import nearest_stations, resolve_place
+
+    db = await _get_db()
+    try:
+        origin_name = place
+        if lat is None or lon is None:
+            if not place:
+                return {"data": {"message": "Give a place name or lat/lon."}, "followups": []}
+            origin = await resolve_place(db, place)
+            if "message" in origin:
+                return {"data": origin, "followups": []}
+            lat, lon, origin_name = origin["lat"], origin["lon"], f"{origin['name']} ({origin['kind']})"
+        data = await nearest_stations(db, lat, lon, k=k, max_km=max_km, origin_name=origin_name)
+    finally:
+        await db.close()
+    _update_session(ctx, tool="aq_nearest_stations", entities=[s["name"] for s in data["stations"][:5]])
+    first = data["stations"][0]["name"] if data["stations"] else None
+    followups = ([f"Tell me about {first}", f"Show the 24-hour trend at {first}"] if first else []) + \
+                [f"How many stations are within {int(max_km)} km of {place or 'here'}?"]
+    return {"date": _effective_date(ctx), "data": data, "followups": followups}
+
+
+# ── Tool 19: aq_period_stats ──────────────────────────────────────────────
+
+
+async def aq_period_stats(
+    ctx: RunContext[CopilotSession],
+    entity: str = "city",
+    name: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    bucket: str = "day",
+    same_calendar_date: bool = False,
+) -> dict:
+    """PM2.5 statistics over a period: daily, monthly, yearly or whole-range means for a
+    station, city, province or the country, on Pakistan calendar days.
+
+    Use for "average in October 2025", "monthly means this year", "2024 vs 2025",
+    "worst day last winter", "average on 29 October across all years"
+    (same_calendar_date=True, start_date="10-29"). Never for a single current reading.
+
+    Args:
+        entity: "station", "city", "province" or "national".
+        name: Station, city or province name (empty for national).
+        start_date: YYYY-MM-DD, YYYY-MM or YYYY (inclusive). For same_calendar_date: "MM-DD".
+        end_date: YYYY-MM-DD, YYYY-MM or YYYY (inclusive, default today).
+        bucket: "day", "month", "year" or "all" (one row for the whole range). Max 120 buckets.
+        same_calendar_date: One row per year for the calendar day in start_date.
+    """
+    from app.services.copilot.station_queries import period_stats
+
+    db = await _get_db()
+    try:
+        data = await period_stats(db, entity=entity, name=name, start=start_date, end=end_date,
+                                  bucket=bucket, same_calendar_date=same_calendar_date)
+    finally:
+        await db.close()
+    ent = data.get("entity", {}) if isinstance(data, dict) else {}
+    _update_session(ctx, tool="aq_period_stats",
+                    focus_type=ent.get("kind") if ent.get("kind") in ("city", "province", "national") else None,
+                    focused_city=ent.get("name") if ent.get("kind") == "city" else None,
+                    entities=[ent.get("name")] if ent.get("name") else [])
+    label = ent.get("name") or name or "Pakistan"
+    followups = [f"Which was the worst month for {label}?", f"Compare {label} with the previous year",
+                 f"How many stations contributed in {label}?"]
+    return {"date": _effective_date(ctx), "data": data, "followups": followups}

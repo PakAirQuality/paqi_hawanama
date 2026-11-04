@@ -3,6 +3,8 @@
 import functools
 import logging
 import os
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from pydantic_ai import ModelRetry, RunContext
@@ -70,9 +72,12 @@ from the monitoring network — these show real current conditions, not predicti
 | "What needs attention?" / "Alerts?" | `aq_incident_summary` |
 | "How accurate?" / "Accuracy trend" | `aq_forecast_audit` (n_days=1 or 7) |
 | @StationName or "tell me about station X" | `aq_station_focus` |
-| "Show trend" / "neighbors" (after station focus) | `aq_station_history` (hours param — any value supported; the DB has multi-year data) |
+| "Show trend" / "neighbors" (after station focus) | `aq_station_history` (hourly means, hours ≤ 744; longer periods → `aq_period_stats`) |
 | "How far back?" / "Earliest reading?" / "Data coverage?" / "How many stations?" | `aq_data_coverage` (summary includes oldest 3 stations; use detail_level="preview" for top_k; "station_breakdown" for full list) |
-| "How many monitors in KP / Sindh / Punjab?" / province questions | `aq_data_coverage` with geography="province" (short forms KP, KPK, ICT, AJK, GB are accepted; n_stations_total is the station count) |
+| "How many monitors/stations in KP / Lahore / Pakistan?" / "which stations" / "list stations with coordinates" / "stations within N km of X" / counts by provider | `aq_station_inventory` (area=national/province/city/radius; list_stations=True for names and coordinates; short forms KP, KPK, ICT, AJK, GB accepted) |
+| "Nearest station to X" / "how far is the closest monitor" / "stations near X" | `aq_nearest_stations` (place or lat/lon; returns distance_km and bearing) |
+| "Average in October 2025" / monthly, yearly or whole-range means / "2024 vs 2025" / "worst day last winter" / "average on 29 Oct across all years" | `aq_period_stats` (bucket=day/month/year/all; same_calendar_date=True with start_date="MM-DD" for one row per year) |
+| "How far back does the data go?" / earliest reading / data gaps for a station or city | `aq_data_coverage` (first/last reading per station; geography="province" accepted) |
 | "What is near that fire?" / nearby hospitals/schools | `aq_nearest_assets` (pass lat/lon from a previous tool result) |
 | "Show satellite image" / "Sentinel imagery" | `aq_satellite_image` (pass lat/lon, optional date range and cloud threshold) |
 | "How many people are exposed?" / "Population at risk?" | `aq_exposed_population` (city_name or lat/lon, returns pop by risk band) |
@@ -85,7 +90,25 @@ When user mentions @StationName or asks about a specific station, use aq_station
 For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
 The station remains focused until the user mentions a different station or changes topic.
 
-One tool call usually suffices.
+Use as many tool calls as the question needs, up to four; most questions need one.
+
+## Precision rules (station, spatial and temporal questions)
+- Quote counts exactly as the tool returned them. Never write "approximately", "around" or \
+"about" in front of an integer a tool returned.
+- Every count or mean comes with its definition and window, in one short clause: e.g. \
+"42 registered monitors in Khyber Pakhtunkhwa, 39 of them reporting in the last 24 hours \
+(IQAir 38, Punjab EPA 0, BAM 1)". Registered / active / reporting mean what the tool's \
+`definitions` say; "reporting" is always tied to the stated window.
+- "Within N km", "nearest", "how far", "coordinates": use `aq_nearest_stations` or \
+`aq_station_inventory(area="radius")`. Never answer a distance question with city membership.
+- Ranges, months, years, "same date across years", "worst day": use `aq_period_stats`. \
+Never stitch a range together from repeated single-day calls.
+- Say which calendar day convention applies: the new tools use Pakistan days (Asia/Karachi); \
+`aq_compare_dates` and `aq_historical_snapshot` use the last reading per station in a UTC day.
+- If no tool can answer, say in one sentence exactly what is missing (e.g. "I have no \
+district boundaries, only provinces and cities"). Do not substitute a nearby answer.
+- Lists: when a tool returns more than 25 stations, give the count, list the first 25, and \
+say the rest are available on request. Never drop stations silently.
 
 ## Date routing
 - No date / "today" / "current" → existing tools with no date param (uses latest data)
@@ -100,14 +123,16 @@ One tool call usually suffices.
   - "Compare Dec 15 to Dec 22?" → `aq_compare_dates(date1="2025-12-15", date2="2025-12-22")`
   - "Station trend on Dec 15?" → `aq_station_history(date="2025-12-15", hours=24)` (after focus)
   - "Where did Lahore air come from on Jan 6?" → `aq_trajectory(city="Lahore", date="2025-01-06")`
-- ALL major tools accept a `date` parameter and query the observation archive for that day.
+- Tools that accept `date`: hotspots, city detail, compare, drivers, incidents, snapshot, fires, \
+trajectory, station history. `aq_station_focus`, `aq_data_coverage`, exposure and impact brief \
+have no date and describe the current state; `aq_station_inventory` takes `as_of_date`.
 - `aq_historical_snapshot` is best for broad national overviews with 7-day context. \
 For ranked hotspots, city station detail, or driver attribution on a past date, use those \
 specific tools directly with `date=...`.
 - When a user establishes a historical date ("let's look at December 15"), the session stores \
 it and all subsequent tool calls should pass that same date unless the user explicitly changes it.
-- GCS forecast/watchlist/driver files may not exist for old dates; tools gracefully fall back \
-to DB observations in that case.
+- Forecast/watchlist/driver files may not exist for old dates. Hotspots, drivers and incidents \
+fall back to observations; exposure and impact brief return a message instead — relay it.
 
 ## Historical reasoning
 - `aq_historical_snapshot` queries the multi-year observation archive (readings table), \
@@ -124,8 +149,8 @@ If status is "ok", this is a real HYSPLIT 72h back-trajectory.
 returned by a tool (specifically `aq_data_coverage`).
 - If a user asks about data availability, history length, earliest readings, gaps, or station \
 lifespan, ALWAYS use `aq_data_coverage` — do not infer from other tools.
-- The `hours` parameter on `aq_station_history` is a query window, not a database limit. \
-The database may have years of data beyond any default window.
+- `aq_station_history` returns hourly means for up to 744 hours (31 days). The archive is \
+multi-year; for anything longer call `aq_period_stats(entity="station", …)`.
 - If the user requests detail not present in the current result, you may refine the query \
 once by calling the most relevant tool again with more specific parameters \
 (e.g. detail_level summary→preview→station_breakdown). Do not repeat the same call or \
@@ -284,51 +309,7 @@ def get_agent(model_name: str | None = None):
     # Dynamic system prompt — injects session date + context for follow-up resolution
     @agent.system_prompt
     async def inject_session_context(ctx: RunContext[CopilotSession]) -> str:
-        s = ctx.deps
-        dt = s.current_date or "unknown"
-        model_label = "Enhanced (support_aware)" if s.model == "support_aware" else "Satellite backbone"
-        lines = [
-            f"Current forecast date: {dt}. Use this as 'today' when the user says 'yesterday' or 'last week'.",
-            f"The user is viewing the {model_label} PM2.5 model, pollutant {s.pollutant} in µg/m³, "
-            f"times in {s.tz}. When you quote model values or bias, say which model they are for; "
-            f"'the map' means this model.",
-        ]
-        if s.active_layers:
-            lines.append(f"Evidence layers currently shown on the map: {', '.join(s.active_layers)}.")
-        if s.focused_station_name:
-            lines.append(f"Selected station on the map: {s.focused_station_name} (station_id={s.focused_station_id}).")
-        if s.focused_city or s.last_entities or s.focused_station_id or s.active_historical_date:
-            lines.append("")
-            lines.append("Session context:")
-            lines.append(f"- Focus: {s.focus_type} — {s.focused_city or 'national'}")
-            if s.focused_station_id:
-                lines.append(f"- Currently focused station: station_id={s.focused_station_id}")
-            if s.active_historical_date:
-                lines.append(
-                    f"- Active historical date: {s.active_historical_date} — pass this as the "
-                    f"`date` argument to all tool calls unless the user explicitly changes the date "
-                    f"or asks about current conditions."
-                )
-            if s.comparison_date:
-                lines.append(f"- Last comparison date: {s.comparison_date}")
-            if s.last_entities:
-                lines.append(f"- Recent entities: {', '.join(s.last_entities[:5])}")
-            lines.append('When the user says "it", "there", or "that station/city", resolve to the focused entity.')
-        # ── Deterministic coverage follow-up guidance ──
-        cq = s.last_coverage_query
-        if cq and s.last_tool == "aq_data_coverage":
-            lines.append("")
-            lines.append("Coverage follow-up context:")
-            lines.append(f"- Last coverage query: entity={cq.get('entity')}, "
-                         f"geography={cq.get('geography')}, detail_level={cq.get('detail_level')}")
-            if cq.get("detail_level") == "summary":
-                lines.append(
-                    f"- To answer station-specific follow-ups (oldest station, station breakdown, "
-                    f"which station was first), call aq_data_coverage again with "
-                    f"entity_name=\"{cq.get('entity')}\", geography=\"{cq.get('geography')}\", "
-                    f"detail_level=\"preview\" or \"station_breakdown\"."
-                )
-        return "\n".join(lines)
+        return "\n".join(session_context_lines(ctx.deps))
 
     for fn in (
         tools.aq_hotspots_daily,
@@ -347,6 +328,9 @@ def get_agent(model_name: str | None = None):
         tools.aq_historical_snapshot,
         tools.aq_fire_activity,
         tools.aq_trajectory,
+        tools.aq_station_inventory,
+        tools.aq_nearest_stations,
+        tools.aq_period_stats,
     ):
         agent.tool(_safe_tool(fn))
 
@@ -384,3 +368,58 @@ def get_agent(model_name: str | None = None):
     _copilot_agent = agent
     logger.info("Copilot agent initialized (%s)", actual_model)
     return agent
+
+
+def session_context_lines(s: CopilotSession, real_today: str | None = None) -> list[str]:
+    """The per-turn system prompt: real date vs dashboard date, selection, focus, follow-up hints."""
+    real_today = real_today or datetime.now(ZoneInfo("Asia/Karachi")).date().isoformat()
+    dt = s.current_date or real_today
+    model_label = "Enhanced (support_aware)" if s.model == "support_aware" else "Satellite backbone"
+    lines = [
+        f"Today's calendar date in Pakistan is {real_today} (Asia/Karachi).",
+        (f"The dashboard is showing forecast date {dt}. 'Today', 'yesterday' and 'last week' are relative to the "
+         f"real date {real_today}; use {dt} only when the user is clearly asking about the forecast being shown."
+         if dt != real_today else "The dashboard is showing today's forecast."),
+        f"The user is viewing the {model_label} PM2.5 model, pollutant {s.pollutant} in µg/m³, "
+        f"times in {s.tz}. When you quote model values or bias, say which model they are for; "
+        f"'the map' means this model.",
+    ]
+    if s.last_turn_date and not s.active_historical_date:
+        lines.append(f"The previous turn's tools used date {s.last_turn_date}. Pass date=\"{s.last_turn_date}\" "
+                     f"again only if the user is continuing on that date; a new question without a date is about now.")
+    if s.active_layers:
+        lines.append(f"Evidence layers currently shown on the map: {', '.join(s.active_layers)}.")
+    if s.focused_station_name:
+        lines.append(f"Selected station on the map: {s.focused_station_name} (station_id={s.focused_station_id}).")
+    if s.focused_city or s.last_entities or s.focused_station_id or s.active_historical_date:
+        lines.append("")
+        lines.append("Session context:")
+        lines.append(f"- Focus: {s.focus_type} — {s.focused_city or 'national'}")
+        if s.focused_station_id:
+            lines.append(f"- Currently focused station: station_id={s.focused_station_id}")
+        if s.active_historical_date:
+            lines.append(
+                f"- Active historical date: {s.active_historical_date} — pass this as the "
+                f"`date` argument to all tool calls unless the user explicitly changes the date "
+                f"or asks about current conditions."
+            )
+        if s.comparison_date:
+            lines.append(f"- Last comparison date: {s.comparison_date}")
+        if s.last_entities:
+            lines.append(f"- Recent entities: {', '.join(s.last_entities[:5])}")
+        lines.append('When the user says "it", "there", or "that station/city", resolve to the focused entity.')
+    # ── Deterministic coverage follow-up guidance ──
+    cq = s.last_coverage_query
+    if cq and s.last_tool == "aq_data_coverage":
+        lines.append("")
+        lines.append("Coverage follow-up context:")
+        lines.append(f"- Last coverage query: entity={cq.get('entity')}, "
+                     f"geography={cq.get('geography')}, detail_level={cq.get('detail_level')}")
+        if cq.get("detail_level") == "summary":
+            lines.append(
+                f"- To answer station-specific follow-ups (oldest station, station breakdown, "
+                f"which station was first), call aq_data_coverage again with "
+                f"entity_name=\"{cq.get('entity')}\", geography=\"{cq.get('geography')}\", "
+                f"detail_level=\"preview\" or \"station_breakdown\"."
+            )
+    return lines
