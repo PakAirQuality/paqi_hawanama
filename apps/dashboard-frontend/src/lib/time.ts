@@ -87,3 +87,13 @@ export function relativeAge(instant: string | null | undefined, now: Date = new 
   if (h < 48) return `${h} h ago`
   return `${Math.round(h / 24)} d ago`
 }
+
+/** YYYY-MM-DD shifted by n days, zone-safe ("2026-11-01", -1 → "2026-10-31"). */
+export function shiftDateOnly(dateStr: string, days: number): string {
+  const d = parseDateOnly(dateStr)
+  d.setDate(d.getDate() + days)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${dd}`
+}

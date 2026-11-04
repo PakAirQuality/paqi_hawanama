@@ -2,6 +2,7 @@
 
 import { MessageCircle, BarChart3, Radio, Building2, Flame, Layers } from 'lucide-react'
 import { m } from 'motion/react'
+import Link from 'next/link'
 
 export type RailTab = 'chat' | 'analytics' | 'stations' | 'sources' | 'fires' | 'layers'
 
@@ -12,12 +13,12 @@ interface IconRailProps {
   tabs?: RailTab[]
 }
 
-const ALL_TABS: { id: RailTab; icon: typeof MessageCircle; label: string }[] = [
+const ALL_TABS: { id: RailTab; icon: typeof MessageCircle; label: string; href?: string }[] = [
   { id: 'chat', icon: MessageCircle, label: 'Chat' },
   { id: 'analytics', icon: BarChart3, label: 'Analytics' },
   { id: 'stations', icon: Radio, label: 'Stations' },
   { id: 'sources', icon: Building2, label: 'Sources' },
-  { id: 'fires', icon: Flame, label: 'Fires' },
+  { id: 'fires', icon: Flame, label: 'Fires', href: '/fires' },
   { id: 'layers', icon: Layers, label: 'Layers' },
 ]
 
@@ -32,6 +33,20 @@ export function IconRail({ activeTab, onTabChange, isStreaming, tabs }: IconRail
       {(tabs ? ALL_TABS.filter(t => tabs.includes(t.id)) : ALL_TABS).map((tab) => {
         const Icon = tab.icon
         const isActive = activeTab === tab.id
+        if (tab.href) {
+          return (
+            <Link
+              key={tab.id}
+              href={tab.href}
+              title={tab.label}
+              aria-label={tab.label}
+              className="relative flex h-12 w-12 max-md:w-16 flex-col items-center justify-center gap-0.5 rounded-xl text-slate-500 transition-colors hover:bg-slate-900/[0.04] hover:text-slate-800"
+            >
+              <Icon size={19} strokeWidth={1.8} />
+              <span className="relative text-[11px] font-medium leading-none">{tab.label}</span>
+            </Link>
+          )
+        }
         return (
           <m.button
             key={tab.id}
