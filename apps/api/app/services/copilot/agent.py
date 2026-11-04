@@ -87,6 +87,7 @@ from the monitoring network — these show real current conditions, not predicti
 | "Fires near / around / upwind of Lahore?" / "is smoke heading to X" / fires by distance from a city | `aq_fire_exposure` (city required; 50/100/200 km rings by country, wind source named, ±60° upwind cone, nearest fire, transport time) |
 | "Fire trend" / "how does this season compare" / "fires in Indian Punjab this week" / "fires in October vs last year" / season-to-date | `aq_fire_trends` (region = Pakistan, province, district, Indian Punjab, Haryana; season="rice" or "wheat"; compares with 2020–2025) |
 | "Where are the fires / biggest fire clusters" / "which districts are burning" / "persistent hotspots / kilns / flares" | `aq_fire_hotspots` (group=cluster, district or persistent; area = region or city with radius_km) |
+| "Are fires driving / affecting X's PM2.5?" / "is the smoke reaching X" over days or weeks / fire–pollution link | `aq_fire_pm25_link` (city required; lagged correlations and fire-influenced days; answer "consistent with", never "caused") |
 | "Where did the air come from?" / trajectory / transport | `aq_trajectory` (city required) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
@@ -347,6 +348,7 @@ def get_agent(model_name: str | None = None):
         tools.aq_fire_exposure,
         tools.aq_fire_trends,
         tools.aq_fire_hotspots,
+        tools.aq_fire_pm25_link,
         tools.aq_trajectory,
         tools.aq_station_inventory,
         tools.aq_nearest_stations,

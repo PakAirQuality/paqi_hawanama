@@ -505,6 +505,9 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
     # same-window comparison with earlier years
     comparison: Optional[Dict[str, Any]] = None
     if compare_years:
+        # like for like: reference years are summed over the calendar days that have data in the
+        # current window (the 2026 archive has gaps), and a reference year needs 60 % of those days
+        mmdd_with_data = {d.strftime("%m-%d") for d, f in zip(s["pk_day"], s["has_file"]) if f}
         ref = []
         for y in compare_years:
             if y >= start.year:
@@ -514,11 +517,15 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
             except ValueError:                       # 29 Feb
                 continue
             rs = _series(daily, kind, rname, ys, ye, days_with_file)
-            rv = rs[rs["has_file"]]
+            rv = rs[rs["has_file"] & rs["pk_day"].map(lambda d: d.strftime("%m-%d") in mmdd_with_data)]
             ref.append({"year": y, "fires": int(rv["n_dedup_hn"].sum()) if len(rv) else None, "frp_mw": _r(rv["frp_dedup_hn"].sum(), 0) if len(rv) else None,
-                        "days_with_data": int(len(rv)), "days_missing": int((~rs["has_file"]).sum())})
-        vals = [r["fires"] for r in ref if r["fires"] is not None and r["days_with_data"] >= max(1, int(0.6 * len(s)))]
-        comparison = {"window": f"{start.strftime('%m-%d')} to {end.strftime('%m-%d')} in each year", "years": ref}
+                        "days_with_data": int(len(rv)), "days_missing": int(len(mmdd_with_data) - len(rv))})
+        vals = [r["fires"] for r in ref if r["fires"] is not None and r["days_with_data"] >= max(1, int(0.6 * len(mmdd_with_data)))]
+        comparison = {"window": f"{start.strftime('%m-%d')} to {end.strftime('%m-%d')} in each year",
+                      "days_compared": len(mmdd_with_data), "years": ref}
+        if len(mmdd_with_data) < len(s):
+            comparison["note"] = (f"Only the {len(mmdd_with_data)} calendar days with data in the current window are summed in each "
+                                  f"reference year ({len(s) - len(mmdd_with_data)} days of the window have no 2026 file).")
         if vals:
             comparison.update({
                 "reference_mean": _r(float(np.mean(vals)), 0), "reference_min": int(min(vals)), "reference_max": int(max(vals)),
@@ -699,3 +706,177 @@ async def fire_activity(db, day: date, city: Optional[str] = None, *, radius_km:
     if built is None:
         out["message"] = f"No fire file for the Pakistan day {day.isoformat()}; say so rather than inferring fire activity."
     return out
+
+
+# ── 5. fire vs PM2.5 linkage ──────────────────────────────────────────────────
+
+MAX_LINK_DAYS = 120
+MIN_PAIRS = 10
+RISE_RATIO = 1.2          # PM2.5 ≥ 120 % of the prior three days' mean …
+RISE_FLOOR = 10.0         # … and at least 10 µg/m³ above it
+P75_QUANTILE = 0.75
+
+LINK_DEFINITIONS = {
+    **FIRE_DEFINITIONS,
+    "pm25_daily": "reporting-station mean of station daily means over the Pakistan day (station-day needs ≥ 6 valid hours), as aq_period_stats",
+    "fire_series": "deduplicated high/nominal fires within 200 km of the city per Pakistan day: upwind FRP uses the ±60° cone on that day's station wind; frp_200 is the whole ring",
+    "lag": "lag k pairs the fire day d with the PM2.5 day d+k (k = 0, 1, 2)",
+    "correlation": "Pearson and Spearman over the paired days (n given); |r| < 0.3 weak, < 0.6 moderate, else strong; no significance test",
+    "fire_influenced_day": "upwind FRP on the day or the day before above the window's 75th percentile AND PM2.5 ≥ 120 % of the prior three days' mean AND at least 10 µg/m³ higher",
+    "not_causation": FIRE_DEFINITIONS["not_causation"],
+}
+
+
+def _rank(a: np.ndarray) -> np.ndarray:
+    order = np.argsort(a, kind="mergesort")
+    ranks = np.empty(len(a), dtype=float)
+    ranks[order] = np.arange(1, len(a) + 1, dtype=float)
+    # average ties
+    vals = a[order]
+    i = 0
+    while i < len(vals):
+        j = i
+        while j + 1 < len(vals) and vals[j + 1] == vals[i]:
+            j += 1
+        if j > i:
+            ranks[order[i:j + 1]] = (i + j + 2) / 2.0
+        i = j + 1
+    return ranks
+
+
+def correlations(x_: Sequence[float], y_: Sequence[float]) -> Dict[str, Any]:
+    a = np.asarray(x_, dtype=float)
+    b = np.asarray(y_, dtype=float)
+    m = ~np.isnan(a) & ~np.isnan(b)
+    a, b = a[m], b[m]
+    n = int(len(a))
+    if n < MIN_PAIRS or a.std() == 0 or b.std() == 0:
+        return {"n": n, "pearson": None, "spearman": None, "strength": "insufficient" if n < MIN_PAIRS else "undefined"}
+    pear = float(np.corrcoef(a, b)[0, 1])
+    spear = float(np.corrcoef(_rank(a), _rank(b))[0, 1])
+    r = abs(spear)
+    return {"n": n, "pearson": round(pear, 2), "spearman": round(spear, 2), "strength": "weak" if r < 0.3 else ("moderate" if r < 0.6 else "strong")}
+
+
+async def city_wind_by_day(db, city_id: int, start: date, end: date) -> Dict[date, Tuple[Optional[float], Optional[float], int]]:
+    """Pakistan day -> (from_deg, speed_ms, n) from the city's station observations, one query."""
+    from sqlalchemy import text
+    from app.services.copilot.station_queries import day_window_utc
+    w0, _ = day_window_utc(start)
+    _, w1 = day_window_utc(end)
+    rows = (await db.execute(text("""
+        SELECT (r.ts_utc AT TIME ZONE 'Asia/Karachi')::date AS d, r.wind_dir_deg AS wd, r.wind_speed_ms AS ws
+        FROM readings r JOIN stations s ON s.station_id = r.scope_key
+        WHERE r.scope_type = 'station' AND s.city_id = :cid AND s.active = true
+          AND r.ts_utc >= :w0 AND r.ts_utc < :w1
+          AND r.wind_dir_deg IS NOT NULL AND r.wind_speed_ms IS NOT NULL
+    """), {"cid": city_id, "w0": w0, "w1": w1})).fetchall()
+    by_day: Dict[date, List[Tuple[float, float]]] = {}
+    for r in rows:
+        by_day.setdefault(r.d, []).append((float(r.wd), float(r.ws)))
+    out: Dict[date, Tuple[Optional[float], Optional[float], int]] = {}
+    for d, obs in by_day.items():
+        fd, sp = fr.vector_mean_from_deg([o[0] for o in obs], [o[1] for o in obs])
+        out[d] = (fd, sp, len(obs))
+    return out
+
+
+async def fire_pm25_link(db, city: str, start: Optional[date] = None, end: Optional[date] = None, *,
+                         store: Optional[AggStore] = None, today: Optional[date] = None) -> Dict[str, Any]:
+    """Daily upwind fire FRP against the city's daily PM2.5 with lagged correlations and flagged days."""
+    from app.services.copilot.station_queries import _city_centroid, period_stats, resolve_city
+    store = store or agg_store()
+    today = today or pkt_today()
+    end = min(end or today, today)
+    start = start or (end - timedelta(days=59))
+    if start > end:
+        return {"message": f"Start {start} is after end {end}."}
+    if (end - start).days + 1 > MAX_LINK_DAYS:
+        return {"message": f"The window is limited to {MAX_LINK_DAYS} days; ask for a shorter one."}
+    match, cands = await resolve_city(db, city)
+    if cands:
+        return {"message": f"'{city}' matches several cities: {', '.join(c.name for c in cands)}. Which one?"}
+    if match is None:
+        return {"message": f"City '{city}' not found among active Pakistan cities."}
+    lat, lon = await _city_centroid(db, match)
+    if lat is None or lon is None:
+        return {"message": f"{match.name} has no coordinates in the registry."}
+    pm = await period_stats(db, entity="city", name=match.name, start=start.isoformat(), end=end.isoformat(), bucket="day")
+    if "message" in pm and not pm.get("rows"):
+        return {"message": f"No PM2.5 for {match.name}: {pm['message']}"}
+    pm_by_day = {date.fromisoformat(r["bucket"]): (r["mean"], r.get("n_stations")) for r in pm.get("rows", []) if r.get("mean") is not None}
+    det, passes = _detections_for(store, start, end)
+    head = _headline(det) if len(det) else det
+    if len(head):
+        km = fr.haversine_km_vec(lat, lon, head["lat"].to_numpy(), head["lon"].to_numpy())
+        brg = fr.bearing_deg(lat, lon, head["lat"].to_numpy(), head["lon"].to_numpy())
+        head = head.assign(km=km, bearing=brg)
+        head = head[head["km"] <= MAX_RING_KM]
+    wind = await city_wind_by_day(db, match.id, start, end)
+    days = [start + timedelta(days=i) for i in range((end - start).days + 1)]
+    manifest_days = {date.fromisoformat(k) for k in store.manifest().get("days", {})}
+    series = []
+    for d in days:
+        g = head[head["pk_day"] == d] if len(head) else head
+        has_file = d in manifest_days or (store.day_from_csv(d) is not None if today_recent(d, today) else False)
+        wd, ws, n = wind.get(d, (None, None, 0))
+        up = None
+        if wd is not None and has_file:
+            up = float(g.loc[fr.in_cone(g["bearing"].to_numpy(), wd), "frp"].sum()) if len(g) else 0.0
+        series.append({"day": d, "pm25": pm_by_day.get(d, (None, None))[0], "n_stations": pm_by_day.get(d, (None, None))[1],
+                       "fires_100": int((g["km"] <= 100).sum()) if len(g) else (0 if has_file else None),
+                       "frp_100": round(float(g.loc[g["km"] <= 100, "frp"].sum()), 1) if len(g) else (0.0 if has_file else None),
+                       "frp_200": round(float(g["frp"].sum()), 1) if len(g) else (0.0 if has_file else None),
+                       "frp_upwind": round(up, 1) if up is not None else None, "wind_from": wd, "wind_ms": ws, "wind_obs": n, "has_fire_file": has_file})
+    pm_arr = np.array([np.nan if r["pm25"] is None else r["pm25"] for r in series], dtype=float)
+    up_arr = np.array([np.nan if r["frp_upwind"] is None else r["frp_upwind"] for r in series], dtype=float)
+    r200 = np.array([np.nan if r["frp_200"] is None else r["frp_200"] for r in series], dtype=float)
+    corr = {}
+    for name, arr in (("frp_upwind", up_arr), ("frp_200", r200)):
+        corr[name] = {}
+        for lag in (0, 1, 2):
+            xs = arr[: len(arr) - lag] if lag else arr
+            ys = pm_arr[lag:] if lag else pm_arr
+            corr[name][f"lag{lag}"] = correlations(xs, ys)
+    finite_up = up_arr[~np.isnan(up_arr)]
+    p75 = float(np.quantile(finite_up, P75_QUANTILE)) if len(finite_up) >= 4 else None
+    flagged = []
+    for i, r in enumerate(series):
+        r["flag"] = False
+        if p75 is None or r["pm25"] is None or i < 3:
+            continue
+        prior = [series[j]["pm25"] for j in range(i - 3, i) if series[j]["pm25"] is not None]
+        if len(prior) < 2:
+            continue
+        base = float(np.mean(prior))
+        fire_hit = any(series[j]["frp_upwind"] is not None and series[j]["frp_upwind"] > p75 for j in (i, i - 1))
+        if fire_hit and r["pm25"] >= RISE_RATIO * base and r["pm25"] - base >= RISE_FLOOR:
+            r["flag"] = True
+            r["pm25_prior3"] = round(base, 1)
+            flagged.append(r["day"])
+    n_pm = int(sum(1 for r in series if r["pm25"] is not None))
+    n_wind = int(sum(1 for r in series if r["frp_upwind"] is not None))
+    best = max(((k, lag, v) for k, lags in corr.items() for lag, v in lags.items() if v["spearman"] is not None),
+               key=lambda t: abs(t[2]["spearman"]), default=None)
+    if n_pm and flagged:
+        summary = (f"On {len(flagged)} of {n_pm} days with PM2.5, upwind fire FRP was above the window's 75th percentile and PM2.5 rose "
+                   f"≥ 20 % (and ≥ 10 µg/m³) on the prior three days' mean — a pattern consistent with smoke transport; stagnation and "
+                   f"local sources can produce the same rise, so this is not an attribution.")
+    elif n_pm:
+        summary = "No day met the fire-influenced rule in this window; fires upwind did not coincide with a PM2.5 rise on the prior three days."
+    else:
+        summary = f"No PM2.5 reporting days for {match.name} in this window."
+    if best:
+        summary += f" Strongest association: {best[0]} vs PM2.5 at {best[1]}, Spearman {best[2]['spearman']} ({best[2]['strength']}, n={best[2]['n']})."
+    rows = series if len(series) <= MAX_ROWS else sorted(series, key=lambda r: (not r["flag"], r["day"]))[:MAX_ROWS]
+    rows = sorted(rows, key=lambda r: r["day"])
+    out_rows = [{**{k: v for k, v in r.items() if k not in ("has_fire_file",)}, "day": r["day"].isoformat()} for r in rows]
+    caveats = [LINK_DEFINITIONS["not_causation"]]
+    if n_wind < n_pm:
+        caveats.append(f"Upwind FRP is defined on {n_wind} of {len(series)} days (station wind or fire file missing on the others); frp_200 covers the whole ring regardless of wind.")
+    if passes.get("day_basis") and "acq_utc" in passes["day_basis"]:
+        caveats.append("Some days in the window are UTC-keyed archive days without pass times.")
+    return {"city": match.name, "window": _window_dict(start, end), "pm25_statistic": pm.get("statistic"), "days": len(series),
+            "days_with_pm25": n_pm, "days_with_upwind": n_wind, "upwind_p75_mw": _r(p75), "correlations": corr,
+            "fire_influenced_days": [d.isoformat() for d in flagged], "rows": out_rows, "rows_truncated": len(series) > MAX_ROWS,
+            "summary": summary, "passes": passes, "caveats": caveats, "definitions": LINK_DEFINITIONS}
