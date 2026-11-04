@@ -97,3 +97,28 @@ async def test_registry_provinces_defaults_to_dry_run_and_passes_the_flag(monkey
     assert r2.status_code == 200 and "applied" in r2.json()["message"]
     assert captured == [(True, "http"), (False, "scheduler")]
     assert "POST /tasks/registry/provinces?dry_run=true|false" in status.json()["available_endpoints"]
+
+
+async def test_fires_aggregate_passes_flags_and_rejects_a_bad_since(monkeypatch):
+    import app.services.fire_aggregates as fa
+    captured = []
+
+    async def fake_run(self, *, backfill=False, dry_run=False, since=None, trigger="http"):
+        captured.append((backfill, dry_run, since, trigger))
+        o = _outcome(RunStatus.success)
+        o.task = "fires-aggregate"
+        return o
+    monkeypatch.setattr(fa.FireAggregateTask, "__init__", lambda self, **kw: None)
+    monkeypatch.setattr(fa.FireAggregateTask, "run", fake_run)
+    async with AsyncClient(transport=ASGITransport(app=_app()), base_url="http://t") as c:
+        r1 = await c.post("/api/v1/tasks/fires/aggregate")
+        r2 = await c.post("/api/v1/tasks/fires/aggregate", params={"backfill": "true", "dry_run": "true", "since": "2026-01-01"},
+                          headers={"X-CloudScheduler": "true"})
+        r3 = await c.post("/api/v1/tasks/fires/aggregate", params={"since": "yesterday"})
+        status = await c.get("/api/v1/tasks/status")
+    assert r1.status_code == 200 and "updated" in r1.json()["message"]
+    assert r2.status_code == 200 and "planned" in r2.json()["message"]
+    assert r3.status_code == 422
+    from datetime import date
+    assert captured == [(False, False, None, "http"), (True, True, date(2026, 1, 1), "scheduler")]
+    assert any(e.startswith("POST /tasks/fires/aggregate") for e in status.json()["available_endpoints"])
