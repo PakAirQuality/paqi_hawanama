@@ -108,7 +108,7 @@ export default function OpsPipelinePage() {
   const [mapKey, setMapKey] = useState(0)
   const retryMap = () => { setMapUnavailable(null); setMapKey(k => k + 1) }
 
-  // Shareable URLs: ?date=YYYY-MM-DD or ?view=today|h3|h6|h12|h24|1|2|3, &model=support_aware&layers=kilns,industry,fires
+  // Shareable URLs: ?date=YYYY-MM-DD or ?view=today|h3|h6|h12|1|2|3, &model=support_aware&layers=kilns,industry,fires
   const urlApplied = useRef(false)
   useEffect(() => {
     if (urlApplied.current || typeof window === 'undefined') return
@@ -189,7 +189,7 @@ export default function OpsPipelinePage() {
   }
   const leads = useMemo(() => availableLeads(forecasts, today), [forecasts, today])
 
-  // The latest hourly nowcast (+3/+6/+12/+24 h), issued every 3 h; null until the first cycle is published
+  // The latest hourly nowcast (+3/+6/+12 h shown; +24 h is published but hidden), issued every 3 h; null until the first cycle is published
   const { data: nowcastData } = useQuery({
     queryKey: ['nowcast-latest'],
     queryFn: fetchNowcast,

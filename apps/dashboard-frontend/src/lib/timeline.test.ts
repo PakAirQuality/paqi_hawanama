@@ -181,12 +181,13 @@ describe('hour steps', () => {
     expect(stepKey(2)).toBe('2')
     expect(stepKey('now')).toBe('now')
     expect(sameStep(hourStep(12), { kind: 'hour', h: 12 })).toBe(true)
-    expect(sameStep(hourStep(12), hourStep(24))).toBe(false)
+    expect(sameStep(hourStep(12), hourStep(3))).toBe(false)
   })
 
   it('come from and go to the view URL parameter', () => {
     expect(parseViewParam('h6')).toEqual({ hour: 6 })
     expect(parseViewParam('h7')).toBeNull()
+    expect(parseViewParam('h24')).toBeNull() // published by the API, hidden in the UI
     expect(parseViewParam('2')).toEqual({ daysAhead: 2 })
     expect(parseViewParam('today')).toEqual({ today: true })
     expect(parseViewParam(null)).toBeNull()
@@ -195,11 +196,11 @@ describe('hour steps', () => {
 
 describe('availableHours', () => {
   it('lists the leads still ahead of now, in order', () => {
-    expect(availableHours(nowcast(), '2026-11-04T10:00:00Z')).toEqual([3, 6, 12, 24])
+    expect(availableHours(nowcast(), '2026-11-04T10:00:00Z')).toEqual([3, 6, 12])
   })
 
   it('drops leads whose hour has passed, so a stalled job never shows old numbers as the future', () => {
-    expect(availableHours(nowcast(), '2026-11-04T16:00:00Z')).toEqual([12, 24])
+    expect(availableHours(nowcast(), '2026-11-04T16:00:00Z')).toEqual([12])
     expect(availableHours(nowcast(), '2026-11-06T00:00:00Z')).toEqual([])
   })
 
@@ -237,14 +238,14 @@ describe('nowcastReadings', () => {
 describe('stationNowcastPoints', () => {
   it('finds a station by its id, by a member id, or by name and city', () => {
     const pts = stationNowcastPoints(nowcast(), { station_id: 'old-1', name: 'x', city: 'y' })
-    expect(pts.map(p => p.lead)).toEqual([3, 6, 12, 24])
+    expect(pts.map(p => p.lead)).toEqual([3, 6, 12])
     expect(pts[2]).toEqual({ lead: 12, valid_time: '2026-11-04T21:00:00+00:00', pm25: 140, high: 190, basis: 'model' })
-    expect(stationNowcastPoints(nowcast(), { name: 'Korangi', city: 'Karachi' })).toHaveLength(4)
+    expect(stationNowcastPoints(nowcast(), { name: 'Korangi', city: 'Karachi' })).toHaveLength(3)
     expect(stationNowcastPoints(nowcast(), { station_id: 'nope', name: 'Korangi', city: 'Lahore' })).toEqual([])
   })
 
   it('skips leads with no value', () => {
     const s = ncStation({ leads: ncStation().leads.map(l => (l.lead_hours === 3 ? { ...l, pm25: null } : l)) })
-    expect(stationNowcastPoints(nowcast([s]), { station_id: 'pk-1', name: 'Korangi', city: 'Karachi' }).map(p => p.lead)).toEqual([6, 12, 24])
+    expect(stationNowcastPoints(nowcast([s]), { station_id: 'pk-1', name: 'Korangi', city: 'Karachi' }).map(p => p.lead)).toEqual([6, 12])
   })
 })
