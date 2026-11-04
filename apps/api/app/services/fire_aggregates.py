@@ -150,8 +150,8 @@ def rollup_regions(det: pd.DataFrame) -> pd.DataFrame:
     for (day, label), g in keyed.groupby(["pk_day", "country_label"], sort=True):
         out.append({"pk_day": day, "region_kind": "country", "region": label, **_metrics(g)})
     prov = keyed[keyed["province"].notna()]
-    for (day, country, name), g in prov.groupby(["pk_day", "country", "province"], sort=True):
-        out.append({"pk_day": day, "region_kind": "india_state" if country == "IN" else "province", "region": name, **_metrics(g)})
+    for (day, name), g in prov.groupby(["pk_day", "province"], sort=True):
+        out.append({"pk_day": day, "region_kind": "india_state" if name in fr.INDIA_REGIONS else "province", "region": name, **_metrics(g)})
     dist = keyed[keyed["district"].notna()]
     for (day, name), g in dist.groupby(["pk_day", "district"], sort=True):
         out.append({"pk_day": day, "region_kind": "district", "region": name, **_metrics(g)})
