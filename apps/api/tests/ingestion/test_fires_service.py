@@ -24,12 +24,15 @@ def test_parse_resolves_utc_time_and_pakistan_day():
     assert night["frp"] == 12.3
 
 
-def test_sources_drop_snpp_after_its_end_date():
-    assert "VIIRS_SNPP_NRT" in fires.sources_for(date(2026, 10, 18))
-    assert "VIIRS_SNPP_NRT" in fires.sources_for(date(2026, 10, 31))
-    assert "VIIRS_SNPP_NRT" not in fires.sources_for(date(2026, 11, 1))
-    assert "VIIRS_SNPP_NRT" not in fires.sources_for(date(2026, 11, 2))
-    assert fires.sources_for(date(2026, 11, 2)) == ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT"]
+def test_sources_drop_snpp_after_its_end_date_and_use_sp_beyond_nrt_retention():
+    today = date(2026, 11, 4)
+    assert "VIIRS_SNPP_NRT" in fires.sources_for(date(2026, 10, 18), today)
+    assert "VIIRS_SNPP_NRT" in fires.sources_for(date(2026, 10, 31), today)
+    assert "VIIRS_SNPP_NRT" not in fires.sources_for(date(2026, 11, 1), today)
+    assert fires.sources_for(date(2026, 11, 2), today) == ["VIIRS_NOAA20_NRT", "VIIRS_NOAA21_NRT"]
+    assert fires.sources_for(date(2026, 8, 7), today)[0] == "VIIRS_NOAA20_NRT"                 # 89 days back: still NRT
+    assert fires.sources_for(date(2026, 8, 5), today) == list(fires.SP_SOURCES)                # 91 days back: standard processing
+    assert fires.sources_for(date(2026, 5, 10), today) == ["VIIRS_NOAA20_SP", "VIIRS_NOAA21_SP", "VIIRS_SNPP_SP"]
 
 
 def _store(files):
@@ -132,7 +135,7 @@ async def test_ingest_window_rekeys_days_and_records_source_failures():
     })
     bucket = _Bucket()
     now = datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc)
-    out = await fires.ingest_window(http=http, key="k", bucket=bucket, gcs_client=None, now_utc=now, window_days=2)
+    out = await fires.ingest_window(http=http, key="k", bucket=bucket, gcs_client=None, now_utc=now, window_days=2, real_today=date(2026, 10, 17))
 
     assert [s.status for s in out.sources] == ["ok", "error", "error"]
     assert out.sources[1].error.startswith("Invalid MAP_KEY")
@@ -151,7 +154,7 @@ async def test_invalid_key_fails_fast_without_area_requests():
                  key_status="MAP_KEY is invalid or your have exceeded your transaction/time limit.")
     bucket = _Bucket()
     out = await fires.ingest_window(http=http, key="dead", bucket=bucket, gcs_client=None,
-                                    now_utc=datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc), window_days=3)
+                                    now_utc=datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc), window_days=3, real_today=date(2026, 10, 17))
     assert out.key["status"] == "invalid" and "dead" not in json.dumps(out.key)
     assert out.status == "unavailable"
     assert http.urls == [] and bucket.store == {}          # no budget spent, nothing overwritten
@@ -164,7 +167,7 @@ async def test_all_sources_failing_keeps_csv_and_marks_sidecar_unavailable():
     bucket = _Bucket()
     good = await fires.ingest_window(http=_Http({"VIIRS_NOAA20_NRT": _Resp(200, RAW), "VIIRS_NOAA21_NRT": _Resp(200, RAW),
                                                  "VIIRS_SNPP_NRT": _Resp(200, RAW)}),
-                                     key="k", bucket=bucket, gcs_client=None, now_utc=now, window_days=2)
+                                     key="k", bucket=bucket, gcs_client=None, now_utc=now, window_days=2, real_today=date(2026, 10, 17))
     assert good.status == "ok" and good.rows_fetched == 6 and good.rows_written == 3
     assert good.latest_acq_utc == datetime(2026, 10, 16, 20, 45, tzinfo=timezone.utc)
     csv17, meta17 = fires.blob_paths(date(2026, 10, 17))
@@ -172,7 +175,7 @@ async def test_all_sources_failing_keeps_csv_and_marks_sidecar_unavailable():
 
     bad = await fires.ingest_window(http=_Http({"VIIRS_NOAA20_NRT": _Resp(503, ""), "VIIRS_NOAA21_NRT": _Resp(500, ""),
                                                 "VIIRS_SNPP_NRT": _Resp(502, "")}),
-                                    key="k", bucket=bucket, gcs_client=None, now_utc=now, window_days=2)
+                                    key="k", bucket=bucket, gcs_client=None, now_utc=now, window_days=2, real_today=date(2026, 10, 17))
     assert bad.status == "unavailable" and bad.rows_written == 0
     assert bucket.store[csv17] == before                     # detections kept
     assert json.loads(bucket.store[meta17])["status"] == "unavailable"
@@ -186,7 +189,7 @@ async def test_fetch_source_retries_once_on_5xx_and_429():
                   "VIIRS_NOAA21_NRT": [_Resp(429, ""), _Resp(429, "")],
                   "VIIRS_SNPP_NRT": [_Resp(400, "Invalid MAP_KEY."), _Resp(200, RAW)]})
     out = await fires.ingest_window(http=http, key="k", bucket=_Bucket(), gcs_client=None,
-                                    now_utc=datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc), window_days=2)
+                                    now_utc=datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc), window_days=2, real_today=date(2026, 10, 17))
     by = {s.source: s for s in out.sources}
     assert by["VIIRS_NOAA20_NRT"].status == "ok"            # recovered on the retry
     assert by["VIIRS_NOAA21_NRT"].error == "HTTP 429"       # retried, still throttled
@@ -199,8 +202,8 @@ async def test_fetch_source_retries_once_on_5xx_and_429():
 async def test_window_is_capped_at_the_firms_maximum():
     http = _Http({"VIIRS_NOAA20_NRT": _Resp(200, RAW), "VIIRS_NOAA21_NRT": _Resp(200, RAW), "VIIRS_SNPP_NRT": _Resp(200, RAW)})
     await fires.ingest_window(http=http, key="k", bucket=_Bucket(), gcs_client=None,
-                              now_utc=datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc), window_days=30)
-    assert all("/10/2026-10-08" in u for u in http.urls)
+                              now_utc=datetime(2026, 10, 17, 6, 0, tzinfo=timezone.utc), window_days=30, real_today=date(2026, 10, 17))
+    assert all("/5/2026-10-13" in u for u in http.urls)
 
 
 @pytest.mark.asyncio
