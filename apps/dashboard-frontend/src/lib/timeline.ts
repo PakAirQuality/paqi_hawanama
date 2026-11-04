@@ -4,9 +4,10 @@ import type { CurrentStation, ForecastEntry, NowcastResponse, NowcastStation } f
 import type { StationReading } from '@/components/ops-pipeline/types'
 
 export type ForecastLead = 1 | 2 | 3
-/** Hours ahead the nowcast covers (issued every 3 h) */
-export type NowcastLead = 3 | 6 | 12 | 24
-export const NOWCAST_LEADS: readonly NowcastLead[] = [3, 6, 12, 24]
+/** Nowcast leads the Tracker shows (issued every 3 h). The API and nowcast/latest.json also carry +24 h;
+ *  it is hidden here because it sits next to the D+1 daily mean and reads as a duplicate. */
+export type NowcastLead = 3 | 6 | 12
+export const NOWCAST_LEADS: readonly NowcastLead[] = [3, 6, 12]
 /** An hourly nowcast step: the PM2.5 expected `h` hours after the cycle's init time */
 export interface HourStep { kind: 'hour'; h: NowcastLead }
 /** Today, an hourly nowcast step or a forecast day; a past day is a plain YYYY-MM-DD date. */
@@ -17,7 +18,7 @@ export const isForecastLead = (step: TimelineStep | null): step is ForecastLead 
 export const isHourStep = (step: TimelineStep | null | undefined): step is HourStep =>
   typeof step === 'object' && step !== null && step.kind === 'hour'
 const isLead = (n: number): n is ForecastLead => n === 1 || n === 2 || n === 3
-const isNowcastLead = (n: number): n is NowcastLead => n === 3 || n === 6 || n === 12 || n === 24
+const isNowcastLead = (n: number): n is NowcastLead => (NOWCAST_LEADS as readonly number[]).includes(n)
 export const hourStep = (h: NowcastLead): HourStep => ({ kind: 'hour', h })
 
 /** Stable key for a step (object steps cannot be compared by identity): 'now' | 'h6' | '2' | a date */
@@ -25,7 +26,7 @@ export const stepKey = (step: TimelineStep | null | undefined): string =>
   step == null ? '' : isHourStep(step) ? `h${step.h}` : String(step)
 export const sameStep = (a: TimelineStep | null | undefined, b: TimelineStep | null | undefined) => stepKey(a) === stepKey(b)
 
-/** The `?view=` value for a step: today | h3..h24 | days ahead (given by the caller for forecast days) */
+/** The `?view=` value for a step: today | h3..h12 | days ahead (given by the caller for forecast days) */
 export function parseViewParam(v: string | null): { today?: true; hour?: NowcastLead; daysAhead?: number } | null {
   if (!v) return null
   if (v === 'today') return { today: true }

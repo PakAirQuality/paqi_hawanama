@@ -127,7 +127,7 @@ export interface StructuresTabProps {
   stationCaption?: string
   /** Set on a forecast day: the run, today, and the day in view */
   stationForecast?: { forecasts: ForecastEntry[]; today: string; date: string | null }
-  /** The latest hourly nowcast: the station chart gets a dashed +3/+6/+12/+24 h tail */
+  /** The latest hourly nowcast: the station chart gets a dashed +3/+6/+12 h tail */
   stationNowcast?: NowcastResponse
 }
 
