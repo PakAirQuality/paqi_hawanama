@@ -38,10 +38,10 @@ SESSION_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
 # One chat turn may need a few tool round-trips; cap requests and total tokens per turn.
 # 120k: a province-wide station breakdown plus history ran past 60k (2026-10-31); the daily
 # global budget (COPILOT_GLOBAL_DAILY_TOKENS) is the real spend guard.
-RUN_LIMITS = UsageLimits(request_limit=8, total_tokens_limit=120_000)
+RUN_LIMITS = UsageLimits(request_limit=10, total_tokens_limit=120_000)
 TOO_MUCH_DATA_MSG = ("That question needed more data than one answer allows. "
                      "Try narrowing it, for example one city or a shorter period.")
-RUN_SETTINGS = {"max_tokens": 1024}
+RUN_SETTINGS = {"max_tokens": 2048}   # a 50-station list with coordinates plus follow-ups did not fit in 1024
 
 
 def _is_rate_limit_error(exc: Exception) -> bool:
@@ -113,6 +113,17 @@ def _apply_context(session, ctx: SelectionContext | None) -> None:
         session.focus_type = "national"
 
 
+def _begin_turn(session) -> None:
+    """A past date set by last turn's tools must not silently anchor this turn.
+
+    The prompt offers it as "the previous turn used date D" and the model passes it
+    explicitly when the user is continuing on that date.
+    """
+    if session.active_historical_date:
+        session.last_turn_date = session.active_historical_date
+        session.active_historical_date = None
+
+
 def _clean(text: str) -> str:
     return STRAY_BRACE_RE.sub("", ACTION_RE.sub("", text))
 
@@ -148,6 +159,7 @@ async def copilot_chat(req: ChatRequest, request: Request):
     await budget.reserve(ip)
     session = get_or_create_session(req.session_id, req.date)
     _apply_context(session, req.context)
+    _begin_turn(session)
 
     async def _run_with_agent(agent):
         async with session.lock:

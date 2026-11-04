@@ -44,8 +44,10 @@ class CopilotSession:
     last_entities: List[str] = field(default_factory=list)
     # ── Coverage query tracking (for deterministic follow-up upgrades) ──
     last_coverage_query: Optional[Dict] = None  # {entity, geography, detail_level}
-    # ── Historical date anchor (set when user focuses on a past date) ──
+    # ── Historical date anchor: set by tools within a turn, cleared at the start of the next
+    #    turn (the router moves it to last_turn_date so the prompt can offer it as context) ──
     active_historical_date: Optional[str] = None  # YYYY-MM-DD
+    last_turn_date: Optional[str] = None          # the date the previous turn's tools used
     # ── Shared selection sent by the client (what the map/cards currently show) ──
     model: str = "backbone"                       # backbone | support_aware
     pollutant: str = "pm25"

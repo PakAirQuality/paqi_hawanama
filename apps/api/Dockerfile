@@ -40,6 +40,7 @@ COPY apps/api/alembic.ini /app/alembic.ini
 # Copy Pakistan boundary data (geoBoundaries) for tile clipping and district interactions
 COPY apps/api/data/pakistan_country.geojson /app/data/pakistan_country.geojson
 COPY apps/api/data/pakistan_districts.geojson /app/data/pakistan_districts.geojson
+COPY apps/api/data/pakistan_provinces.geojson /app/data/pakistan_provinces.geojson
 COPY apps/api/data/pakistan_adm2_dissolved.geojson /app/data/pakistan_adm2_dissolved.geojson
 
 # Create artifacts directory structure

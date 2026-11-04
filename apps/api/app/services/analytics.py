@@ -1841,6 +1841,9 @@ async def _resolve_station(
     return None
 
 
+MAX_HISTORY_HOURS = 744     # 31 days of hourly rows; longer periods go through period_stats
+
+
 async def get_station_history(
     db: AsyncSession,
     station_id: str,
@@ -1860,11 +1863,14 @@ async def get_station_history(
             window_end = datetime.now(timezone.utc)
     else:
         window_end = datetime.now(timezone.utc)
+    hours = max(1, min(int(hours), MAX_HISTORY_HOURS))
     window_start = window_end - timedelta(hours=hours)
 
+    # One row per hour (mean of that hour's readings): BAM-class stations report every few
+    # seconds, so raw rows would be tens of thousands per day and swamp the model's context.
     query = text("""
         SELECT s.name AS station_name, c.name AS city_name,
-               r.pm25, r.ts_utc
+               AVG(r.pm25) AS pm25, time_bucket('1 hour', r.ts_utc) AS ts_utc
         FROM readings r
         JOIN stations s ON r.scope_key = s.station_id
         LEFT JOIN cities c ON s.city_id = c.id
@@ -1873,7 +1879,9 @@ async def get_station_history(
           AND r.ts_utc >= :window_start
           AND r.ts_utc <= :window_end
           AND r.pm25 IS NOT NULL
-        ORDER BY r.ts_utc ASC
+          AND (r.qc_state IS NULL OR r.qc_state <> 'INVALID')
+        GROUP BY s.name, c.name, time_bucket('1 hour', r.ts_utc)
+        ORDER BY ts_utc ASC
     """)
     rows = (await db.execute(query, {
         "station_id": station_id,
@@ -2030,8 +2038,10 @@ async def get_data_coverage(
         if not station_ids:
             return {"data": {"message": f"No active stations found in {target_name}."}}
     else:
-        target_name = "National"
-        q = text("SELECT station_id FROM stations WHERE active = true")
+        # National = Pakistan's registered monitors (not shadow-provider rows, not test stations)
+        from app.services.copilot.station_queries import BASE_FROM, REGISTERED_WHERE
+        target_name = "Pakistan"
+        q = text(f"SELECT s.station_id {BASE_FROM} WHERE {REGISTERED_WHERE} AND s.active = true")
         rows = (await db.execute(q)).fetchall()
         station_ids = [r.station_id for r in rows]
 
