@@ -20,6 +20,12 @@ rewrites scope_key when state_id changes, which would detach them — flagged in
 
 A duplicate city (same name already registered under the target province, e.g. Gilgit) is
 merged: its stations move to the existing city and the orphan row is deactivated.
+
+stations is unique on (country, state, city, name, lat, lon). A row whose corrected key is
+already held by another station is a duplicate registration of the same device (the CSV
+import copied IQAir stations; Punjab EPA devices are also on IQAir) — it is flagged
+`duplicate_registration` with the twin's id and left as it is: merging identities is a
+reviewed decision (metadata identity.aliases), not this task's.
 """
 
 from __future__ import annotations
@@ -96,7 +102,7 @@ class StationChange:
 
 @dataclass
 class Flag:
-    kind: str          # outside_polygons | far_from_city | geo_differs | city_has_readings | no_decision
+    kind: str          # outside_polygons | far_from_city | geo_differs | city_has_readings | no_decision | duplicate_registration
     key: str           # station_id or city id
     name: str
     detail: str
@@ -152,6 +158,9 @@ def plan(cities: List[CityRow], stations: List[StationRow], *, border_km: float 
     city_by_id = {c.id: c for c in cities}
     effective_state: Dict[int, Optional[str]] = {c.id: c.state for c in cities}
     redirect: Dict[int, int] = {}            # orphan city id -> surviving city id
+    # the stations unique key as it stands now: (state, city_id, name, lat, lon) -> station_id
+    held: Dict[Tuple[Optional[str], Optional[int], str, Optional[float], Optional[float]], str] = {
+        (s.state, s.city_id, s.name, s.lat, s.lon): s.station_id for s in stations if s.state is not None}
 
     for c in cities:
         pts = by_city.get(c.id, [])
@@ -198,6 +207,12 @@ def plan(cities: List[CityRow], stations: List[StationRow], *, border_km: float 
                                   f"coordinates fall in {d.geo_province}; province {d.province} from city {city.name}"))
         to_city = redirect.get(s.city_id) if s.city_id is not None else None
         if d.province != s.state or to_city is not None:
+            twin = held.get((d.province, to_city or s.city_id, s.name, s.lat, s.lon))
+            if twin and twin != s.station_id:
+                out.flags.append(Flag("duplicate_registration", s.station_id, s.name,
+                                      f"{s.provider}: would move {s.state or 'NULL'} -> {d.province} but station {twin} already "
+                                      f"holds that name, coordinates, city and province; left unchanged (identity review)"))
+                continue
             out.stations.append(StationChange(s.station_id, s.name, s.provider, s.state, d.province, d.rule, d.geo_province,
                                               from_city_id=s.city_id if to_city is not None else None, to_city_id=to_city))
     return out
