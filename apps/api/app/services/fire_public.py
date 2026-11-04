@@ -240,6 +240,7 @@ def seasons(region: str = "pakistan", season: str = "rice", *, store: Optional[A
             s.loc[s["pk_day"] > end_eff, [*METRICS, "has_file"]] = [np.nan] * len(METRICS) + [False]
             cur_series = s
         r7 = s["n_dedup_hn"].rolling(7, min_periods=R7_MIN_DAYS).mean()
+        r7[s["n_dedup_hn"].isna()] = np.nan          # a day without data has no mean either (no run-on past the last point)
         valid = s[s["has_file"]]
         to_date = valid[valid["pk_day"] <= date(y, end_eff.month, end_eff.day)] if n_to_date else valid.iloc[0:0]
         sus = sum(1 for d in s["pk_day"] if d in t.suspect_days)
