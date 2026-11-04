@@ -65,6 +65,13 @@ export default function OpsPipelinePage() {
 
   // Map flyTo callback + static data
   const [flyTo, setFlyTo] = useState<((lng: number, lat: number, zoom?: number) => Promise<void>) | null>(null)
+  // ?focus=lat,lon[,zoom] from a shared link (the Fire trends page): fly once the map is ready
+  const [linkedFocus, setLinkedFocus] = useState<{ lat: number; lon: number; zoom: number } | null>(null)
+  useEffect(() => {
+    if (!flyTo || !linkedFocus) return
+    flyTo(linkedFocus.lon, linkedFocus.lat, linkedFocus.zoom)
+    setLinkedFocus(null)
+  }, [flyTo, linkedFocus])
   const [kilnsData, setKilnsData] = useState<KilnItem[]>([])
   const [industryData, setIndustryData] = useState<IndustryCategory[]>([])
 
@@ -120,6 +127,11 @@ export default function OpsPipelinePage() {
     if (view?.daysAhead) setLinkedDaysAhead(view.daysAhead)
     else if (view?.hour) setFutureStep(hourStep(view.hour))
     const m = q.get('model'); if (m === 'support_aware' || m === 'backbone') setModel(m)
+    const focus = q.get('focus')
+    if (focus) {
+      const [la, lo, z] = focus.split(',').map(Number)
+      if (Number.isFinite(la) && Number.isFinite(lo)) setLinkedFocus({ lat: la, lon: lo, zoom: Number.isFinite(z) ? z : 9 })
+    }
     const layers = q.get('layers')
     if (layers != null) {
       const on = new Set(layers.split(',').filter(Boolean))
@@ -577,7 +589,7 @@ export default function OpsPipelinePage() {
         activeTab={railTab}
         onTabChange={setRailTab}
         isStreaming={isStreaming}
-        tabs={['chat', 'layers', 'sources']}
+        tabs={['chat', 'layers', 'sources', 'fires']}
       />
 
       {/* Sliding panel: width springs open, content stays 370px wide so it never reflows mid-animation */}
