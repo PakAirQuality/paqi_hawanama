@@ -83,7 +83,10 @@ from the monitoring network — these show real current conditions, not predicti
 | "How many people are exposed?" / "Population at risk?" | `aq_exposed_population` (city_name or lat/lon, returns pop by risk band) |
 | "Give me the impact brief" / "Full city assessment" | `aq_impact_brief` (city_name — combines hazard, exposure, assets, sources) |
 | "What happened on Dec 21?" / past-date AQ question | `aq_historical_snapshot` (date required) |
-| "How many fires on Jan 6?" / fire activity on date | `aq_fire_activity` (date required) |
+| "How many fires on Jan 6?" / fire activity on one date | `aq_fire_activity` (date required; national split by country and top districts, or a city's 50 km ring) |
+| "Fires near / around / upwind of Lahore?" / "is smoke heading to X" / fires by distance from a city | `aq_fire_exposure` (city required; 50/100/200 km rings by country, wind source named, ±60° upwind cone, nearest fire, transport time) |
+| "Fire trend" / "how does this season compare" / "fires in Indian Punjab this week" / "fires in October vs last year" / season-to-date | `aq_fire_trends` (region = Pakistan, province, district, Indian Punjab, Haryana; season="rice" or "wheat"; compares with 2020–2025) |
+| "Where are the fires / biggest fire clusters" / "which districts are burning" / "persistent hotspots / kilns / flares" | `aq_fire_hotspots` (group=cluster, district or persistent; area = region or city with radius_km) |
 | "Where did the air come from?" / trajectory / transport | `aq_trajectory` (city required) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
@@ -142,6 +145,20 @@ These are real satellite observations, not predictions.
 - `aq_trajectory` returns back-trajectory analysis. If status is "wind_estimated", \
 clearly caveat that this is a surface wind estimate, not a full HYSPLIT trajectory. \
 If status is "ok", this is a real HYSPLIT 72h back-trajectory.
+
+## Fire wording
+- Quote the deduplicated high/nominal-confidence count as "fires" and say so once ("deduplicated \
+VIIRS fires"); raw detections are "detections". Give the window as Pakistan days and, for one \
+day, the passes included (passes.observation_period).
+- Cross-border fires are included and labelled: Pakistan / Indian Punjab and Haryana / other. \
+Say which when the question is about smoke reaching a city.
+- Upwind figures name the wind source (ERA5, forecast pipeline, station observations) and the \
+±60° cone; if the wind is unavailable, give the rings and say the upwind split is unavailable.
+- Never say fires caused or drove PM2.5. Say the pattern is "consistent with smoke transport" \
+and name the other candidates (stagnation, local sources). FRP is burning intensity, not PM2.5.
+- Comparisons with earlier years: state the window ("1–4 Nov in each year"), the reference \
+years with data, and "higher than k of n reference years"; mention satellite-roster and thin-day \
+caveats when the tool returns them.
 
 ## Critical: data coverage and availability
 - The monitoring database has **multi-year historical data** — do NOT assume any retention limit.
@@ -327,6 +344,9 @@ def get_agent(model_name: str | None = None):
         tools.aq_impact_brief,
         tools.aq_historical_snapshot,
         tools.aq_fire_activity,
+        tools.aq_fire_exposure,
+        tools.aq_fire_trends,
+        tools.aq_fire_hotspots,
         tools.aq_trajectory,
         tools.aq_station_inventory,
         tools.aq_nearest_stations,

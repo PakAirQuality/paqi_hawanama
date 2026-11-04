@@ -1,0 +1,701 @@
+"""
+Fire analytics on the FIRMS aggregate store (fire_aggregates) and the day files:
+
+  fire_exposure  — fires around and upwind of a city on one Pakistan day, with the wind source named
+  fire_trends    — daily / weekly series for a region, season-to-date, compared with 2020–2025
+  fire_hotspots  — same-day clusters, district league table, persistent thermal sources
+  fire_activity  — the old one-day summary, now without the national-numbers-as-city fallback
+
+Every result carries FIRE_DEFINITIONS, the window (Pakistan and UTC), the satellites and pass
+window from the day sidecars, and caveats. Counts quoted as the headline are deduplicated fires
+with a high- or nominal-confidence detection (see fire_aggregates). Nothing here asserts that
+fires caused PM2.5; the wording rule is "consistent with".
+"""
+
+from __future__ import annotations
+
+import difflib
+import logging
+import math
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+
+import numpy as np
+import pandas as pd
+
+from app.services import fire_regions as fr
+from app.services.fire_aggregates import AggStore, DayBuild, agg_store
+from app.services.fires import PK_TZ
+
+logger = logging.getLogger(__name__)
+
+RINGS_KM = (50, 100, 200)
+MAX_RING_KM = 200.0
+TOP_FIRES = 10
+MAX_ROWS = 60
+PERSISTENT_WINDOW_DAYS = 30
+REFERENCE_YEARS = (2020, 2021, 2022, 2023, 2024, 2025)
+SEASONS = {
+    "kharif_rice_residue": ("10-01", "11-30"),   # rice stubble before wheat sowing
+    "rabi_wheat_residue": ("04-15", "05-31"),    # wheat stubble before rice transplanting
+}
+SEASON_ALIASES = {"rice": "kharif_rice_residue", "kharif": "kharif_rice_residue", "autumn": "kharif_rice_residue",
+                  "october": "kharif_rice_residue", "november": "kharif_rice_residue", "winter": "kharif_rice_residue",
+                  "wheat": "rabi_wheat_residue", "rabi": "rabi_wheat_residue", "spring": "rabi_wheat_residue",
+                  "april": "rabi_wheat_residue", "may": "rabi_wheat_residue"}
+
+FIRE_DEFINITIONS = {
+    "detection": "one VIIRS 375 m pixel flagged as a thermal anomaly by NASA FIRMS; a large field burn is several detections",
+    "fire": "deduplicated detection: detections from different satellites within 1 km and 90 minutes are one fire (highest FRP kept)",
+    "headline_count": "deduplicated fires with at least one high- or nominal-confidence detection; raw detections and low-confidence rows are reported separately because the satellite roster changed over the years",
+    "frp": "fire radiative power in megawatts summed over deduplicated fires: burning intensity, not a PM2.5 contribution",
+    "day": "Pakistan calendar day (Asia/Karachi): the ~13:00 PKT day pass and the ~01:00 PKT night pass of that date",
+    "day_basis": "acq_pkt = keyed by Pakistan day with pass times; acq_utc = older archive days keyed by UTC date without pass times",
+    "country": "PK = Pakistan; IN = Indian Punjab and Haryana only; other = the rest of the 60–78E / 23–37N box (Rajasthan, J&K, Afghanistan, Iran)",
+    "upwind": "fires whose bearing from the city lies within ±60° of the wind's 'from' direction on that day; the wind source is named",
+    "transport_time": "distance divided by the 10 m wind speed; smoke moves faster aloft, so the hours are an upper bound",
+    "not_causation": "fire counts and FRP do not measure a contribution to PM2.5: say 'consistent with smoke transport', never 'caused'",
+}
+
+PROVINCE_ALIASES = {
+    "kp": "Khyber Pakhtunkhwa", "kpk": "Khyber Pakhtunkhwa", "khyber pakhtunkhwa": "Khyber Pakhtunkhwa", "nwfp": "Khyber Pakhtunkhwa",
+    "ict": "Islamabad", "islamabad": "Islamabad", "islamabad capital territory": "Islamabad",
+    "ajk": "Azad Kashmir", "azad kashmir": "Azad Kashmir", "azad jammu and kashmir": "Azad Kashmir",
+    "gb": "Gilgit-Baltistan", "gilgit": "Gilgit-Baltistan", "gilgit baltistan": "Gilgit-Baltistan", "gilgit-baltistan": "Gilgit-Baltistan",
+    "punjab": "Punjab", "pakistan punjab": "Punjab", "pakistani punjab": "Punjab", "west punjab": "Punjab",
+    "sindh": "Sindh", "balochistan": "Balochistan", "baluchistan": "Balochistan",
+}
+INDIA_ALIASES = {
+    "india punjab": "Punjab (IN)", "indian punjab": "Punjab (IN)", "punjab (in)": "Punjab (IN)", "punjab india": "Punjab (IN)",
+    "east punjab": "Punjab (IN)", "punjab in": "Punjab (IN)",
+    "haryana": "Haryana (IN)", "haryana (in)": "Haryana (IN)", "haryāna": "Haryana (IN)",
+}
+COUNTRY_ALIASES = {
+    "pakistan": "Pakistan", "national": "Pakistan", "pk": "Pakistan", "": "Pakistan",
+    "india": "India (Punjab+Haryana)", "india (punjab+haryana)": "India (Punjab+Haryana)", "cross-border": "India (Punjab+Haryana)",
+    "cross border": "India (Punjab+Haryana)", "across the border": "India (Punjab+Haryana)",
+    "other": "other in bbox", "other in bbox": "other in bbox", "rest of bbox": "other in bbox",
+}
+
+
+# ── shared helpers ────────────────────────────────────────────────────────────
+
+def pkt_today() -> date:
+    return datetime.now(timezone.utc).astimezone(PK_TZ).date()
+
+
+def _window_dict(start: date, end: date) -> Dict[str, Any]:
+    return {"start_pkt_day": start.isoformat(), "end_pkt_day": end.isoformat(), "days": (end - start).days + 1,
+            "start_utc": (datetime(start.year, start.month, start.day, tzinfo=PK_TZ)).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%MZ"),
+            "end_utc": (datetime(end.year, end.month, end.day, tzinfo=PK_TZ) + timedelta(days=1)).astimezone(timezone.utc).strftime("%Y-%m-%d %H:%MZ")}
+
+
+def _pass_info(built: Optional[DayBuild]) -> Dict[str, Any]:
+    if built is None:
+        return {}
+    i = built.info
+    return {"status": i.get("status"), "day_basis": "acq_pkt" if i.get("format") == "pkt_v2" else "acq_utc",
+            "satellites": i.get("sources"), "observation_period": i.get("observation_period"), "fetched_at": i.get("fetched_at")}
+
+
+def _headline(det: pd.DataFrame) -> pd.DataFrame:
+    return det[det["is_primary"] & det["grp_hn"]]
+
+
+def _pkt(ts) -> Optional[str]:
+    if ts is None or pd.isna(ts):
+        return None
+    return pd.Timestamp(ts).tz_convert(PK_TZ).strftime("%Y-%m-%d %H:%M PKT")
+
+
+def parse_day(s: str) -> Optional[date]:
+    try:
+        return date.fromisoformat((s or "").strip()[:10])
+    except ValueError:
+        return None
+
+
+def _r(v, nd=1):
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else round(float(v), nd)
+
+
+# ── wind at a city ────────────────────────────────────────────────────────────
+
+@dataclass
+class WindEstimate:
+    source: str                 # era5 | pipeline_summary | station_vector_mean | none
+    from_deg: Optional[float]
+    speed_ms: Optional[float]
+    n: int = 0
+    note: str = ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {"source": self.source, "from_deg": self.from_deg, "from_compass": fr.compass(self.from_deg),
+                "speed_ms": self.speed_ms, "n_observations": self.n, "note": self.note}
+
+
+@dataclass
+class Loaders:
+    """Injectable I/O for the context pieces (defaults read GCS through the analyst-desk helpers)."""
+    era5_uv: Callable[[float, float, date], Optional[Tuple[float, float]]] = None       # type: ignore[assignment]
+    summary: Callable[[date], Optional[Dict[str, Any]]] = None                            # type: ignore[assignment]
+    driver_summary: Callable[[date], Optional[Dict[str, Any]]] = None                     # type: ignore[assignment]
+    trajectory: Callable[[str, date], Optional[Dict[str, Any]]] = None                    # type: ignore[assignment]
+
+    def __post_init__(self):
+        self.era5_uv = self.era5_uv or _default_era5_uv
+        self.summary = self.summary or _default_summary
+        self.driver_summary = self.driver_summary or _default_driver_summary
+        self.trajectory = self.trajectory or _default_trajectory
+
+
+_MEMO: Dict[Tuple[str, Any], Tuple[float, Any]] = {}
+MEMO_TTL_S = 600.0
+
+
+def _memo(key: Tuple[str, Any], fn: Callable[[], Any]) -> Any:
+    """Per-process cache for the pipeline JSONs (immutable once written; the latest day is re-read every 10 min)."""
+    import time
+    hit = _MEMO.get(key)
+    if hit is not None and time.monotonic() - hit[0] < MEMO_TTL_S:
+        return hit[1]
+    val = fn()
+    if len(_MEMO) >= 200:
+        _MEMO.pop(next(iter(_MEMO)))
+    _MEMO[key] = (time.monotonic(), val)
+    return val
+
+
+def _default_era5_uv(lat: float, lon: float, day: date) -> Optional[Tuple[float, float]]:
+    try:
+        from app.routers.ops_pipeline import _get_features_bucket, _sample_cog_at_points
+        bucket = _get_features_bucket()
+        ds = day.isoformat()
+        u = _sample_cog_at_points(bucket, f"cog/u10/date={ds}/u10.tif", [(lon, lat)])[0]
+        v = _sample_cog_at_points(bucket, f"cog/v10/date={ds}/v10.tif", [(lon, lat)])[0]
+        if u is None or v is None:
+            return None
+        return float(u), float(v)
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("ERA5 point sample unavailable for %s: %s", day, exc)
+        return None
+
+
+def _default_summary(day: date) -> Optional[Dict[str, Any]]:
+    def load():
+        try:
+            from app.routers.analyst_desk import _load_summary_safe
+            return _load_summary_safe(day.isoformat())
+        except Exception:  # noqa: BLE001
+            return None
+    return _memo(("summary", day), load)
+
+
+def _default_driver_summary(day: date) -> Optional[Dict[str, Any]]:
+    def load():
+        try:
+            from app.routers.analyst_desk import _load_driver_summary_safe
+            return _load_driver_summary_safe(day.isoformat())
+        except Exception:  # noqa: BLE001
+            return None
+    return _memo(("driver_summary", day), load)
+
+
+def _default_trajectory(city: str, day: date) -> Optional[Dict[str, Any]]:
+    def load():
+        try:
+            from app.routers.analyst_desk import _load_trajectory_safe
+            return _load_trajectory_safe(city, day.isoformat())
+        except Exception:  # noqa: BLE001
+            return None
+    return _memo(("trajectory", (city.lower(), day)), load)
+
+
+def _city_summary(summary: Optional[Dict[str, Any]], city: str) -> Optional[Dict[str, Any]]:
+    for row in (summary or {}).get("city_summaries", []) or []:
+        name = row.get("name") or row.get("city_name") or ""
+        if name.lower() == city.lower():
+            return row
+    return None
+
+
+async def station_wind(db, city_id: int, day: date) -> WindEstimate:
+    """Speed-weighted vector mean of the city's station winds over the Pakistan day."""
+    from sqlalchemy import text
+    from app.services.copilot.station_queries import day_window_utc
+    w0, w1 = day_window_utc(day)
+    rows = (await db.execute(text("""
+        SELECT r.wind_dir_deg AS d, r.wind_speed_ms AS s
+        FROM readings r JOIN stations s ON s.station_id = r.scope_key
+        WHERE r.scope_type = 'station' AND s.city_id = :cid AND s.active = true
+          AND r.ts_utc >= :w0 AND r.ts_utc < :w1
+          AND r.wind_dir_deg IS NOT NULL AND r.wind_speed_ms IS NOT NULL
+    """), {"cid": city_id, "w0": w0, "w1": w1})).fetchall()
+    if not rows:
+        return WindEstimate("none", None, None, 0, "no station wind observations for this city and day")
+    d, s = fr.vector_mean_from_deg([r.d for r in rows], [r.s for r in rows])
+    if d is None:
+        return WindEstimate("station_vector_mean", None, s, len(rows), "opposing winds cancel out; no dominant direction")
+    return WindEstimate("station_vector_mean", d, s, len(rows), "speed-weighted vector mean of surface station observations (10 m, IQAir)")
+
+
+async def city_wind(db, city_name: str, city_id: Optional[int], lat: float, lon: float, day: date, loaders: Loaders) -> WindEstimate:
+    """ERA5 10 m wind at the city when the raster exists, else the forecast pipeline's prevailing wind,
+    else the station vector mean. The source is always named in the result."""
+    uv = loaders.era5_uv(lat, lon, day)
+    if uv is not None:
+        u, v = uv
+        return WindEstimate("era5", round(fr.wind_from_deg(u, v), 1), round(fr.wind_speed(u, v), 2), 1, "ERA5 10 m daily wind sampled at the city centroid")
+    cs = _city_summary(loaders.summary(day), city_name)
+    mf = (cs or {}).get("met_fire") or {}
+    if mf.get("met_wd10_prevailing") is not None:
+        return WindEstimate("pipeline_summary", round(float(mf["met_wd10_prevailing"]), 1),
+                            _r(mf.get("met_ws10_mean"), 2), 1, "prevailing 10 m wind from the forecast pipeline's city summary")
+    if db is not None and city_id is not None:
+        return await station_wind(db, city_id, day)
+    return WindEstimate("none", None, None, 0, "no wind source available")
+
+
+# ── 1. exposure ───────────────────────────────────────────────────────────────
+
+async def fire_exposure(db, city: str, day: date, *, radius_km: float = 100.0, cone_half_deg: float = fr.CONE_HALF_DEG,
+                        store: Optional[AggStore] = None, loaders: Optional[Loaders] = None) -> Dict[str, Any]:
+    """Fires around and upwind of a city on one Pakistan day."""
+    from app.services.copilot.station_queries import _city_centroid, resolve_city
+    store = store or agg_store()
+    loaders = loaders or Loaders()
+    match, cands = await resolve_city(db, city)
+    if cands:
+        return {"message": f"'{city}' matches several cities: {', '.join(c.name for c in cands)}. Which one?"}
+    if match is None:
+        return {"message": f"City '{city}' not found among active Pakistan cities; fire exposure needs a known city."}
+    lat, lon = await _city_centroid(db, match)
+    if lat is None or lon is None:
+        return {"message": f"{match.name} has no coordinates in the registry (no stations with a position), so fires around it cannot be counted."}
+    built = store.day_from_csv(day)
+    if built is None:
+        return {"message": f"No fire file for the Pakistan day {day.isoformat()}; the archive holds days from 2020-01-01 to about today."}
+    if built.info.get("status") == "unavailable":
+        return {"message": f"The fire feed had no data for {day.isoformat()} (every satellite source failed); do not infer fire activity.",
+                "passes": _pass_info(built)}
+    caveats: List[str] = []
+    if built.info.get("status") == "partial":
+        caveats.append("Partial satellite coverage for this day: one source failed, counts are a lower bound.")
+    if built.info.get("format") != "pkt_v2":
+        caveats.append("Archive day keyed by UTC date without pass times; the night pass may belong to the neighbouring day.")
+    radius_km = float(max(5.0, min(radius_km or 100.0, MAX_RING_KM)))
+    det = built.detections
+    if det.empty:
+        rings = {f"{r}km": {"fires": 0, "detections": 0, "frp_mw": 0.0, "by_country": {}} for r in RINGS_KM}
+        wind = await city_wind(db, match.name, match.id, lat, lon, day, loaders)
+        return {"city": match.name, "lat": _r(lat, 4), "lon": _r(lon, 4), "day": day.isoformat(), "window": _window_dict(day, day),
+                "rings": rings, "wind": wind.to_dict(), "upwind": None, "nearest_fire": None, "top_upwind_fires": [],
+                "passes": _pass_info(built), "caveats": caveats + ["No detections at all in the box on this day."],
+                "definitions": FIRE_DEFINITIONS}
+    km = fr.haversine_km_vec(lat, lon, det["lat"].to_numpy(), det["lon"].to_numpy())
+    brg = fr.bearing_deg(lat, lon, det["lat"].to_numpy(), det["lon"].to_numpy())
+    d = det.assign(km=km, bearing=brg)
+    near = d[d["km"] <= MAX_RING_KM]
+    head = _headline(near)
+    rings: Dict[str, Any] = {}
+    for r in sorted(set(RINGS_KM) | {int(radius_km)}):
+        h = head[head["km"] <= r]
+        rings[f"{r}km"] = {
+            "fires": int(len(h)), "detections": int((near["km"] <= r).sum()), "frp_mw": _r(h["frp"].sum()),
+            "by_country": {fr.COUNTRY_LABELS[c]: int(n) for c, n in h["country"].value_counts().items()},
+        }
+    sel = head[head["km"] <= radius_km]
+    top_districts = [{"district": k, "fires": int(v)} for k, v in sel["district"].dropna().value_counts().head(5).items()]
+    wind = await city_wind(db, match.name, match.id, lat, lon, day, loaders)
+    upwind: Optional[Dict[str, Any]] = None
+    top_upwind: List[Dict[str, Any]] = []
+    if wind.from_deg is not None:
+        cone = head[fr.in_cone(head["bearing"].to_numpy(), wind.from_deg, cone_half_deg)]
+        cosw = np.cos(np.radians(fr.angle_diff(cone["bearing"].to_numpy(), wind.from_deg)))
+        upwind = {
+            "cone_half_width_deg": cone_half_deg, "from_deg": wind.from_deg, "from_compass": fr.compass(wind.from_deg),
+            "fires_200km": int(len(cone)), "frp_mw_200km": _r(cone["frp"].sum()), "frp_mw_cos_weighted": _r(float((cone["frp"].to_numpy() * cosw).sum())),
+            "fires_100km": int((cone["km"] <= 100).sum()), "frp_mw_100km": _r(cone.loc[cone["km"] <= 100, "frp"].sum()),
+            "by_country": {fr.COUNTRY_LABELS[c]: int(n) for c, n in cone["country"].value_counts().items()},
+        }
+        for _, f in cone.sort_values("frp", ascending=False).head(TOP_FIRES).iterrows():
+            top_upwind.append(_fire_row(f, wind.speed_ms))
+    nearest = None
+    if len(head):
+        f = head.sort_values("km").iloc[0]
+        nearest = _fire_row(f, wind.speed_ms)
+    context: Dict[str, Any] = {}
+    traj = loaders.trajectory(match.name, day)
+    if traj and traj.get("status") == "ok":
+        context["hysplit"] = {"dominant_corridor": traj.get("dominant_corridor"), "corridor_consistent": traj.get("corridor_consistent"),
+                              "fire_intersections": len(traj.get("fire_intersections") or []), "note": "cached 72 h back-trajectory for this city and day"}
+    cs = _city_summary(loaders.summary(day), match.name)
+    if cs and cs.get("met_fire"):
+        mf = cs["met_fire"]
+        context["pipeline_met_fire"] = {k: mf.get(k) for k in ("fire_count_100km", "fire_frp_sum_100km", "fire_frp_sum_upwind_100km",
+                                                               "fire_frp_sum_200km_3d", "fire_frp_sum_200km_7d", "met_blh_mean", "met_stag_frac")
+                                        if k in mf}
+        context["pipeline_met_fire"]["note"] = "forecast pipeline features (raw detection counts, max across the city's stations)"
+    ds = loaders.driver_summary(day)
+    for row in (ds or {}).get("driver_summaries", []) or []:
+        if (row.get("city_name") or "").lower() == match.name.lower():
+            fire_driver = next((dr for dr in row.get("drivers", []) if dr.get("driver") in ("fire", "fire_biomass", "fire_activity")), None)
+            if fire_driver:
+                context["pipeline_fire_driver"] = {"score": fire_driver.get("score"), "evidence": fire_driver.get("evidence"),
+                                                   "primary_driver": row.get("primary_driver")}
+            break
+    if wind.from_deg is None:
+        caveats.append(f"No wind direction for {day.isoformat()} ({wind.note}); upwind figures are not available, rings are.")
+    return {
+        "city": match.name, "lat": _r(lat, 4), "lon": _r(lon, 4), "day": day.isoformat(), "window": _window_dict(day, day),
+        "radius_km": radius_km, "rings": rings, "top_districts_in_radius": top_districts,
+        "wind": wind.to_dict(), "upwind": upwind, "top_upwind_fires": top_upwind, "nearest_fire": nearest,
+        "context": context, "passes": _pass_info(built), "caveats": caveats, "definitions": FIRE_DEFINITIONS,
+    }
+
+
+def _fire_row(f, speed_ms: Optional[float]) -> Dict[str, Any]:
+    th = None
+    if speed_ms and speed_ms > 0.3:
+        th = round(float(f["km"]) / (float(speed_ms) * 3.6), 1)
+    return {"lat": _r(f["lat"], 4), "lon": _r(f["lon"], 4), "frp_mw": _r(f["frp"]), "km": _r(f["km"]), "bearing_deg": _r(f["bearing"], 0),
+            "direction": fr.compass(float(f["bearing"])), "country": fr.COUNTRY_LABELS.get(f["country"], f["country"]),
+            "province": f["province"], "district": f["district"], "confidence": f["confidence"], "satellite": f["satellite"],
+            "acq_pkt": _pkt(f["acq_utc"]), "transport_h_at_10m_wind": th}
+
+
+# ── 2. trends ─────────────────────────────────────────────────────────────────
+
+def resolve_region(name: str, store: Optional[AggStore] = None) -> Tuple[Optional[Tuple[str, str]], Optional[str], List[str]]:
+    """(kind, region), note, known districts for a typed name; kind in country|province|india_state|district."""
+    key = (name or "").strip().lower()
+    if key in COUNTRY_ALIASES:
+        return ("country", COUNTRY_ALIASES[key]), None, []
+    if key in INDIA_ALIASES:
+        return ("india_state", INDIA_ALIASES[key]), None, []
+    if key in PROVINCE_ALIASES:
+        note = "'Punjab' taken as Pakistan's Punjab; ask for 'Indian Punjab' for the cross-border belt." if key == "punjab" else None
+        return ("province", PROVINCE_ALIASES[key]), note, []
+    idx = fr.load_region_index()
+    districts = sorted(idx.district_province)
+    low = {d.lower(): d for d in districts}
+    if key in low:
+        return ("district", low[key]), None, districts
+    close = difflib.get_close_matches(key, list(low), n=1, cutoff=0.8)
+    if close:
+        return ("district", low[close[0]]), f"'{name}' read as district {low[close[0]]}", districts
+    return None, None, districts
+
+
+def season_window(season: str, *, year: Optional[int] = None, today: Optional[date] = None) -> Optional[Tuple[date, date, str]]:
+    """(start, end, season_name) for a season name/alias in `year` (default: the latest occurrence), capped at today."""
+    today = today or pkt_today()
+    key = (season or "").strip().lower()
+    key = SEASON_ALIASES.get(key, key)
+    if key not in SEASONS:
+        return None
+    s_mmdd, e_mmdd = SEASONS[key]
+    y = year or today.year
+    start = date(y, int(s_mmdd[:2]), int(s_mmdd[3:]))
+    end = date(y, int(e_mmdd[:2]), int(e_mmdd[3:]))
+    if year is None and start > today:                # this year's season has not started: last year's
+        start, end = start.replace(year=y - 1), end.replace(year=y - 1)
+    return start, min(end, today), key
+
+
+def current_season(today: Optional[date] = None) -> Optional[str]:
+    today = today or pkt_today()
+    for k, (s, e) in SEASONS.items():
+        if date(today.year, int(s[:2]), int(s[3:])) <= today <= date(today.year, int(e[:2]), int(e[3:])):
+            return k
+    return None
+
+
+def _series(daily: pd.DataFrame, kind: str, region: str, start: date, end: date, days_with_file: set) -> pd.DataFrame:
+    sel = daily[(daily["region_kind"] == kind) & (daily["region"] == region) & (daily["pk_day"] >= start) & (daily["pk_day"] <= end)]
+    idx = pd.date_range(start, end, freq="D").date
+    out = pd.DataFrame({"pk_day": idx})
+    out = out.merge(sel[["pk_day", "n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"]], on="pk_day", how="left")
+    out["has_file"] = [d in days_with_file for d in out["pk_day"]]
+    for c in ("n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"):
+        out[c] = np.where(out["has_file"], out[c].fillna(0), np.nan)
+    return out
+
+
+def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Optional[date] = None, *, season: str = "",
+                compare_years: Sequence[int] = REFERENCE_YEARS, store: Optional[AggStore] = None,
+                today: Optional[date] = None) -> Dict[str, Any]:
+    """Daily (or weekly) fire series for a region with a same-window comparison against earlier years."""
+    store = store or agg_store()
+    today = today or pkt_today()
+    resolved, note, districts = resolve_region(region, store)
+    if resolved is None:
+        return {"message": f"Region '{region}' not recognised. Use Pakistan, a province (Punjab, Sindh, KP, Balochistan, GB, AJK, Islamabad), "
+                           f"a Pakistan district, 'Indian Punjab' or 'Haryana'."}
+    kind, rname = resolved
+    season_name = None
+    if season:
+        sw = season_window(season, year=end.year if end and not start else None, today=today)
+        if sw is None:
+            return {"message": f"Unknown season '{season}'. Seasons: {', '.join(SEASONS)} (aliases: rice/kharif, wheat/rabi)."}
+        start, end, season_name = sw
+    if start is None and end is None:
+        cs = current_season(today)
+        if cs:
+            start, end, season_name = season_window(cs, today=today)
+        else:
+            end = today
+            start = end - timedelta(days=29)
+    start = start or (end - timedelta(days=29))
+    end = end or min(today, start + timedelta(days=29))
+    if end > today:
+        end = today
+    if start > end:
+        return {"message": f"Start {start} is after end {end}."}
+    manifest = store.manifest()
+    days_with_file = {date.fromisoformat(k) for k in manifest.get("days", {})}
+    daily = store.daily_regions()
+    s = _series(daily, kind, rname, start, end, days_with_file)
+    s["rolling7_fires"] = s["n_dedup_hn"].rolling(7, min_periods=1).mean().round(1)
+    s["rolling7_frp_mw"] = s["frp_dedup_hn"].rolling(7, min_periods=1).mean().round(0)
+    missing = [d.isoformat() for d, f in zip(s["pk_day"], s["has_file"]) if not f]
+    valid = s[s["has_file"]]
+    total = int(valid["n_dedup_hn"].sum()) if len(valid) else 0
+    peak = (valid.sort_values(["n_dedup_hn", "frp_dedup_hn"], ascending=False).iloc[0]
+            if len(valid) and valid["n_dedup_hn"].max() > 0 else None)
+    summary: Dict[str, Any] = {
+        "fires": total, "detections": int(valid["n_raw"].sum()) if len(valid) else 0, "frp_mw": _r(valid["frp_dedup_hn"].sum()) if len(valid) else 0.0,
+        "days_with_data": int(len(valid)), "days_missing": len(missing), "fires_per_day": _r(total / len(valid)) if len(valid) else None,
+        "peak_day": {"day": peak["pk_day"].isoformat(), "fires": int(peak["n_dedup_hn"]), "frp_mw": _r(peak["frp_dedup_hn"])} if peak is not None else None,
+        "night_share": _r(valid["n_night"].sum() / max(valid["n_day"].sum() + valid["n_night"].sum(), 1), 2) if len(valid) else None,
+    }
+    if kind == "country" and rname == "Pakistan":
+        share = {}
+        for lab in fr.COUNTRY_LABELS.values():
+            cs_ = _series(daily, "country", lab, start, end, days_with_file)
+            share[lab] = int(cs_["n_dedup_hn"].fillna(0).sum())
+        summary["by_country"] = share
+    if kind in ("country", "province") and rname != "other in bbox":
+        dsel = daily[(daily["region_kind"] == "district") & (daily["pk_day"] >= start) & (daily["pk_day"] <= end)]
+        if kind == "province":
+            idx = fr.load_region_index()
+            dsel = dsel[dsel["region"].map(idx.district_province) == rname]
+        if kind == "country" and rname != "Pakistan":
+            dsel = dsel.iloc[0:0]
+        top = dsel.groupby("region")[["n_dedup_hn", "frp_dedup_hn"]].sum()
+        top = top[top["n_dedup_hn"] > 0].sort_values("n_dedup_hn", ascending=False).head(10)
+        summary["top_districts"] = [{"district": k, "fires": int(v["n_dedup_hn"]), "frp_mw": _r(v["frp_dedup_hn"])} for k, v in top.iterrows()]
+    # rows: daily, or weekly when the window is long
+    if len(s) > MAX_ROWS:
+        wk = s.assign(week=[d - timedelta(days=d.weekday()) for d in s["pk_day"]])
+        g = wk.groupby("week")
+        rows_df = pd.DataFrame({
+            "week_start": list(g.groups.keys()), "fires": g["n_dedup_hn"].sum(min_count=1).values, "detections": g["n_raw"].sum(min_count=1).values,
+            "frp_mw": g["frp_dedup_hn"].sum(min_count=1).values, "days_with_data": g["has_file"].sum().values,
+        })
+        rows = [{"week_start": r.week_start.isoformat(), "fires": _int(r.fires), "detections": _int(r.detections), "frp_mw": _r(r.frp_mw, 0),
+                 "days_with_data": int(r.days_with_data)} for r in rows_df.itertuples()]
+        bucket = "week"
+    else:
+        rows = [{"day": r.pk_day.isoformat(), "fires": _int(r.n_dedup_hn), "detections": _int(r.n_raw), "frp_mw": _r(r.frp_dedup_hn, 0),
+                 "rolling7_fires": _r(r.rolling7_fires), "night": _int(r.n_night)} if r.has_file
+                else {"day": r.pk_day.isoformat(), "fires": None, "note": "no file"} for r in s.itertuples()]
+        bucket = "day"
+    # same-window comparison with earlier years
+    comparison: Optional[Dict[str, Any]] = None
+    if compare_years:
+        ref = []
+        for y in compare_years:
+            if y >= start.year:
+                continue
+            try:
+                ys, ye = start.replace(year=y), end.replace(year=y)
+            except ValueError:                       # 29 Feb
+                continue
+            rs = _series(daily, kind, rname, ys, ye, days_with_file)
+            rv = rs[rs["has_file"]]
+            ref.append({"year": y, "fires": int(rv["n_dedup_hn"].sum()) if len(rv) else None, "frp_mw": _r(rv["frp_dedup_hn"].sum(), 0) if len(rv) else None,
+                        "days_with_data": int(len(rv)), "days_missing": int((~rs["has_file"]).sum())})
+        vals = [r["fires"] for r in ref if r["fires"] is not None and r["days_with_data"] >= max(1, int(0.6 * len(s)))]
+        comparison = {"window": f"{start.strftime('%m-%d')} to {end.strftime('%m-%d')} in each year", "years": ref}
+        if vals:
+            comparison.update({
+                "reference_mean": _r(float(np.mean(vals)), 0), "reference_min": int(min(vals)), "reference_max": int(max(vals)),
+                "ratio_to_mean": _r(total / float(np.mean(vals)), 2) if np.mean(vals) > 0 else None,
+                "higher_than_n_of": [sum(1 for v in vals if total > v), len(vals)],
+            })
+    caveats = [FIRE_DEFINITIONS["headline_count"]]
+    if any(d.year < 2026 for d in s["pk_day"]) or (comparison and ref):
+        caveats.append("Archive days before the 2026 ingester are keyed by UTC date and lack pass times; the satellite roster differs by year "
+                       "(Suomi NPP + NOAA-20 in 2020–2022, NOAA-21 from 2023, Suomi NPP retired 2026-11-01), so deduplicated counts are the comparable ones.")
+    if manifest.get("suspect_days"):
+        sus = [x["day"] for x in manifest["suspect_days"] if start.strftime("%m-%d") <= x["day"][5:] <= end.strftime("%m-%d")]
+        if sus:
+            caveats.append(f"{len(sus)} archive day(s) in this calendar window look thin (re-fetched with fewer rows than the 2020–2023 median): {', '.join(sus[:6])}"
+                           + (" …" if len(sus) > 6 else ""))
+    if missing:
+        caveats.append(f"{len(missing)} day(s) in the window have no fire file: {', '.join(missing[:5])}" + (" …" if len(missing) > 5 else ""))
+    out = {"region": {"kind": kind, "name": rname}, "window": _window_dict(start, end), "season": season_name, "bucket": bucket,
+           "summary": summary, "rows": rows, "comparison": comparison, "caveats": caveats, "definitions": FIRE_DEFINITIONS,
+           "store_built_at": manifest.get("built_at")}
+    if note:
+        out["note"] = note
+    return out
+
+
+def _int(v) -> Optional[int]:
+    return None if v is None or (isinstance(v, float) and math.isnan(v)) else int(v)
+
+
+# ── 3. hotspots ───────────────────────────────────────────────────────────────
+
+def _detections_for(store: AggStore, start: date, end: date) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """Detections over the window from the store, with days the store lacks read from their CSVs."""
+    det = store.detections(start, end)
+    manifest = store.manifest()
+    known = {date.fromisoformat(k) for k in manifest.get("days", {})}
+    passes: Dict[str, Any] = {"satellites": set(), "day_basis": set(), "first_pass": None, "last_pass": None}
+    extra = []
+    d = start
+    while d <= end:
+        rec = manifest.get("days", {}).get(d.isoformat())
+        if d not in known or (today_recent(d) and rec):
+            b = store.day_from_csv(d)
+            if b is not None:
+                if d not in known or today_recent(d):
+                    extra.append(b.detections)
+                rec = b.info
+        if rec:
+            passes["satellites"].update(rec.get("sources") or [])
+            passes["day_basis"].add("acq_pkt" if rec.get("format") == "pkt_v2" else "acq_utc")
+            op = rec.get("observation_period") or {}
+            if op.get("start") and (passes["first_pass"] is None or op["start"] < passes["first_pass"]):
+                passes["first_pass"] = op["start"]
+            if op.get("end") and (passes["last_pass"] is None or op["end"] > passes["last_pass"]):
+                passes["last_pass"] = op["end"]
+        d += timedelta(days=1)
+    if extra:
+        fresh = pd.concat(extra, ignore_index=True)
+        fresh_days = set(fresh["pk_day"])
+        det = pd.concat([det[~det["pk_day"].isin(fresh_days)], fresh], ignore_index=True) if len(det) else fresh
+    passes["satellites"] = sorted(passes["satellites"])
+    passes["day_basis"] = sorted(passes["day_basis"])
+    return det, passes
+
+
+def today_recent(d: date, today: Optional[date] = None) -> bool:
+    """The last two Pakistan days are read from their CSVs so the 3-hourly ingest is not waited on."""
+    return (today or pkt_today()) - d <= timedelta(days=1)
+
+
+def fire_hotspots(*, region: Optional[str] = None, center: Optional[Tuple[float, float, str]] = None, radius_km: float = 50.0,
+                  start: Optional[date] = None, end: Optional[date] = None, group: str = "cluster", min_days: int = 10,
+                  limit: int = 40, store: Optional[AggStore] = None, today: Optional[date] = None) -> Dict[str, Any]:
+    """Clusters, district league table or persistent thermal sources for a region or a radius around a point."""
+    store = store or agg_store()
+    today = today or pkt_today()
+    group = (group or "cluster").strip().lower()
+    if group not in ("cluster", "district", "persistent"):
+        return {"message": "group must be cluster, district or persistent."}
+    end = min(end or today, today)
+    if group == "persistent":
+        start = end - timedelta(days=PERSISTENT_WINDOW_DAYS - 1)
+    start = start or end
+    if start > end:
+        return {"message": f"Start {start} is after end {end}."}
+    if (end - start).days > 92 and group != "persistent":
+        return {"message": "Hotspot windows are limited to 92 days; use fire_trends for longer periods."}
+    area_desc: Dict[str, Any]
+    if center is not None:
+        lat, lon, label = center
+        area_desc = {"kind": "radius", "name": f"within {radius_km:g} km of {label}", "lat": _r(lat, 4), "lon": _r(lon, 4), "radius_km": radius_km}
+        kind = rname = None
+    else:
+        resolved, note, _ = resolve_region(region or "Pakistan", store)
+        if resolved is None:
+            return {"message": f"Area '{region}' not recognised as a region; pass a city name to search around a city."}
+        kind, rname = resolved
+        area_desc = {"kind": kind, "name": rname}
+        if note:
+            area_desc["note"] = note
+    det, passes = _detections_for(store, start, end)
+    head = _headline(det) if len(det) else det
+    if center is not None:
+        lat, lon, _ = center
+        km = fr.haversine_km_vec(lat, lon, head["lat"].to_numpy(), head["lon"].to_numpy()) if len(head) else np.zeros(0)
+        head = head.assign(km=km)
+        head = head[head["km"] <= radius_km]
+    elif kind == "country":
+        code = {v: k for k, v in fr.COUNTRY_LABELS.items()}[rname]
+        head = head[head["country"] == code]
+    elif kind in ("province", "india_state"):
+        head = head[head["province"] == rname]
+    else:
+        head = head[head["district"] == rname]
+    limit = max(1, min(int(limit or 40), MAX_ROWS))
+    base = {"area": area_desc, "window": _window_dict(start, end), "group": group, "fires_in_area": int(len(head)),
+            "passes": passes, "definitions": FIRE_DEFINITIONS, "caveats": [FIRE_DEFINITIONS["headline_count"]]}
+    if head.empty:
+        return {**base, "rows": [], "message": "No deduplicated high/nominal-confidence fires in this area and window."}
+    if group == "cluster":
+        rows = []
+        for day, g in head.groupby("pk_day"):
+            labels = fr.cluster_cells(g["cell_id"].to_numpy())
+            for lab, c in g.assign(_c=labels).groupby("_c"):
+                lat_c, lon_c = float(c["lat"].mean()), float(c["lon"].mean())
+                ext = float(fr.haversine_km_vec(float(c["lat"].min()), float(c["lon"].min()), [float(c["lat"].max())], [float(c["lon"].max())])[0])
+                rows.append({"day": day.isoformat(), "lat": round(lat_c, 4), "lon": round(lon_c, 4), "fires": int(len(c)),
+                             "frp_mw": _r(c["frp"].sum()), "frp_max_mw": _r(c["frp"].max()), "extent_km": round(ext, 1),
+                             "district": c["district"].mode().iloc[0] if c["district"].notna().any() else None,
+                             "country": fr.COUNTRY_LABELS.get(c["country"].mode().iloc[0]),
+                             "satellites": sorted(set(c["satellite"])), "day_night": {"D": int((c["daynight"] == "D").sum()), "N": int((c["daynight"] == "N").sum())},
+                             "confidence": {k: int(v) for k, v in c["confidence"].value_counts().items()}})
+        rows.sort(key=lambda r: -(r["frp_mw"] or 0))
+        return {**base, "clusters_total": len(rows), "rows": rows[:limit],
+                "method": "same-day 8-neighbour clusters on a 0.02° (~2 km) grid of deduplicated fires"}
+    if group == "district":
+        if "district" not in head or head["district"].isna().all():
+            return {**base, "rows": [], "message": "No Pakistan districts in this area (district tables cover Pakistan only)."}
+        g = head.dropna(subset=["district"]).groupby("district")
+        rows = [{"district": k, "province": fr.load_region_index().district_province.get(k), "fires": int(len(c)), "frp_mw": _r(c["frp"].sum()),
+                 "days_active": int(c["pk_day"].nunique()), "night_share": _r((c["daynight"] == "N").sum() / max((c["daynight"].notna()).sum(), 1), 2),
+                 "confidence": {kk: int(vv) for kk, vv in c["confidence"].value_counts().items()}}
+                for k, c in g]
+        rows.sort(key=lambda r: -r["fires"])
+        return {**base, "districts_total": len(rows), "rows": rows[:limit]}
+    # persistent
+    g = head.groupby("cell_id")
+    cells = pd.DataFrame({"days_active": g["pk_day"].nunique(), "fires": g.size(), "frp_mean": g["frp"].mean(),
+                          "night": g["daynight"].apply(lambda s: int((s == "N").sum())), "known": g["daynight"].apply(lambda s: int(s.notna().sum())),
+                          "district": g["district"].agg(lambda s: s.mode().iloc[0] if s.notna().any() else None),
+                          "country": g["country"].agg(lambda s: s.mode().iloc[0])})
+    persistent = cells[cells["days_active"] >= min_days].sort_values(["days_active", "fires"], ascending=False)
+    rows = []
+    for cid, c in persistent.head(limit).iterrows():
+        lat_c, lon_c = fr.cell_center(int(cid))
+        rows.append({"lat": lat_c, "lon": lon_c, "days_active": int(c["days_active"]), "fires": int(c["fires"]), "frp_mean_mw": _r(c["frp_mean"]),
+                     "night_share": _r(c["night"] / c["known"], 2) if c["known"] else None, "district": c["district"],
+                     "country": fr.COUNTRY_LABELS.get(c["country"])})
+    n_cells = int(len(cells))
+    return {**base, "min_days": min_days, "window_days": PERSISTENT_WINDOW_DAYS, "cells_total": n_cells,
+            "persistent_cells": int(len(persistent)), "one_off_share": _r((cells["days_active"] == 1).sum() / max(n_cells, 1), 2),
+            "rows": rows, "label": "persistent thermal source: a ~2 km cell with detections on many days, consistent with kilns, gas flares, "
+                                   "landfills or industry rather than a one-off field burn"}
+
+
+# ── 4. the old one-day summary, fixed ─────────────────────────────────────────
+
+async def fire_activity(db, day: date, city: Optional[str] = None, *, radius_km: float = 50.0,
+                        store: Optional[AggStore] = None, loaders: Optional[Loaders] = None) -> Dict[str, Any]:
+    """One day: a city's exposure (never national numbers under a city label) or the national picture."""
+    if city:
+        return await fire_exposure(db, city, day, radius_km=radius_km, store=store, loaders=loaders)
+    out = fire_trends("Pakistan", day, day, compare_years=(), store=store)
+    if "message" in out:
+        return out
+    built = (store or agg_store()).day_from_csv(day)
+    out["passes"] = _pass_info(built)
+    if built is None:
+        out["message"] = f"No fire file for the Pakistan day {day.isoformat()}; say so rather than inferring fire activity."
+    return out

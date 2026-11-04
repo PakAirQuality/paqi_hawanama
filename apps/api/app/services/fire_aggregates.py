@@ -223,11 +223,18 @@ def suspect_days(daily: pd.DataFrame, *, reference_years: Tuple[int, ...] = REFE
 
 # ── GCS I/O ──────────────────────────────────────────────────────────────────
 
+def _is_not_found(exc: BaseException) -> bool:
+    return type(exc).__name__ in ("NotFound", "KeyError") or getattr(exc, "code", None) == 404
+
+
 def _read_text(bucket, path: str) -> Optional[str]:
-    b = bucket.blob(path)
-    if not b.exists():
-        return None
-    return b.download_as_text()
+    """One round trip: download, and treat a 404 as absent (no separate exists() call)."""
+    try:
+        return bucket.blob(path).download_as_text()
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found(exc):
+            return None
+        raise
 
 
 def _read_json(bucket, path: str) -> Optional[Dict[str, Any]]:
@@ -240,10 +247,12 @@ def _read_json(bucket, path: str) -> Optional[Dict[str, Any]]:
 
 def _read_parquet(bucket, path: str, filters=None) -> Optional[pd.DataFrame]:
     import pyarrow.parquet as pq
-    b = bucket.blob(path)
-    if not b.exists():
-        return None
-    raw = b.download_as_bytes()
+    try:
+        raw = bucket.blob(path).download_as_bytes()
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found(exc):
+            return None
+        raise
     return pq.read_table(io.BytesIO(raw), filters=filters).to_pandas()
 
 
@@ -415,7 +424,7 @@ class AggStore:
         self._manifest: Tuple[float, Optional[Dict[str, Any]]] = (0.0, None)
         self._daily: Tuple[Optional[str], Optional[pd.DataFrame]] = (None, None)
         self._slices: Dict[Tuple[int, date, date], pd.DataFrame] = {}
-        self._csv_days: Dict[Tuple[date, Optional[str]], DayBuild] = {}
+        self._csv_days: Dict[date, Tuple[float, Optional[DayBuild]]] = {}     # day -> (monotonic, build or None)
 
     @property
     def bucket(self):
@@ -463,20 +472,17 @@ class AggStore:
         return out
 
     def day_from_csv(self, day: date) -> Optional[DayBuild]:
-        """The freshest view of one day: parsed from the CSV + sidecar (None when the file is absent)."""
+        """One day parsed from its CSV + sidecar (None when the file is absent); cached for ttl_s."""
+        import time
+        hit = self._csv_days.get(day)
+        if hit is not None and time.monotonic() - hit[0] < self.ttl_s:
+            return hit[1]
         csv_path, meta_path = blob_paths(day)
-        meta = _read_json(self.bucket, meta_path)
-        key = (day, (meta or {}).get("fetched_at"))
-        hit = self._csv_days.get(key)
-        if hit is not None:
-            return hit
         text = _read_text(self.bucket, csv_path)
-        if text is None:
-            return None
-        built = build_day(day, text, meta)
+        built = build_day(day, text, _read_json(self.bucket, meta_path)) if text is not None else None
         if len(self._csv_days) >= 20:
             self._csv_days.pop(next(iter(self._csv_days)))
-        self._csv_days[key] = built
+        self._csv_days[day] = (time.monotonic(), built)
         return built
 
 
