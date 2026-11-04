@@ -55,6 +55,21 @@ class StationName(str, Enum):
     PUNJAB_UNIVERSITY = "Punjab University-LHR"
     SAFARI_PARK = "Safari Park-LHR"
     UET_LHR = "UET-LHR"
+    # EPD renamed its Lahore stations in late October 2026. The old names above resolve to the
+    # retired rows (history up to 2026-10-25); these names are the live rows.
+    BARKI_ROAD = "Barki Road"                     # was FMDRC-LHR
+    BHU_JANDIALA_KALSAN = "BHU Jandiala Kalsan"   # was Mobile 5
+    DHA_PHASE_6 = "DHA Phase 6"                   # was PKLI-LHR
+    EGERTON_ROAD = "Egerton Road"                 # was Mobile 4
+    GT_ROAD = "GT Road"                           # was UET-LHR
+    GULBERG_III = "Gulberg III, Lahore"           # was Mobile 1
+    KAHNA_NAU = "Kahna Nau"                       # was Kahna Nau Hospital-LHR
+    LATHEPUR = "Lathepur"                         # was Mobile 2
+    MULTAN_ROAD = "Multan Road"                   # was LWMC-LHR
+    PUNJAB_UNIVERSITY_NEW = "Punjab University"   # was Punjab University-LHR
+    SAFARI_PARK_NEW = "Safari Park"               # was Safari Park-LHR
+    SHAHDARA = "Shahdara"                         # was Govt. Teaching Hospital Shahdara-LHR
+    WAGHA_BORDER = "Wagha Border"                 # was Mobile 3
 
 # ---------- U.S. AQI (IQAir-style hourly mapping) helpers ----------
 
