@@ -68,7 +68,7 @@ FIRE_DEFINITIONS = {
     "headline_count": "deduplicated detection clusters with at least one high- or nominal-confidence detection; 'fires' in the text means these clusters. Raw detections and low-confidence rows are reported separately",
     "comparison_basis": "year-on-year comparisons use the NOAA-20-only series (basis n20): deduplication cannot remove the extra fires an added satellite sees, so the roster change (Suomi NPP + NOAA-20 in 2020–2025, NOAA-21 added in 2026, Suomi NPP retired 2026-11-01) is handled by holding the satellite fixed",
     "what_burns": f"a thermal detection does not identify what burns. The store classifies each detection (class {fc.CLASS_VERSION}) as likely crop-residue burning, likely other source or uncertain from the cropland share around it, the harvest window, listed kilns and industrial sites, and out-of-season persistence; the classification is unvalidated until the labelled sample is scored, so say 'likely crop-residue detections', never 'crop fires'",
-    "classification": f"crop: {fc.RULES['crop']}. other: {fc.RULES['other']}. uncertain: {fc.RULES['uncertain']}. Night is a reason only.",
+    "classification": f"crop: {fc.RULES['crop']}. other: {fc.RULES['other']}. uncertain: {fc.RULES['uncertain']}. Night is a reason only. Coverage: {fc.RULES['coverage']}.",
     "frp": "fire radiative power in megawatts summed over deduplicated fires: burning intensity, not a PM2.5 contribution",
     "day": "Pakistan calendar day (Asia/Karachi): the ~13:00 PKT day pass and the ~01:00 PKT night pass of that date",
     "day_basis": "acq_pkt = keyed by Pakistan day with pass times; acq_utc = older archive days keyed by UTC date without pass times",
