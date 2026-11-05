@@ -278,3 +278,41 @@ export const fetchExposure = (city: string, date: string) =>
   getJson<ExposureResponse>(`/exposure?city=${encodeURIComponent(city)}&date=${date}&radius_km=100`)
 export const fetchPm25Link = (city: string, end: string) =>
   getJson<Pm25LinkResponse>(`/pm25-link?city=${encodeURIComponent(city)}&end=${end}&days=60`)
+
+export type OutlookBand = 'none' | 'low' | 'elevated' | 'high' | 'very_high'
+
+export interface OutlookWind { from_deg: number | null; from_compass: string | null; speed_ms: number | null; n_hours: number }
+
+export interface OutlookLead {
+  lead: string
+  day: string
+  status: 'ok' | 'no_forecast'
+  wind_850: OutlookWind | null
+  wind_10m: OutlookWind | null
+  fires_200km: number
+  band: OutlookBand | null
+  upwind_load_mw: number | null
+  cone_frp_mw?: number
+  cone_frp_mw_10m?: number | null
+  fires_in_cone?: number
+  fires_reachable?: number
+  reach_km?: number
+  by_country?: Record<string, number>
+  top_fires?: { lat: number; lon: number; frp_mw: number; km: number; direction: string | null; district: string | null; country: string; transport_h: number }[]
+}
+
+export interface OutlookAlert { city: string; province?: string | null; band: OutlookBand; upwind_load_mw: number; from_compass: string | null }
+
+export interface CityOutlookResponse {
+  status: 'ok' | 'stale' | 'unavailable'
+  message?: string
+  generated_at?: string
+  model?: string
+  fires_as_of?: { days: string[]; observation_period?: { start: string; end: string } | null; satellites?: string[] }
+  city?: string
+  leads?: OutlookLead[]
+  others_at_alert_d1?: OutlookAlert[]
+  caveats?: string[]
+}
+
+export const fetchCityOutlook = (city: string) => getJson<CityOutlookResponse>(`/outlook?city=${encodeURIComponent(city)}`)

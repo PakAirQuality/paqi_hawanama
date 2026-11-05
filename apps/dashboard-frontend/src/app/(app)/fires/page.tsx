@@ -4,7 +4,7 @@ import { Suspense, useEffect, useMemo } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { pktToday, shiftDateOnly } from '@/lib/time'
 import {
-  fetchCities, fetchDistricts, fetchExposure, fetchFiresMeta, fetchPersistent, fetchPm25Link, fetchSeasons, fetchSplit, retryServerErrorsOnly,
+  fetchCities, fetchCityOutlook, fetchDistricts, fetchExposure, fetchFiresMeta, fetchPersistent, fetchPm25Link, fetchSeasons, fetchSplit, retryServerErrorsOnly,
 } from '@/components/fires/api'
 import { CardShell } from '@/components/fires/CardShell'
 import { RegionChips } from '@/components/fires/RegionChips'
@@ -17,6 +17,7 @@ import { PersistentSources } from '@/components/fires/PersistentSources'
 import { CityExposure } from '@/components/fires/CityExposure'
 import { FirePm25Chart } from '@/components/fires/FirePm25Chart'
 import { DataNotes } from '@/components/fires/DataNotes'
+import { SmokeOutlook } from '@/components/fires/SmokeOutlook'
 import { districtScope, regionLabel } from '@/components/fires/regions'
 import { useFiresParams } from '@/components/fires/useFiresParams'
 
@@ -53,6 +54,8 @@ function FiresPageInner() {
   const exposure = useQuery({ queryKey: ['fires', 'exposure', city, date], queryFn: () => fetchExposure(city, date), enabled: !!city,
     placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const link = useQuery({ queryKey: ['fires', 'pm25link', city, date], queryFn: () => fetchPm25Link(city, date), enabled: !!city,
+    placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
+  const outlook = useQuery({ queryKey: ['fires', 'outlook', city], queryFn: () => fetchCityOutlook(city), enabled: !!city,
     placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
 
   return (
@@ -96,6 +99,12 @@ function FiresPageInner() {
 
       <div>
         <h2 className="mb-2 text-[15px] font-semibold tracking-tight text-slate-900">Smoke and cities</h2>
+        <div className="mb-4">
+          <CardShell id="outlook" title={`Smoke outlook for ${city || 'the city'}`} subtitle="Forecast wind × the fires seen in the last two days, for today and the next three days"
+            isLoading={!!city && outlook.isPending} error={outlook.error} onRetry={() => outlook.refetch()} skeletonHeight={160}>
+            {outlook.data && <SmokeOutlook data={outlook.data} today={pktToday()} />}
+          </CardShell>
+        </div>
         <div className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <CardShell id="exposure" title="Fires around a city" subtitle="One Pakistan day: rings by country, wind, and the upwind cone"
             isLoading={cities.isPending || (!!city && exposure.isPending)} error={cities.error ?? exposure.error} onRetry={() => { cities.refetch(); exposure.refetch() }} skeletonHeight={360}>
