@@ -228,6 +228,10 @@ def test_trends_regions_seasons_weeks_and_messages():
     season = x.fire_trends("Pakistan", season="rice", store=store, today=D3, compare_years=())
     assert season["season"] == "kharif_rice_residue" and season["window"]["start_pkt_day"] == "2026-09-15" and season["window"]["end_pkt_day"] == "2026-11-02"
     assert any("ends 2026-11-02 (yesterday)" in c for c in season["caveats"])
+    sp = season["season_progress"]
+    assert sp and sp["basis"] == "n20" and sp["cumulative_to_date"] is not None and sp["season"]["id"] == "rice", sp
+    assert {r["role"] for r in sp["years"]} >= {"current"} and "late season" in sp["note"]
+    assert x.fire_trends("Pakistan", D1, D3, store=store, today=D3)["season_progress"] is None
     assert x.fire_trends("Pakistan", season="rice", store=store, today=date(2026, 11, 4), compare_years=())["window"]["end_pkt_day"] == "2026-11-03"
     assert x.fire_trends("Pakistan", D1, D3, store=store, today=D3)["window"]["end_pkt_day"] == "2026-11-03"   # an explicit end is kept
     assert season["summary"]["days_missing"] == 47 and any("no fire file" in c for c in season["caveats"])

@@ -989,6 +989,11 @@ async def aq_fire_trends(
             wc2021-v1: cropland, harvest window, no listed kiln or industrial site within 1 km, not a persistent
             out-of-season cell) or "crop_n20" (both). The summary carries source_classes (crop / other /
             uncertain shares) on the all basis; the classification is unvalidated, say "likely crop-residue".
+        With a season window the answer carries season_progress: cumulative detections to date on the
+            comparable basis, their share of last season's whole total and of the reference mean, and for
+            complete seasons the dates by which 10/50/90 % of detections had occurred. Use it for "how far
+            along is the season", "is burning late this year" and "where do we stand cumulatively"; say that a
+            mid-season shortfall can be lateness rather than less burning.
     """
     from app.services.copilot.station_queries import parse_period_date
     from app.services.fire_analytics import REFERENCE_YEARS, fire_trends

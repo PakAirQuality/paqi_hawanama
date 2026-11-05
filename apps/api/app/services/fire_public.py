@@ -153,15 +153,17 @@ class RegionTable:
 
 
 _TABLE: Optional[RegionTable] = None
+_TABLE_STORE: Optional[int] = None     # id() of the store the table was built from: a second store with the same built_at is not it
 
 
 def region_table(store: AggStore) -> RegionTable:
     """The pre-pivot for the store's current build (rebuilt when built_at changes; one sort, well under a second)."""
-    global _TABLE
+    global _TABLE, _TABLE_STORE
     m = store.manifest()
     built = m.get("built_at")
-    if _TABLE is not None and _TABLE.built_at == built:
+    if _TABLE is not None and _TABLE.built_at == built and _TABLE_STORE == id(store):
         return _TABLE
+    _TABLE_STORE = id(store)
     daily = store.daily_regions()
     pk = pd.to_datetime(daily["pk_day"])
     frame = pd.DataFrame({c: daily[c].to_numpy(dtype=float) for c in METRICS},
