@@ -187,3 +187,29 @@ def test_audit_counts_files_products_and_missing_passes():
     y25 = out["years"]["2025"]
     assert y25["products"] == {"legacy": 6} and y25["satellites"] == {} and y25["suspect_days"] == []   # no rows_by_satellite before schema 2
     assert "missing_pass" in out["method"]
+
+
+def test_export_rows_header_and_csv():
+    store = _store()
+    out = fp.export("rice", None, "all", store=store, today=TODAY)
+    h = out["header"]
+    assert h["season"]["year"] == 2026 and h["basis"] == "all" and h["regions"]["pakistan_punjab"] == "Pakistan Punjab" and h["class_version"] is None
+    assert len(out["rows"]) == 77 and out["columns"][:3] == ["day", "pakistan_detections", "pakistan_r7"]
+    r = {row["day"]: row for row in out["rows"]}
+    assert r["2026-11-01"]["pakistan_detections"] == 1 and r["2026-11-03"]["pakistan_cum"] == 3 and r["2026-11-03"]["pakistan_r7"] is None
+    assert r["2026-10-31"]["pakistan_observed"] is False and r["2026-10-31"]["pakistan_detections"] is None      # a gap
+    assert r["2026-11-04"]["pakistan_observed"] is None and r["2026-11-04"]["pakistan_cum"] is None                 # not yet
+    assert r["2026-11-03"]["indian_punjab_detections"] == 2 and r["2026-11-03"]["haryana_detections"] == 0      # B and C on 3 Nov
+    past = fp.export("rice", 2025, "n20", store=store, today=TODAY)
+    assert past["header"]["season"]["complete"] is True and past["header"]["satellites_in_year"] == ["NOAA-20", "Suomi NPP"]
+    assert {row["day"]: row for row in past["rows"]}["2025-11-02"]["pakistan_detections"] == 8 and past["header"]["basis"] == "n20"
+    assert "year must be" in fp.export("rice", 2030, store=store, today=TODAY)["error"]
+    csv_text = fp.export_csv(out)
+    lines = csv_text.splitlines()
+    assert lines[0].startswith("# season: ") and any(l.startswith("# caveat: ") for l in lines) and any(l.startswith("day,pakistan_detections,") for l in lines)
+    assert "2026-11-03,1," in csv_text and csv_text.count("\n") == 77 + sum(1 for l in lines if l.startswith("#")) + 1
+
+
+def test_brief_lines_mention_the_cumulative_position():
+    lines = fp.brief_lines(store=_store(), today=TODAY)
+    assert "cumulative so far = 11% of the whole 2025 season" in lines[1]

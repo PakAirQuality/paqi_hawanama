@@ -45,6 +45,14 @@ async def test_store_endpoints_cache_headers_and_sizes(client):
             r = await c.get(path)
             assert r.status_code == 200, path
             assert r.headers["cache-control"] == cc and len(r.content) < 50_000
+        r = await c.get("/api/v1/fires/export?season=rice&format=csv")
+        assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv") and "attachment; filename=" in r.headers["content-disposition"]
+        assert r.text.startswith("# season: ") and "day,pakistan_detections" in r.text
+        r = await c.get("/api/v1/fires/export?season=rice&year=2030")
+        assert r.status_code == 400
+        assert (await c.get("/api/v1/fires/export?season=rice&basis=snpp")).status_code == 422
+        r = await c.get("/api/v1/fires/audit")
+        assert r.status_code == 200 and r.headers["cache-control"] == fires_router.CC_META and "2026" in r.json()["years"]
         r = await c.get("/api/v1/fires/seasons?region=indian-punjab")
         assert r.json()["region"]["label"] == "Indian Punjab" and r.json()["headline"]["fires"] == 3
         assert (await c.get("/api/v1/fires/seasons?season=monsoon")).status_code == 422

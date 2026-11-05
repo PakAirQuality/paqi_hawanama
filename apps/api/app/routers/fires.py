@@ -129,6 +129,21 @@ async def get_persistent(region: str = Query("pakistan", max_length=80), min_day
     return _respond(data, CC_LIVE)
 
 
+@router.get("/export", summary="One season of daily series for the two Punjabs, Haryana, Pakistan and the rest of the box, as JSON or CSV")
+async def get_export(season: str = Query("rice", pattern="^(rice|wheat)$"), year: Optional[int] = Query(None, ge=2020, le=2100),
+                     basis: str = BASIS, format: str = Query("json", pattern="^(json|csv)$")):
+    key = ("export", season, year, basis)
+    data = await _single_flight(key, _cached("export", key[1:], lambda s, t: fp.export(season, year, basis, store=s, today=t)))
+    if "error" in data:
+        raise HTTPException(status_code=400, detail=data["error"])
+    if format == "csv":
+        from fastapi.responses import PlainTextResponse
+        name = f"hawanama-fires-{season}-{data['header']['season']['year']}-{basis}.csv"
+        return PlainTextResponse(fp.export_csv(data), media_type="text/csv",
+                                 headers={"Cache-Control": CC_LIVE, "Content-Disposition": f'attachment; filename="{name}"'})
+    return _respond(data, CC_LIVE)
+
+
 @router.get("/audit", summary="Observation-quality audit by year and satellite: files, day keys, products, missing passes, suspect days")
 async def get_audit():
     data = await _single_flight(("audit",), _cached("audit", (), lambda s, t: fp.audit(store=s, today=t)))

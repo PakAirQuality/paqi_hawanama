@@ -19,6 +19,7 @@ import { CityExposure } from '@/components/fires/CityExposure'
 import { FirePm25Chart } from '@/components/fires/FirePm25Chart'
 import { DataNotes } from '@/components/fires/DataNotes'
 import { SmokeOutlook } from '@/components/fires/SmokeOutlook'
+import { TwoPunjabs } from '@/components/fires/TwoPunjabs'
 import { districtScope, regionLabel } from '@/components/fires/regions'
 import { useFiresParams } from '@/components/fires/useFiresParams'
 
@@ -45,6 +46,9 @@ function FiresPageInner() {
   const districts = useQuery({ queryKey: ['fires', 'districts', season, scope, basis], queryFn: () => fetchDistricts(season, scope ?? 'pakistan', basis),
     enabled: scope != null, placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const split = useQuery({ queryKey: ['fires', 'split', season, basis], queryFn: () => fetchSplit(season, basis), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
+  const pbPk = useQuery({ queryKey: ['fires', 'seasons', 'punjab', season, basis], queryFn: () => fetchSeasons('punjab', season, basis), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
+  const pbIn = useQuery({ queryKey: ['fires', 'seasons', 'indian-punjab', season, basis], queryFn: () => fetchSeasons('indian-punjab', season, basis), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
+  const hr = useQuery({ queryKey: ['fires', 'seasons', 'haryana', season, basis], queryFn: () => fetchSeasons('haryana', season, basis), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const persistent = useQuery({ queryKey: ['fires', 'persistent', region], queryFn: () => fetchPersistent(region), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const cities = useQuery({ queryKey: ['fires', 'cities'], queryFn: fetchCities, staleTime: 60 * 60 * 1000, retry: retryServerErrorsOnly })
   const cityList = useMemo(() => cities.data?.cities ?? [], [cities.data])
@@ -81,6 +85,14 @@ function FiresPageInner() {
           </div>
         )}
       </CardShell>
+
+      <div>
+        <h2 className="mb-2 text-[15px] font-semibold tracking-tight text-slate-900">The two Punjabs</h2>
+        <CardShell id="two-punjabs" title="Pakistan Punjab and Indian Punjab, season to date" subtitle="Daily detections with the 7-day mean this season over last, and the cumulative curves of both Punjabs and Haryana"
+          isLoading={pbPk.isPending || pbIn.isPending || hr.isPending} error={pbPk.error ?? pbIn.error ?? hr.error} onRetry={() => { pbPk.refetch(); pbIn.refetch(); hr.refetch() }} skeletonHeight={320}>
+          <TwoPunjabs data={{ punjab: pbPk.data, 'indian-punjab': pbIn.data, haryana: hr.data }} season={season} basis={basis} />
+        </CardShell>
+      </div>
 
       <div>
         <h2 className="mb-2 text-[15px] font-semibold tracking-tight text-slate-900">Where it burns</h2>
