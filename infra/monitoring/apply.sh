@@ -53,7 +53,7 @@ check="$(upsert uptimeCheckConfigs uptimeCheckConfigs "$DIR/uptime-health-freshn
 check_id="${check##*/}"
 echo "uptime check: $check_id"
 
-for f in policy-health-freshness.json policy-scheduler-failures.json policy-fire-ingest-failed.json; do
+for f in policy-health-freshness.json policy-scheduler-failures.json policy-fire-ingest-failed.json policy-smoke-outlook-high.json; do
   sed -e "s#__CHANNEL__#${channel}#g" -e "s#__CHECK_ID__#${check_id}#g" "$DIR/$f" > "$tmp/$f"
   echo "policy: $(upsert alertPolicies alertPolicies "$tmp/$f")  ($(display "$DIR/$f"))"
 done
