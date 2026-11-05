@@ -41,7 +41,7 @@ export function SmokeOutlook({ data, today }: { data: CityOutlookResponse; today
         </p>
       )}
       <p className="mt-2 text-[11px] text-slate-500">
-        ECMWF wind at 850 hPa (transport) × the fires seen on {data.fires_as_of?.days?.join(' and ') ?? 'the last two days'}, assumed to keep burning; a smoke-source outlook, not a PM2.5 forecast. Bands: elevated above 300 MW, high above 1,000, very high above 3,000. Generated {generated}{data.status === 'stale' ? ' (older than 6 h)' : ''}.
+        ECMWF wind at 850 hPa (transport) × the fires seen on {data.fires_as_of?.days?.join(' and ') ?? 'the last two days'}, assumed to keep burning; a smoke-source outlook, not a PM2.5 forecast. Bands: elevated above 300 MW, high above 1,000, very high above 3,000; unvalidated screening categories, not an air-quality claim. Generated {generated}{data.status === 'stale' ? ' (older than 6 h)' : ''}.
       </p>
     </div>
   )

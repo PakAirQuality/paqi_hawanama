@@ -23,7 +23,7 @@ export function DistrictTable({ data, date }: { data: DistrictsResponse; date: s
     return all ? r : r.slice(0, 25)
   }, [data.rows, sort, all])
   if (data.note) return <p className="text-[13px] text-slate-600">{data.note}</p>
-  if (!data.rows.length) return <p className="text-[13px] text-slate-600">No fires in these districts in the window.</p>
+  if (!data.rows.length) return <p className="text-[13px] text-slate-600">No detections in these districts in the window.</p>
   const th = (key: SortKey, label: string, cls = '') => (
     <th scope="col" aria-sort={sort.key === key ? (sort.dir === -1 ? 'descending' : 'ascending') : 'none'} className={`py-1.5 pr-3 font-medium ${cls}`}>
       <button type="button" className="hover:text-slate-900" onClick={() => setSort(s => ({ key, dir: s.key === key ? (s.dir === -1 ? 1 : -1) : key === 'district' ? 1 : -1 }))}>
@@ -35,7 +35,7 @@ export function DistrictTable({ data, date }: { data: DistrictsResponse; date: s
     <div>
       <p className="mb-2 text-[12px] text-slate-500">
         {data.window.compared_dates ?? 'Season to date'} this season vs the same dates in {data.last_year}
-        {data.totals ? ` · ${fmtInt(data.totals.fires)} fires vs ${fmtInt(data.totals.fires_last)}` : ''}
+        {data.totals ? ` · ${fmtInt(data.totals.fires)} detections vs ${fmtInt(data.totals.fires_last)}` : ''}
       </p>
       <div className="overflow-x-auto">
         <table className="w-full text-[12px] tabular-nums">

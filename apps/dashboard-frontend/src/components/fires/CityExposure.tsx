@@ -84,7 +84,7 @@ function Body({ data, date }: { data: ExposureResponse; date: string }) {
           <div className="text-[11px] uppercase tracking-wide text-slate-500">Upwind cone, ±60°, 200 km</div>
           {up ? (
             <>
-              <div className="mt-0.5 text-[15px] font-semibold text-slate-900">{fmtInt(up.fires_200km)} fires · {fmtMw(up.frp_mw_200km)}</div>
+              <div className="mt-0.5 text-[15px] font-semibold text-slate-900">{fmtInt(up.fires_200km)} detections · {fmtMw(up.frp_mw_200km)}</div>
               <div className="text-slate-500">{Object.entries(up.by_country).map(([c, n]) => `${shortCountry(c)} ${fmtInt(n)}`).join(' · ') || 'none'}; {fmtInt(up.fires_100km)} within 100 km</div>
             </>
           ) : <div className="mt-0.5 text-slate-600">Not available without a wind direction.</div>}
@@ -92,7 +92,7 @@ function Body({ data, date }: { data: ExposureResponse; date: string }) {
       </div>
       {data.top_upwind_fires && data.top_upwind_fires.length > 0 && (
         <div>
-          <div className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Strongest upwind fires</div>
+          <div className="mb-1 text-[11px] uppercase tracking-wide text-slate-500">Strongest upwind detections</div>
           <ul className="divide-y divide-slate-100 text-[12px]">
             {data.top_upwind_fires.slice(0, 6).map((f, i) => (
               <li key={i} className="flex items-center gap-3 py-1.5 tabular-nums">
