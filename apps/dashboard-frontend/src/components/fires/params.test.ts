@@ -6,16 +6,17 @@ import { shiftDateOnly } from '@/lib/time'
 describe('fires params', () => {
   it('defaults and validates', () => {
     const p = parseFiresParams('', { today: '2026-11-05' })
-    expect(p).toEqual({ region: 'pakistan', season: 'rice', city: null, date: '2026-11-04' })
+    expect(p).toEqual({ region: 'pakistan', season: 'rice', basis: 'all', city: null, date: '2026-11-04' })
     expect(defaultSeason('2026-05-01')).toBe('wheat')
     const bad = parseFiresParams('?region=Narnia&season=monsoon&date=2030-01-01', { today: '2026-11-05', districts: [{ name: 'Sheikhpura' }] })
-    expect(bad).toEqual({ region: 'pakistan', season: 'rice', city: null, date: '2026-11-04' })
-    const d = parseFiresParams('?region=Sheikhpura&season=wheat&city=Lahore&date=2026-10-20', { today: '2026-11-05', districts: [{ name: 'Sheikhpura' }] })
-    expect(d).toEqual({ region: 'Sheikhpura', season: 'wheat', city: 'Lahore', date: '2026-10-20' })
+    expect(bad).toEqual({ region: 'pakistan', season: 'rice', basis: 'all', city: null, date: '2026-11-04' })
+    const d = parseFiresParams('?region=Sheikhpura&season=wheat&city=Lahore&date=2026-10-20&basis=n20', { today: '2026-11-05', districts: [{ name: 'Sheikhpura' }] })
+    expect(d).toEqual({ region: 'Sheikhpura', season: 'wheat', basis: 'n20', city: 'Lahore', date: '2026-10-20' })
+    expect(parseFiresParams('?basis=snpp', { today: '2026-11-05' }).basis).toBe('all')
   })
   it('serialises only what differs from the defaults', () => {
-    expect(serializeFiresParams({ region: 'pakistan', season: 'rice', city: null, date: '2026-11-04' }, '2026-11-05')).toBe('')
-    expect(serializeFiresParams({ region: 'punjab', season: 'wheat', city: 'Lahore', date: '2026-10-20' }, '2026-11-05')).toBe('?region=punjab&season=wheat&city=Lahore&date=2026-10-20')
+    expect(serializeFiresParams({ region: 'pakistan', season: 'rice', basis: 'all', city: null, date: '2026-11-04' }, '2026-11-05')).toBe('')
+    expect(serializeFiresParams({ region: 'punjab', season: 'wheat', basis: 'n20', city: 'Lahore', date: '2026-10-20' }, '2026-11-05')).toBe('?region=punjab&season=wheat&basis=n20&city=Lahore&date=2026-10-20')
   })
   it('shifts dates zone-safely and builds tracker links', () => {
     expect(shiftDateOnly('2026-11-01', -1)).toBe('2026-10-31')

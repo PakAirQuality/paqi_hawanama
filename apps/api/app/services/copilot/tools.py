@@ -967,19 +967,25 @@ async def aq_fire_trends(
     end_date: str = "",
     season: str = "",
     compare_years: bool = True,
+    basis: str = "all",
 ) -> dict:
-    """Daily (or weekly, for long windows) fire counts and FRP for a region, with the same calendar
-    window in 2020–2025 for comparison: totals, peak day, country share, top districts, and
-    "higher than k of n reference years". Regions: Pakistan, a province (KP, Punjab, Sindh, Balochistan,
-    GB, AJK, Islamabad), a Pakistan district, "Indian Punjab", "Haryana", "India", or "other".
+    """Daily (or weekly, for long windows) counts of deduplicated fire detection clusters and FRP for a
+    region, with the same calendar window in 2020–2025 for comparison: totals, peak day, country share,
+    top districts, and "higher than k of n reference years". The comparison block always carries
+    `noaa20_only` (NOAA-20 detections alone): quote THAT for "more or fewer than last year", because the
+    satellite roster changed and deduplication cannot remove the extra fires an added satellite sees.
+    Regions: Pakistan, a province (KP, Punjab, Sindh, Balochistan, GB, AJK, Islamabad), a Pakistan
+    district, "Indian Punjab", "Haryana", "India", or "other".
 
     Args:
         region: Region name (default Pakistan; plain "Punjab" means Pakistan's).
         start_date: YYYY-MM-DD, YYYY-MM or YYYY (start of the window).
         end_date: YYYY-MM-DD, YYYY-MM or YYYY (end of the window); defaults to today.
-        season: "rice" (1 Oct–30 Nov, kharif residue) or "wheat" (15 Apr–31 May, rabi residue); season-to-date
-            when no dates are given. Without dates or a season: the current season, else the last 30 days.
+        season: "rice" (15 Sep–30 Nov, the ISRO/CAQM paddy window) or "wheat" (15 Apr–31 May, rabi residue);
+            season-to-date when no dates are given. Without dates or a season: the current season, else the last 30 days.
         compare_years: Compare with the same window in 2020–2025.
+        basis: "all" (every satellite, deduplicated; the fullest picture of today) or "n20" (NOAA-20 only,
+            the series that is comparable across years).
     """
     from app.services.copilot.station_queries import parse_period_date
     from app.services.fire_analytics import REFERENCE_YEARS, fire_trends
@@ -988,12 +994,13 @@ async def aq_fire_trends(
     end = parse_period_date(end_date, end=True) if end_date else None
     if (start_date and start is None) or (end_date and end is None):
         return {"date": end_date or start_date, "data": {"message": "dates must be YYYY-MM-DD, YYYY-MM or YYYY"}, "followups": []}
-    data = fire_trends(region, start, end, season=season, compare_years=REFERENCE_YEARS if compare_years else ())
+    data = fire_trends(region, start, end, season=season, compare_years=REFERENCE_YEARS if compare_years else (), basis=basis or "all")
     _update_session(ctx, tool="aq_fire_trends", focus_type="national" if region.strip().lower() in ("", "pakistan") else "region",
                     historical_date=(end or start).isoformat() if (end or start) else None)
     return {"date": data.get("window", {}).get("end_pkt_day") or end_date, "data": data,
-            "basis": _fire_basis("daily region rollups of deduplicated VIIRS fires from the aggregate store"),
-            "followups": ["Which districts are burning most?", "Where are the persistent hotspots?", "What about Indian Punjab in the same window?"]}
+            "basis": _fire_basis("daily region rollups of deduplicated VIIRS detection clusters from the aggregate store; year-on-year on NOAA-20 alone",
+                                 ["a detection cluster is not a verified fire and a thermal detection does not say what burns"]),
+            "followups": ["Which districts are burning most?", "Where are the persistent thermal sources?", "What about Indian Punjab in the same window?"]}
 
 
 # ── Tool 15d: aq_fire_hotspots ───────────────────────────────────────────
@@ -1050,7 +1057,8 @@ async def aq_fire_hotspots(
                          group=group, min_days=min_days)
     _update_session(ctx, tool="aq_fire_hotspots", focus_type="city" if focus_city else "region", focused_city=focus_city,
                     historical_date=end.isoformat() if end else dt)
-    return {"date": dt, "data": data, "basis": _fire_basis("deduplicated VIIRS fires on a 0.02° grid from the aggregate store and the day files"),
+    return {"date": dt, "data": data, "basis": _fire_basis("deduplicated VIIRS detection clusters on a 0.02° grid from the aggregate store and the day files",
+                                                           ["a persistent cell is a flag for investigation (kilns, flares, industry, or fields burning on successive days), never removed from counts"]),
             "followups": ["What is near that fire?", "How does this compare with earlier years?", "Which of these are upwind of Lahore?"]}
 
 
@@ -1065,9 +1073,10 @@ async def aq_fire_pm25_link(
 ) -> dict:
     """Is fire smoke consistent with a city's PM2.5? Daily upwind fire FRP (±60° cone on that day's
     station wind, 200 km) and whole-ring FRP against the city's daily PM2.5 over the window, Pearson and
-    Spearman at lags 0/1/2 days, and "fire-influenced days" (upwind FRP above the window's 75th percentile
-    and PM2.5 ≥ 20 % and ≥ 10 µg/m³ above the prior three days). Never an attribution: report as
-    "consistent with smoke transport" and name stagnation and local sources as alternatives.
+    Spearman at lags 0/1/2 days, and "candidate smoke-transport episodes" (upwind FRP above the window's
+    75th percentile and PM2.5 ≥ 20 % and ≥ 10 µg/m³ above the prior three days). Never an attribution:
+    report as "consistent with smoke transport", call the flagged days candidates, say the correlation is
+    exploratory (not controlled for meteorology), and name stagnation and local sources as alternatives.
 
     Args:
         city: City name (required).

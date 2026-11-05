@@ -33,13 +33,20 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export type SeasonId = 'rice' | 'wheat'
+/** all = every satellite flown that day (deduplicated); n20 = NOAA-20 only, the series comparable across years. */
+export type Basis = 'all' | 'n20'
 
 export interface FiresMeta {
   store_built_at: string | null
   today_pkt: string
+  store_schema_version?: number
   seasons: Record<SeasonId, { key: string; label: string; start: string; end: string }>
+  season_window_note?: string
   current_season: SeasonId | null
   reference_years: number[]
+  bases?: Record<Basis, string>
+  consistent_satellite?: string
+  n20_basis_available?: boolean
   regions: { id: string; label: string; kind: string; api: string }[]
   provinces: string[]
   districts: { name: string; province: string }[]
@@ -49,6 +56,8 @@ export interface FiresMeta {
     gaps: Record<SeasonId, Record<string, [string, string][]>>
     suspect_days_by_year: Record<string, number>
     low_confidence_from: string | null
+    pkt_from?: string | null
+    days_without_pass_by_year?: Record<string, Record<string, number>>
   }
   satellites_by_year: Record<string, string[]>
   pass_times: { day: string; night: string }
@@ -62,21 +71,43 @@ export interface SeasonYear {
   role: 'current' | 'last' | 'reference'
   fires: (number | null)[]
   r7: (number | null)[]
+  cum?: (number | null)[]
   total: number | null
   total_to_date: number | null
   days_with_data: number
   days_missing: number
+  days_no_pass?: number
   suspect_days: number
   first_day_with_data: string | null
+  complete?: boolean
+  timing?: { p10: string | null; p50: string | null; p90: string | null; days_unobserved?: number; note?: string } | null
+}
+
+export interface HeadlineComparison {
+  last_year: { year: number; fires: number; pct_change: number | null; days_with_data: number } | null
+  reference: {
+    years: number[]
+    used_years: number[]
+    rows: { year: number; fires: number | null; days_with_data: number; used: boolean }[]
+    mean: number | null
+    min: number | null
+    max: number | null
+    pct_change: number | null
+    higher_than_n_of: [number, number] | null
+    rank_text: string | null
+  }
 }
 
 export interface SeasonsResponse {
   region: { kind: string; name: string; label: string }
+  basis?: Basis
+  basis_label?: string
   season: { id: SeasonId; key: string; label: string; year: number; start: string; end: string; end_effective: string; complete: boolean }
   days: string[]
   today_index: number | null
   years: SeasonYear[]
-  headline: {
+  headline: HeadlineComparison & {
+    basis?: Basis
     window: { start: string; end: string; days: number; days_with_data: number; days_missing: number; compared_dates: string | null }
     fires: number
     fires_per_day: number | null
@@ -84,20 +115,10 @@ export interface SeasonsResponse {
     day: number
     night: number
     night_share: number | null
-    last_year: { year: number; fires: number; pct_change: number | null; days_with_data: number } | null
-    reference: {
-      years: number[]
-      used_years: number[]
-      rows: { year: number; fires: number | null; days_with_data: number; used: boolean }[]
-      mean: number | null
-      min: number | null
-      max: number | null
-      pct_change: number | null
-      higher_than_n_of: [number, number] | null
-      rank_text: string | null
-    }
+    /** Year-on-year figures on NOAA-20 alone; present when the store carries the series and basis is 'all'. */
+    comparison_n20?: HeadlineComparison & { basis: Basis; basis_label: string; fires: number; days_with_data: number; note: string }
   }
-  method: { r7: string; comparison: string }
+  method: { r7: string; comparison: string; cum?: string; timing?: string; basis?: string }
   caveats: string[]
   store_built_at: string | null
   note?: string
@@ -121,6 +142,7 @@ export interface DistrictsResponse {
   window: { start: string; end: string; days: number; days_with_data: number; compared_dates: string | null }
   last_year: number
   region: { kind: string; name: string; label: string }
+  basis?: Basis
   rows: DistrictRow[]
   districts_total: number
   totals: { fires: number; fires_last: number } | null
@@ -129,15 +151,19 @@ export interface DistrictsResponse {
 }
 
 export type SplitKey = 'pakistan' | 'indian_punjab' | 'haryana' | 'other'
+/** pakistan_punjab is a subset of pakistan, carried so the two Punjabs can be read side by side. */
+export type SplitSeriesKey = SplitKey | 'pakistan_punjab'
 
 export interface SplitResponse {
   season: { id: SeasonId; year: number; start: string; end: string; end_effective: string }
+  basis?: Basis
   days: string[]
-  series: Record<SplitKey, (number | null)[]>
-  totals: Record<SplitKey, number>
+  series: Record<SplitSeriesKey, (number | null)[]>
+  totals: Record<SplitSeriesKey, number>
   shares: Record<SplitKey, number | null>
-  labels: Record<SplitKey, string>
+  labels: Record<SplitSeriesKey, string>
   days_missing: number
+  note?: string
   caveats: string[]
 }
 
@@ -259,6 +285,8 @@ export interface Pm25LinkResponse {
   days_with_upwind?: number
   upwind_p75_mw?: number | null
   correlations?: Record<'frp_upwind' | 'frp_200', Record<'lag0' | 'lag1' | 'lag2', Correlation>>
+  candidate_episodes?: string[]
+  /** @deprecated older name of candidate_episodes */
   fire_influenced_days?: string[]
   rows?: LinkRow[]
   summary?: string
@@ -266,11 +294,11 @@ export interface Pm25LinkResponse {
 }
 
 export const fetchFiresMeta = () => getJson<FiresMeta>('/meta')
-export const fetchSeasons = (region: string, season: SeasonId) =>
-  getJson<SeasonsResponse>(`/seasons?region=${encodeURIComponent(region)}&season=${season}`)
-export const fetchDistricts = (season: SeasonId, region: string) =>
-  getJson<DistrictsResponse>(`/districts?season=${season}&region=${encodeURIComponent(region)}&limit=60`)
-export const fetchSplit = (season: SeasonId) => getJson<SplitResponse>(`/split?season=${season}`)
+export const fetchSeasons = (region: string, season: SeasonId, basis: Basis = 'all') =>
+  getJson<SeasonsResponse>(`/seasons?region=${encodeURIComponent(region)}&season=${season}&basis=${basis}`)
+export const fetchDistricts = (season: SeasonId, region: string, basis: Basis = 'all') =>
+  getJson<DistrictsResponse>(`/districts?season=${season}&region=${encodeURIComponent(region)}&limit=60&basis=${basis}`)
+export const fetchSplit = (season: SeasonId, basis: Basis = 'all') => getJson<SplitResponse>(`/split?season=${season}&basis=${basis}`)
 export const fetchPersistent = (region: string) =>
   getJson<PersistentResponse>(`/persistent?region=${encodeURIComponent(region)}&min_days=10&limit=30`)
 export const fetchCities = () => getJson<{ cities: City[]; count: number }>('/cities')

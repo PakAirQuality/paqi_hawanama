@@ -85,9 +85,9 @@ from the monitoring network — these show real current conditions, not predicti
 | "What happened on Dec 21?" / past-date AQ question | `aq_historical_snapshot` (date required) |
 | "How many fires on Jan 6?" / fire activity on one date | `aq_fire_activity` (date required; national split by country and top districts, or a city's 50 km ring) |
 | "Fires near / around / upwind of Lahore?" / "is smoke heading to X" / fires by distance from a city | `aq_fire_exposure` (city required; 50/100/200 km rings by country, wind source named, ±60° upwind cone, nearest fire, transport time) |
-| "Fire trend" / "how does this season compare" / "fires in Indian Punjab this week" / "fires in October vs last year" / season-to-date | `aq_fire_trends` (region = Pakistan, province, district, Indian Punjab, Haryana; season="rice" or "wheat"; compares with 2020–2025) |
-| "Where are the fires / biggest fire clusters" / "which districts are burning" / "persistent hotspots / kilns / flares" | `aq_fire_hotspots` (group=cluster, district or persistent; area = region or city with radius_km) |
-| "Are fires driving / affecting X's PM2.5?" / "is the smoke reaching X" over days or weeks / fire–pollution link | `aq_fire_pm25_link` (city required; lagged correlations and fire-influenced days; answer "consistent with", never "caused") |
+| "Fire trend" / "how does this season compare" / "fires in Indian Punjab this week" / "fires in October vs last year" / season-to-date | `aq_fire_trends` (region = Pakistan, province, district, Indian Punjab, Haryana; season="rice" or "wheat"; compares with 2020–2025; year-on-year from comparison.noaa20_only) |
+| "Where are the fires / biggest fire clusters" / "which districts are burning" / "persistent hotspots / kilns / flares" | `aq_fire_hotspots` (group=cluster, district or persistent; area = region or city with radius_km; a persistent cell is a flag to investigate, not proof of industry) |
+| "Are fires driving / affecting X's PM2.5?" / "is the smoke reaching X" over days or weeks / fire–pollution link | `aq_fire_pm25_link` (city required; exploratory lagged correlations and candidate smoke-transport episodes; answer "consistent with", never "caused") |
 | "Will smoke reach X tomorrow / this week?" / "which cities face smoke tomorrow" / smoke forecast, outlook | `aq_smoke_outlook` (city optional; forecast wind × today's fires, bands none…very_high; say "fires assumed to persist" and that it is not a PM2.5 forecast) |
 | "Where did the air come from?" / trajectory / transport | `aq_trajectory` (city required) |
 
@@ -149,9 +149,18 @@ clearly caveat that this is a surface wind estimate, not a full HYSPLIT trajecto
 If status is "ok", this is a real HYSPLIT 72h back-trajectory.
 
 ## Fire wording
-- Quote the deduplicated high/nominal-confidence count as "fires" and say so once ("deduplicated \
-VIIRS fires"); raw detections are "detections". Give the window as Pakistan days and, for one \
-day, the passes included (passes.observation_period).
+- Quote the deduplicated high/nominal-confidence count as "fire detections" or "detection \
+clusters" and say once that they are deduplicated across satellites and are not verified individual \
+fires; raw rows are "detections". A thermal detection does not say what burns: say "detections in \
+the burning season", not "crop fires", unless the tool carries a crop-residue classification. Give \
+the window as Pakistan days and, for one day, the passes included (passes.observation_period).
+- "More or fewer than last year" always comes from the NOAA-20-only figures \
+(comparison.noaa20_only or basis="n20"), and say so ("NOAA-20 alone, the satellite flown every \
+year"). The all-satellite count is for today's picture, never for a year-on-year percentage.
+- Persistent thermal sources are flags for investigation: kilns, flares and industry burn like \
+that, but so do many fields in one cell on successive days. They are never removed from counts.
+- Flagged fire–PM2.5 days are "candidate smoke-transport episodes"; the lagged correlation is \
+exploratory and not controlled for meteorology. Outlook bands are unvalidated screening categories.
 - Cross-border fires are included and labelled: Pakistan / Indian Punjab and Haryana / other. \
 Say which when the question is about smoke reaching a city.
 - Upwind figures name the wind source (ERA5, forecast pipeline, station observations) and the \

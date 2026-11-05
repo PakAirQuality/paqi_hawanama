@@ -2041,7 +2041,7 @@ def _build_brief_context(
             pk, ind = _n("country", "Pakistan"), _n("country", "India (Punjab+Haryana)")
             pk_high = int(reg.loc[("country", "Pakistan")]["n_high"]) if ("country", "Pakistan") in reg.index else 0
             if pk > 0 or ind > 0:
-                fires_text = (f"{pk} deduplicated VIIRS fires in Pakistan ({pk_high} high-confidence detections) and "
+                fires_text = (f"{pk} deduplicated VIIRS fire detection clusters in Pakistan ({pk_high} high-confidence detections) and "
                               f"{ind} in Indian Punjab and Haryana.")
                 dsel = reg.loc["district"] if "district" in reg.index.get_level_values(0) else None
                 if dsel is not None and len(dsel):
@@ -2056,6 +2056,14 @@ def _build_brief_context(
             fires_text += f" (Detections are for {fires_date}, the latest day stored; none stored for {date}.)"
     else:
         fires_text = "FIRMS fire data unavailable for this date and the two days before it."
+    # the two Punjabs, season to date, from the aggregate store (only during a burning season)
+    try:
+        from app.services.fire_public import brief_lines as _brief_lines
+        two = _brief_lines()
+        if two:
+            fires_text += " " + " ".join(two)
+    except Exception as exc:  # noqa: BLE001 — the brief must not fail on the store
+        logger.warning("Brief two-Punjab lines unavailable: %s", exc)
     # smoke outlook for the day after the brief's date, when a fresh outlook exists
     outlook_text = ""
     try:

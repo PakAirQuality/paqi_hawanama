@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react'
 import { CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts'
 import type { SeasonsResponse, SeasonYear } from './api'
 import { dayLabel, fmtCompact, fmtInt } from './format'
-import { axisTicks, lastNonNullIndex, niceMax, stackPx, toChartRows, yearKey } from './seasonAlign'
+import { Pill, PillGroup } from './Pill'
+import { axisTicks, curve, lastNonNullIndex, niceMax, stackPx, toChartRows, yearKey, type CurveMode } from './seasonAlign'
 
 const COLORS = { current: '#dc2626', last: '#0f172a', reference: '#cbd5e1' } as const
 const WIDTHS = { current: 2.25, last: 1.75, reference: 1.25 } as const
@@ -16,27 +17,40 @@ const PLOT_H = CHART_H - MARGIN.top - MARGIN.bottom - X_AXIS_H
 
 export function SeasonCurves({ data }: { data: SeasonsResponse }) {
   const [showTable, setShowTable] = useState(false)
-  const rows = useMemo(() => toChartRows(data), [data])
+  const [mode, setMode] = useState<CurveMode>('r7')
+  const rows = useMemo(() => toChartRows(data, mode), [data, mode])
   const ticks = useMemo(() => axisTicks(data.days), [data.days])
-  const yMax = useMemo(() => niceMax(data.years), [data.years])
+  const yMax = useMemo(() => niceMax(data.years, mode), [data.years, mode])
   const years = useMemo(() => [...data.years].sort((a, b) => rank(a) - rank(b)), [data.years])     // references first, current last (on top)
   const current = years.find(y => y.role === 'current')
-  const currentEnd = current ? lastNonNullIndex(current.r7) : -1
+  const currentEnd = current ? lastNonNullIndex(curve(current, mode)) : -1
+  const window = `${dayLabel(data.season.start)} – ${dayLabel(data.season.end)}`
+  const basisNote = data.basis === 'n20' ? 'NOAA-20 only' : 'all satellites, deduplicated'
   // year labels for the finished seasons sit in a column at the right edge, stacked so they never overlap
   const column = useMemo(() => {
     const items = years.filter(y => y.role !== 'current').map(y => {
-      const idx = lastNonNullIndex(y.r7)
-      const v = idx >= 0 ? (y.r7[idx] ?? 0) : 0
+      const c = curve(y, mode)
+      const idx = lastNonNullIndex(c)
+      const v = idx >= 0 ? (c[idx] ?? 0) : 0
       return { key: yearKey(y.year), y: PLOT_TOP + (1 - v / yMax) * PLOT_H, year: y }
     })
     const pos = stackPx(items.map(i => ({ key: i.key, y: i.y })), 12, PLOT_TOP + PLOT_H)
     return items.map(i => ({ ...i, top: pos[i.key] }))
-  }, [years, yMax])
+  }, [years, yMax, mode])
+  const anyTiming = data.years.some(y => y.timing && y.timing.p50)
 
   return (
     <div>
-      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
-        <p className="text-[12px] text-slate-600">Fires a day, 7-day mean · each line is one {data.season.id === 'rice' ? '1 Oct – 30 Nov' : '15 Apr – 31 May'} season</p>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <PillGroup label="Curve">
+            <Pill active={mode === 'r7'} onClick={() => setMode('r7')} title="Detections a day, 7-day mean">7-day mean</Pill>
+            <Pill active={mode === 'cum'} onClick={() => setMode('cum')} title="Running total of detections since the start of the season">Cumulative</Pill>
+          </PillGroup>
+          <p className="text-[12px] text-slate-600">
+            {mode === 'r7' ? 'Detections a day, 7-day mean' : 'Detections since the season began'} · each line is one {window} season · {basisNote}
+          </p>
+        </div>
         <p className="text-[11px] text-slate-500">
           <span className="font-semibold text-[#dc2626]">{data.season.year}</span> in red · {data.season.year - 1} in black · earlier years grey · dashed = thin archive year
         </p>
@@ -50,7 +64,7 @@ export function SeasonCurves({ data }: { data: SeasonsResponse }) {
                 axisLine={{ stroke: '#e2e8f0' }} tickLine={false} stroke="#9ca3af" tick={{ fontSize: 10 }} height={X_AXIS_H} />
               <YAxis orientation="left" domain={[0, yMax]} axisLine={false} tickLine={false} stroke="#9ca3af" tick={{ fontSize: 10 }} width={40}
                 tickFormatter={v => fmtCompact(Number(v))} />
-              <Tooltip content={<CurvesTooltip years={data.years} days={data.days} />} cursor={{ stroke: '#cbd5e1' }} />
+              <Tooltip content={<CurvesTooltip years={data.years} days={data.days} mode={mode} />} cursor={{ stroke: '#cbd5e1' }} />
               {data.today_index != null && !data.season.complete && (
                 <ReferenceLine x={data.today_index} stroke="#94a3b8" strokeDasharray="3 3" label={{ value: 'yesterday', position: 'top', fontSize: 10, fill: '#64748b' }} />
               )}
@@ -82,15 +96,32 @@ export function SeasonCurves({ data }: { data: SeasonsResponse }) {
           ))}
         </div>
       </div>
+      {mode === 'cum' && !data.season.complete && (
+        <p className="mt-1.5 text-[11px] text-slate-500">A cumulative curve part-way through the season cannot tell a late season from a smaller one: a shortfall today can still close by the end of the window. Gap days add nothing and break the line.</p>
+      )}
       <button type="button" onClick={() => setShowTable(v => !v)} className="mt-2 text-[12px] text-slate-600 underline-offset-2 hover:underline" aria-expanded={showTable}>
         {showTable ? 'Hide season totals' : 'Show season totals as a table'}
       </button>
       {showTable && (
         <table className="mt-2 w-full text-[12px] tabular-nums">
-          <thead><tr className="text-left text-slate-500"><th className="py-1 pr-3 font-medium">Season</th><th className="py-1 pr-3 font-medium">Fires, whole season</th><th className="py-1 pr-3 font-medium">Fires to the same date</th><th className="py-1 font-medium">Days with data</th></tr></thead>
+          <thead>
+            <tr className="text-left text-slate-500">
+              <th className="py-1 pr-3 font-medium">Season</th>
+              <th className="py-1 pr-3 font-medium">Whole season</th>
+              <th className="py-1 pr-3 font-medium">To the same date</th>
+              <th className="py-1 pr-3 font-medium">Days observed</th>
+              {anyTiming && <th className="py-1 pr-3 font-medium" title="Dates by which 10%, 50% and 90% of the season's detections had occurred">10% · 50% · 90% by</th>}
+            </tr>
+          </thead>
           <tbody>
             {[...data.years].sort((a, b) => b.year - a.year).map(y => (
-              <tr key={y.year} className="border-t border-slate-100"><td className="py-1 pr-3">{y.year}{y.suspect_days > 0 ? '*' : ''}</td><td className="py-1 pr-3">{y.days_missing > 0 ? '—' : fmtInt(y.total)}</td><td className="py-1 pr-3">{fmtInt(y.total_to_date)}</td><td className="py-1">{y.days_with_data} of {data.days.length}</td></tr>
+              <tr key={y.year} className="border-t border-slate-100">
+                <td className="py-1 pr-3">{y.year}{y.suspect_days > 0 ? '*' : ''}</td>
+                <td className="py-1 pr-3">{y.days_missing > 0 ? '—' : fmtInt(y.total)}</td>
+                <td className="py-1 pr-3">{fmtInt(y.total_to_date)}</td>
+                <td className="py-1 pr-3">{y.days_with_data} of {data.days.length}{y.days_no_pass ? ` (${y.days_no_pass} without a NOAA-20 pass)` : ''}</td>
+                {anyTiming && <td className="py-1 pr-3">{y.timing?.p50 ? `${dayLabel(y.timing.p10 ?? '')} · ${dayLabel(y.timing.p50)} · ${dayLabel(y.timing.p90 ?? '')}` : '—'}</td>}
+              </tr>
             ))}
           </tbody>
         </table>
@@ -103,22 +134,22 @@ function rank(y: SeasonYear): number {
   return y.role === 'current' ? 2 : y.role === 'last' ? 1 : 0
 }
 
-function CurvesTooltip({ active, payload, years, days }: { active?: boolean; payload?: { dataKey?: string | number; value?: number | null }[]; years: SeasonYear[]; days: string[] }) {
+function CurvesTooltip({ active, payload, years, days, mode }: { active?: boolean; payload?: { dataKey?: string | number; value?: number | null }[]; years: SeasonYear[]; days: string[]; mode: CurveMode }) {
   if (!active || !payload?.length) return null
   const idx = (payload[0] as { payload?: { d?: number } }).payload?.d
   if (idx == null) return null
   const entries = years
-    .map(y => ({ year: y.year, role: y.role, r7: y.r7[idx], fires: y.fires[idx] }))
-    .filter(e => e.r7 != null)
-    .sort((a, b) => (b.r7 ?? 0) - (a.r7 ?? 0))
+    .map(y => ({ year: y.year, role: y.role, v: curve(y, mode)[idx], fires: y.fires[idx] }))
+    .filter(e => e.v != null)
+    .sort((a, b) => (b.v ?? 0) - (a.v ?? 0))
   return (
     <div className="rounded-lg border border-slate-200 bg-white px-2.5 py-2 text-[11px] shadow-sm">
-      <div className="mb-1 font-semibold text-slate-800">{dayLabel(days[idx] ?? '')}</div>
+      <div className="mb-1 font-semibold text-slate-800">{dayLabel(days[idx] ?? '')}{mode === 'cum' ? ' · since the season began' : ' · 7-day mean'}</div>
       {entries.map(e => (
         <div key={e.year} className="flex items-center gap-2 tabular-nums">
           <span className="inline-block h-2 w-2 rounded-full" style={{ background: COLORS[e.role] }} />
           <span className={e.role === 'reference' ? 'text-slate-500' : 'font-semibold text-slate-800'}>{e.year}</span>
-          <span className="ml-auto">{fmtInt(e.r7)}</span>
+          <span className="ml-auto">{fmtInt(e.v)}</span>
           <span className="text-slate-400">(day {fmtInt(e.fires)})</span>
         </div>
       ))}

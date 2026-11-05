@@ -62,8 +62,8 @@ class FakeStore:
         days = {d.isoformat(): {"csv_updated": "t", **b.info} for d, b in builds.items()}
         if extra_daily is not None:
             for d in extra_daily["pk_day"].unique():
-                days.setdefault(pd.Timestamp(d).date().isoformat(), {"csv_updated": "t", "rows": 1, "format": "utc_v1", "status": "archive"})
-        self._manifest = {"built_at": "2026-11-03T13:00:00Z", "days": days, "suspect_days": suspect or []}
+                days.setdefault(pd.Timestamp(d).date().isoformat(), {"csv_updated": "t", "rows": 1, "format": "utc_v1", "status": "archive", "sources": ["N", "N20"]})
+        self._manifest = {"built_at": "2026-11-03T13:00:00Z", "schema_version": fa.SCHEMA_VERSION, "days": days, "suspect_days": suspect or []}
 
     def manifest(self):
         return self._manifest
@@ -162,8 +162,10 @@ def _ref_daily():
     rows = []
     for y, n in ((2024, 5), (2025, 9)):
         for d in (date(y, 11, 1), date(y, 11, 2), date(y, 11, 3)):
-            rows.append({"pk_day": d, "region_kind": "country", "region": "Pakistan", "n_raw": n + 1, "n_hn": n + 1, "n_dedup": n, "n_dedup_hn": n,
-                         "n_high": n, "n_nominal": 0, "n_low": 0, "n_day": n, "n_night": 0, "frp_raw": 10.0 * n, "frp_hn": 10.0 * n, "frp_dedup_hn": 10.0 * n, "frp_max": 10.0})
+            for kind, region in (("country", "Pakistan"), ("province", "Punjab")):     # every reference fire is in Punjab
+                rows.append({"pk_day": d, "region_kind": kind, "region": region, "n_raw": n + 1, "n_hn": n + 1, "n_dedup": n, "n_dedup_hn": n,
+                             "n_high": n, "n_nominal": 0, "n_low": 0, "n_day": n, "n_night": 0, "frp_raw": 10.0 * n, "frp_hn": 10.0 * n,
+                             "frp_dedup_hn": 10.0 * n, "frp_max": 10.0, "n_n20_raw": n - 1, "n_n20_hn": n - 1, "frp_n20_hn": 10.0 * (n - 1)})
     return pd.DataFrame(rows)
 
 
@@ -178,13 +180,30 @@ def test_trends_daily_rows_summary_country_share_and_comparison():
     c = out["comparison"]
     assert c["window"] == "11-01 to 11-03 in each year" and [y["fires"] for y in c["years"] if y["fires"] is not None] == [15, 27]
     assert c["reference_mean"] == 21.0 and c["higher_than_n_of"] == [0, 2] and c["ratio_to_mean"] == pytest.approx(3 / 21, abs=0.01)
-    assert c["days_compared"] == 3 and "note" not in c and c["rank_text"] == "lower than every reference year"
-    assert any("satellite roster" in cv for cv in out["caveats"])
+    assert c["days_compared"] == 3 and "note" not in c and c["rank_text"] == "lower than every reference year" and c["basis"] == "all"
+    assert any("satellite roster" in cv for cv in out["caveats"]) and out["basis"] == "all"
+    # the NOAA-20-only block rides along: 2 of the 3 current fires are N20 (D3's second pixel is N21 and merges); refs are n-1 a day
+    n20 = c["noaa20_only"]
+    assert n20["basis"] == "n20" and n20["fires"] == 3 and [y["fires"] for y in n20["years"] if y["fires"] is not None] == [12, 24]
+    assert n20["rank_text"] == "lower than every reference year" and out["summary"]["noaa20_only"] == {"fires": 3, "days_with_data": 3, "note": n20_note()}
+    # basis="n20" makes the NOAA-20 series the main one and drops the rider
+    b20 = x.fire_trends("Pakistan", D1, D3, store=store, today=D3, basis="n20")
+    assert b20["basis"] == "n20" and b20["summary"]["fires"] == 3 and b20["comparison"]["basis"] == "n20" and "noaa20_only" not in b20["comparison"]
+    assert "basis must be" in x.fire_trends("Pakistan", D1, D3, store=store, today=D3, basis="snpp")["message"]
     # a gap in the current window → reference years are summed over the same calendar days only
     gap = x.fire_trends("Pakistan", date(2026, 10, 30), D3, store=store, today=D3)
     cg = gap["comparison"]
-    assert cg["days_compared"] == 3 and "no 2026 file" in cg["note"] and [y["fires"] for y in cg["years"] if y["fires"] is not None] == [15, 27]
+    assert cg["days_compared"] == 3 and "no file" in cg["note"] and [y["fires"] for y in cg["years"] if y["fires"] is not None] == [15, 27]
     assert gap["summary"]["days_missing"] == 2
+    # a day whose file has no NOAA-20 rows is a gap on the n20 basis, not a zero
+    store.manifest()["days"][D2.isoformat()]["rows_by_satellite"] = {"n21": 2}
+    g20 = x.fire_trends("Pakistan", D1, D3, store=store, today=D3, basis="n20")
+    assert g20["summary"]["days_missing"] == 1 and g20["rows"][1] == {"day": D2.isoformat(), "fires": None, "note": "no NOAA-20 rows"}
+    assert x.satellite_days(store.manifest(), "n20") == {D1, D3} | {date(y, 11, d) for y in (2024, 2025) for d in (1, 2, 3)}
+
+
+def n20_note():
+    return "NOAA-20 detections alone; the series to compare across years"
 
 
 def test_trends_regions_seasons_weeks_and_messages():
@@ -201,12 +220,12 @@ def test_trends_regions_seasons_weeks_and_messages():
     assert dist["region"] == {"kind": "district", "name": "Sheikhpura"} and dist["summary"]["fires"] == 3
     assert x.resolve_region("Shekhupura")[0] == ("district", "Sheikhpura")
     # the season window and the current-season default
-    assert x.season_window("rice", today=D3) == (date(2026, 10, 1), D3, "kharif_rice_residue")
+    assert x.season_window("rice", today=D3) == (date(2026, 9, 15), D3, "kharif_rice_residue")
     assert x.season_window("wheat", today=D3) == (date(2026, 4, 15), date(2026, 5, 31), "rabi_wheat_residue")
     assert x.season_window("monsoon", today=D3) is None and x.current_season(D3) == "kharif_rice_residue" and x.current_season(date(2026, 7, 1)) is None
     season = x.fire_trends("Pakistan", season="rice", store=store, today=D3, compare_years=())
-    assert season["season"] == "kharif_rice_residue" and season["window"]["start_pkt_day"] == "2026-10-01" and season["window"]["end_pkt_day"] == "2026-11-03"
-    assert season["summary"]["days_missing"] == 31 and any("no fire file" in c for c in season["caveats"])
+    assert season["season"] == "kharif_rice_residue" and season["window"]["start_pkt_day"] == "2026-09-15" and season["window"]["end_pkt_day"] == "2026-11-03"
+    assert season["summary"]["days_missing"] == 47 and any("no fire file" in c for c in season["caveats"])
     assert "Unknown season" in x.fire_trends("Pakistan", season="monsoon", store=store, today=D3)["message"]
     # > 60 days → ISO-week rows
     long = x.fire_trends("Pakistan", date(2026, 8, 1), D3, store=store, today=D3, compare_years=())

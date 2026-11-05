@@ -47,6 +47,26 @@ DAY_UTC_HOURS = (3, 15)         # VIIRS day passes ~07:30–09:30 UTC, night ~19
 INDIA_REGIONS = ("Punjab (IN)", "Haryana (IN)")
 COUNTRY_LABELS = {"PK": "Pakistan", "IN": "India (Punjab+Haryana)", "XX": "other in bbox"}
 
+# One map for every spelling of a satellite seen in FIRMS CSVs (the `satellite` column: N, N20, N21),
+# the legacy archive (1 = NOAA-20), and the product names in the sidecars (VIIRS_NOAA20_NRT …).
+SATELLITE_KEYS = {"N": "snpp", "SNPP": "snpp", "VIIRS_SNPP_NRT": "snpp", "VIIRS_SNPP_SP": "snpp",
+                  "N20": "n20", "1": "n20", "NOAA-20": "n20", "VIIRS_NOAA20_NRT": "n20", "VIIRS_NOAA20_SP": "n20",
+                  "N21": "n21", "2": "n21", "NOAA-21": "n21", "VIIRS_NOAA21_NRT": "n21", "VIIRS_NOAA21_SP": "n21"}
+SATELLITE_LABELS = {"snpp": "Suomi NPP", "n20": "NOAA-20", "n21": "NOAA-21"}
+CONSISTENT_SATELLITE = "n20"           # flown and processed in every archive year (2020 →): the comparison basis
+
+
+def satellite_key(code: Any) -> Optional[str]:
+    """'snpp' | 'n20' | 'n21' for any spelling; None when unknown."""
+    if code is None:
+        return None
+    return SATELLITE_KEYS.get(str(code).strip())
+
+
+def satellite_name(code: Any) -> str:
+    key = satellite_key(code)
+    return SATELLITE_LABELS[key] if key else str(code)
+
 
 # ── region index ───────────────────────────────────────────────────────────────
 
