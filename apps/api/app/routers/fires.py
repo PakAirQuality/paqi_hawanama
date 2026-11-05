@@ -206,6 +206,52 @@ async def get_trajectories(city: Optional[str] = Query(None, max_length=40)):
                          "cities": [r["city"] for r in latest.get("receptors_out", [])]}, headers={"Cache-Control": CC_OUTLOOK})
 
 
+# ── on-demand kinematic trajectory ───────────────────────────────────────────
+
+@router.get("/trajectory", summary="On-demand kinematic trajectory on ECMWF IFS 0.25° winds (Open-Meteo): backward from a point, or forward")
+async def get_trajectory(lat: float = Query(..., ge=5.0, le=40.0), lon: float = Query(..., ge=55.0, le=95.0),
+                         at: Optional[str] = Query(None, description="UTC hour, ISO 8601 (default: the latest whole hour)"),
+                         direction: str = Query("backward", pattern="^(backward|forward)$"),
+                         hours: int = Query(72, ge=6, le=72), label: Optional[str] = Query(None, max_length=60)):
+    import httpx
+    from app.services import fire_kinematic as fk
+    from app.services.fire_aggregates import default_bucket
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    if at:
+        try:
+            at_utc = datetime.fromisoformat(at.replace("Z", "+00:00"))
+            at_utc = (at_utc.astimezone(timezone.utc) if at_utc.tzinfo else at_utc).replace(tzinfo=None, minute=0, second=0, microsecond=0)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="at must be an ISO 8601 time")
+    else:
+        at_utc = now.replace(minute=0, second=0, microsecond=0)
+    key = ("trajectory", round(lat, 2), round(lon, 2), at_utc.isoformat(), direction, hours)
+    fut = _INFLIGHT.get(key)
+    if fut is None:
+        loop = asyncio.get_running_loop()
+        fut = loop.create_future()
+        _INFLIGHT[key] = fut
+        try:
+            try:
+                bucket = default_bucket()
+            except Exception:  # noqa: BLE001
+                bucket = None
+            async with httpx.AsyncClient(timeout=60.0) as http:
+                doc = await fk.run(http, agg_store(), lat, lon, at_utc, direction=direction, hours=hours, bucket=bucket, now=now, label=label or "")
+            fut.set_result(doc)
+        except BaseException as exc:  # noqa: BLE001
+            fut.set_exception(exc)
+            _INFLIGHT.pop(key, None)
+            raise HTTPException(status_code=503, detail=f"trajectory engine unavailable: {type(exc).__name__}")
+        finally:
+            _INFLIGHT.pop(key, None)
+    else:
+        doc = await asyncio.shield(fut)
+    if doc.get("status") != fk.STATUS:
+        raise HTTPException(status_code=422, detail=doc.get("message", "trajectory unavailable"))
+    return JSONResponse(doc, headers={"Cache-Control": CC_OUTLOOK})
+
+
 # ── city endpoints (database) ────────────────────────────────────────────────
 
 CITIES_SQL = text("""

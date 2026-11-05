@@ -1164,66 +1164,126 @@ async def aq_smoke_outlook(
 
 async def aq_trajectory(
     ctx: RunContext[CopilotSession],
-    city: str,
-    date: Optional[str] = None,
+    city: str = "",
+    lat: Optional[float] = None,
+    lon: Optional[float] = None,
+    date: str = "",
+    hour_pkt: Optional[int] = None,
+    direction: str = "backward",
+    hours: int = 72,
 ) -> dict:
-    """Analyse where the air mass came from for a city on a specific date.
+    """Compute where the air arriving at a place came from (backward) or where air leaving it goes (forward).
 
-    Checks for cached HYSPLIT back-trajectory data first. If unavailable,
-    falls back to a wind-based corridor estimate using surface observations
-    and checks for upwind fire detections.
+    Runs on demand: a kinematic trajectory through hourly ECMWF IFS 0.25° winds on three levels
+    (1000, 925, 850 hPa ≈ 100, 700 and 1,400 m above the plains), 72 h, with the hours spent over
+    Pakistan Punjab, Indian Punjab and Haryana, the compass sector at 24/48/72 h and its agreement
+    across levels, and the fire detections met along the path (strict 10 km/±1 h and loose 25 km/±3 h).
+    A HYSPLIT run is used instead whenever one exists for the place and hour. Covers arrivals in the
+    last 88 days and forecast winds 15 days ahead. It is a plausibility screen with a position error
+    of roughly 10–20 % of the distance travelled: say "transport pathway consistent with", never
+    "caused", and never turn it into a smoke-arrival probability.
 
     Args:
-        city: City name (required). Fuzzy matched.
-        date: Date (YYYY-MM-DD). Defaults to today.
+        city: A Pakistan city, station, province or district name, or Delhi, Amritsar, Chandigarh,
+            Ludhiana. Fuzzy matched. Leave empty when lat/lon are given.
+        lat: Latitude of the start point when it is not a named place.
+        lon: Longitude of the start point when it is not a named place.
+        date: Pakistan date (YYYY-MM-DD) of the arrival (backward) or departure (forward). Default: today.
+        hour_pkt: Hour of that day in Pakistan time (0–23). Default: the latest whole hour for today,
+            12:00 PKT for an earlier date.
+        direction: "backward" (where did this air come from; the default) or "forward" (where does air
+            leaving here go, e.g. smoke from a fire district towards a city).
+        hours: Trajectory length in hours, 6–72.
     """
-    from app.services.trajectory import get_trajectory_for_copilot
+    from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+    from app.services import fire_kinematic as fk
+    from app.services import fire_trajectories as ft
+    from app.services.copilot.station_queries import parse_period_date, resolve_place
+    from app.services.fire_aggregates import agg_store, default_bucket
 
-    dt = date or _effective_date(ctx)
-    db = await _get_db()
-    try:
-        result = await get_trajectory_for_copilot(db, city, dt)
-    finally:
-        await db.close()
-
-    _update_session(
-        ctx, tool="aq_trajectory",
-        focus_type="city",
-        focused_city=city,
-        entities=[city],
-        historical_date=date,
-    )
-
-    status = result.get("status", "unavailable")
-    followups = []
-    if status == "wind_estimated":
-        followups.append(f"What was the air quality in {city} on {dt}?")
-        followups.append(f"How many fires were there on {dt}?")
-    elif status == "ok":
-        followups.append(f"What's driving pollution in {city}?")
+    label = (city or "").strip()
+    name = label
+    if lat is None or lon is None:
+        if not label:
+            return {"date": date or _effective_date(ctx), "data": {"message": "Give a city or place name, or a latitude and longitude."}, "followups": []}
+        extra = next((v for k, v in fk.EXTRA_RECEPTORS.items() if k.lower() == label.lower()), None)
+        if extra:
+            lat, lon = extra
+            name = next(k for k in fk.EXTRA_RECEPTORS if k.lower() == label.lower())
+        else:
+            db = await _get_db()
+            try:
+                place = await resolve_place(db, label)
+            finally:
+                await db.close()
+            if "message" in place:
+                return {"date": date or _effective_date(ctx), "data": {"message": place["message"] + " Delhi, Amritsar, Chandigarh and Ludhiana are also known."}, "followups": []}
+            lat, lon, name = float(place["lat"]), float(place["lon"]), str(place["name"])
+    now_utc = _dt.now(_tz.utc).replace(tzinfo=None)
+    pkt = _tz(_td(hours=5))
+    today_pkt = _dt.now(pkt).date()
+    day = parse_period_date(date) if date else today_pkt
+    if day is None:
+        return {"date": date, "data": {"message": f"Could not read the date '{date}'; use YYYY-MM-DD."}, "followups": []}
+    if hour_pkt is None:
+        hour = _dt.now(pkt).hour if day >= today_pkt else 12
     else:
-        followups.append(f"Tell me about {city}")
+        hour = max(0, min(23, int(hour_pkt)))
+    at_utc = (_dt(day.year, day.month, day.day, hour, tzinfo=pkt)).astimezone(_tz.utc).replace(tzinfo=None)
+    direction = "forward" if str(direction).lower().startswith("f") else "backward"
+    hours = max(6, min(int(hours or 72), fk.MAX_HOURS))
 
-    return {
-        "date": dt,
-        "data": result,
-        "basis": {
-            "description": (
-                "HYSPLIT 72h back-trajectory" if status == "ok"
-                else "Wind-based corridor estimate from surface station observations"
-            ),
-            "sources": (
-                ["hysplit_trajectory"] if status == "ok"
-                else ["station_wind_observations", "firms_viirs_archive"]
-            ),
-            "limitations": (
-                [] if status == "ok"
-                else ["Surface winds may not reflect upper-level transport",
-                      "Wind estimate is directional only, not a full trajectory"]
-            ),
-        },
-        "followups": followups,
-    }
+    _update_session(ctx, tool="aq_trajectory", focus_type="city", focused_city=name, entities=[name], historical_date=date or None)
+    followups = [f"Which fires lie along that path?", f"What is the smoke outlook for {name}?" if direction == "backward" else f"Where did {name}'s air come from?",
+                 f"How does this season's burning compare with last year?"]
+
+    # 1. a HYSPLIT run for this receptor and hour, when the runner has produced one
+    try:
+        hy = await asyncio.to_thread(ft.read_latest)
+    except Exception:  # noqa: BLE001
+        hy = None
+    if hy and ft.status(hy) == "ok" and direction == "backward":
+        view = next((r for r in hy.get("receptors_out", []) if str(r.get("city", "")).lower() == name.lower()
+                     and str(r.get("arrival_utc", ""))[:13] == at_utc.isoformat()[:13]), None)
+        if view:
+            return {"date": day.isoformat(), "data": {"status": "ok", "engine": "hysplit_gfs0p25", **view, "definitions": ft.DEFINITIONS},
+                    "basis": {"description": "HYSPLIT 72 h back-trajectories on GFS 0.25° meteorology (100/500/1,000 m, 27-member ensemble)",
+                              "sources": ["hysplit_trajectory", "firms_viirs_archive", "fire_aggregate_store"],
+                              "limitations": [ft.DEFINITIONS["not_attribution"]]}, "followups": followups}
+
+    # 2. the on-demand kinematic trajectory
+    try:
+        import httpx
+        try:
+            bucket = default_bucket()
+        except Exception:  # noqa: BLE001
+            bucket = None
+        async with httpx.AsyncClient(timeout=60.0) as http:
+            doc = await fk.run(http, agg_store(), lat, lon, at_utc, direction=direction, hours=hours, bucket=bucket, now=now_utc, label=name)
+    except Exception as exc:  # noqa: BLE001
+        # 3. the last resort: the station-wind cone of the old tool, with the failure named
+        from app.services.trajectory import get_trajectory_for_copilot
+        db = await _get_db()
+        try:
+            result = await get_trajectory_for_copilot(db, name, day.isoformat())
+        finally:
+            await db.close()
+        result["engine_note"] = f"on-demand trajectory unavailable ({type(exc).__name__}): this is the surface-wind corridor instead"
+        return {"date": day.isoformat(), "data": result,
+                "basis": {"description": "Wind-based corridor estimate from surface station observations (trajectory engine unavailable)",
+                          "sources": ["station_wind_observations", "firms_viirs_archive"],
+                          "limitations": ["Surface winds may not reflect upper-level transport", "Directional only, not a trajectory"]},
+                "followups": followups}
+    if doc.get("status") != fk.STATUS:
+        return {"date": day.isoformat(), "data": doc, "followups": followups}
+    view = fk.copilot_view(doc)
+    view["place"] = name
+    return {"date": day.isoformat(), "data": view,
+            "basis": {"description": f"{'Backward' if direction == 'backward' else 'Forward'} kinematic trajectory, {hours} h, on {fk.WIND_SOURCE}; "
+                                     "fires from the deduplicated VIIRS archive",
+                      "sources": ["open_meteo_ecmwf_ifs025", "firms_viirs_archive", "fire_aggregate_store"],
+                      "limitations": list(fk.CAVEATS)},
+            "followups": followups}
 
 
 # ── Tool 17: aq_station_inventory ─────────────────────────────────────────
