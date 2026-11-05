@@ -460,11 +460,13 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
                            f"a Pakistan district, 'Indian Punjab' or 'Haryana'."}
     kind, rname = resolved
     season_name = None
+    ends_yesterday = False
     if season:
         sw = season_window(season, year=end.year if end and not start else None, today=today)
         if sw is None:
             return {"message": f"Unknown season '{season}'. Seasons: {', '.join(SEASONS)} (aliases: rice/kharif, wheat/rabi)."}
         start, end, season_name = sw
+        ends_yesterday = end >= today
     if start is None and end is None:
         cs = current_season(today)
         if cs:
@@ -472,6 +474,11 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
         else:
             end = today
             start = end - timedelta(days=29)
+        ends_yesterday = end >= today
+    if ends_yesterday:
+        # season-to-date and default windows end yesterday, as on the fires page: today's afternoon pass is
+        # still arriving and a partial day against a full day in the reference years would read as a drop
+        end = today - timedelta(days=1)
     start = start or (end - timedelta(days=29))
     end = end or min(today, start + timedelta(days=29))
     if end > today:
@@ -563,6 +570,9 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
             comparison["noaa20_only"] = {"fires": int(s20.loc[s20["has_file"], COUNT_COL[b20]].sum()) if s20["has_file"].any() else 0, **c20,
                                          "note": "Quote this block for 'more or fewer than last year': the satellite is held fixed."}
     caveats = [FIRE_DEFINITIONS["headline_count"], FIRE_DEFINITIONS["what_burns"]]
+    if ends_yesterday:
+        caveats.append(f"The window ends {end.isoformat()} (yesterday): today's afternoon pass is still arriving, so season-to-date "
+                       "figures match the fires page and compare whole days only.")
     if any(d.year < 2026 for d in s["pk_day"]) or comparison:
         caveats.append("Archive days before the 2026 ingester are keyed by UTC date and lack pass times; the satellite roster differs by year "
                        "(Suomi NPP + NOAA-20 in 2020–2025, NOAA-21 in the 2026 NRT files, Suomi NPP retired 2026-11-01), so year comparisons "
