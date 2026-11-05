@@ -94,7 +94,8 @@ async def get_meta():
     return _respond(data, CC_META)
 
 
-BASIS = Query("all", pattern="^(all|n20)$", description="all = every satellite (deduplicated); n20 = NOAA-20 only, the series that is comparable across years")
+BASIS = Query("all", pattern="^(all|n20|crop|crop_n20)$",
+              description="all = every satellite (deduplicated); n20 = NOAA-20 only (comparable across years); crop = likely crop-residue clusters only; crop_n20 = both")
 
 
 @router.get("/seasons", summary="Every burning season since 2020 as daily, 7-day-mean and cumulative detection counts, with the season-to-date headline")
@@ -126,6 +127,12 @@ async def get_persistent(region: str = Query("pakistan", max_length=80), min_day
     key = ("persistent", region.strip().lower(), min_days, limit)
     data = await _single_flight(key, _cached("persistent", key[1:], lambda s, t: fp.persistent(region, min_days=min_days, limit=limit, store=s, today=t)))
     return _respond(data, CC_LIVE)
+
+
+@router.get("/audit", summary="Observation-quality audit by year and satellite: files, day keys, products, missing passes, suspect days")
+async def get_audit():
+    data = await _single_flight(("audit",), _cached("audit", (), lambda s, t: fp.audit(store=s, today=t)))
+    return _respond(data, CC_META)
 
 
 # ── smoke outlook (read side) ────────────────────────────────────────────────

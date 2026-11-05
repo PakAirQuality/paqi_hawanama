@@ -984,8 +984,11 @@ async def aq_fire_trends(
         season: "rice" (15 Sep–30 Nov, the ISRO/CAQM paddy window) or "wheat" (15 Apr–31 May, rabi residue);
             season-to-date when no dates are given. Without dates or a season: the current season, else the last 30 days.
         compare_years: Compare with the same window in 2020–2025.
-        basis: "all" (every satellite, deduplicated; the fullest picture of today) or "n20" (NOAA-20 only,
-            the series that is comparable across years).
+        basis: "all" (every satellite, deduplicated; the fullest picture of today), "n20" (NOAA-20 only,
+            the series that is comparable across years), "crop" (likely crop-residue clusters only, class
+            wc2021-v1: cropland, harvest window, no listed kiln or industrial site within 1 km, not a persistent
+            out-of-season cell) or "crop_n20" (both). The summary carries source_classes (crop / other /
+            uncertain shares) on the all basis; the classification is unvalidated, say "likely crop-residue".
     """
     from app.services.copilot.station_queries import parse_period_date
     from app.services.fire_analytics import REFERENCE_YEARS, fire_trends

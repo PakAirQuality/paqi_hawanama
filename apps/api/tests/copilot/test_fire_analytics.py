@@ -63,7 +63,9 @@ class FakeStore:
         if extra_daily is not None:
             for d in extra_daily["pk_day"].unique():
                 days.setdefault(pd.Timestamp(d).date().isoformat(), {"csv_updated": "t", "rows": 1, "format": "utc_v1", "status": "archive", "sources": ["N", "N20"]})
-        self._manifest = {"built_at": "2026-11-03T13:00:00Z", "schema_version": fa.SCHEMA_VERSION, "days": days, "suspect_days": suspect or []}
+        from app.services import fire_classify as fc
+        self._manifest = {"built_at": "2026-11-03T13:00:00Z", "schema_version": fa.SCHEMA_VERSION, "days": days, "suspect_days": suspect or [],
+                          "classification": fc.describe(None)}
 
     def manifest(self):
         return self._manifest

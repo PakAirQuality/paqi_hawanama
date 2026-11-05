@@ -31,6 +31,7 @@ import numpy as np
 import pandas as pd
 
 from app.services import fire_analytics as fa
+from app.services import fire_classify as fc
 from app.services import fire_regions as fr
 from app.services.fire_aggregates import AggStore, agg_store
 
@@ -104,8 +105,11 @@ class RegionTable:
     def has_n20(self) -> bool:
         return self.schema_version >= 2
 
+    def has_basis(self, basis: str) -> bool:
+        return self.schema_version >= fa.BASIS_SCHEMA.get(basis, 99)
+
     def observed(self, basis: str) -> set:
-        return self.days_with_file & self.n20_days if basis == "n20" else self.days_with_file
+        return self.days_with_file & self.n20_days if basis in fa.N20_BASES else self.days_with_file
 
     def _group(self, kind: str, region: str) -> Optional[pd.DataFrame]:
         try:
@@ -175,8 +179,8 @@ def region_table(store: AggStore) -> RegionTable:
 def _basis_error(basis: str, t: RegionTable) -> Optional[Dict[str, Any]]:
     if basis not in BASES:
         return {"error": f"basis must be one of {', '.join(BASES)}"}
-    if basis == "n20" and not t.has_n20:
-        return {"error": "the NOAA-20-only basis needs the rebuilt fire store (schema 2); try again after the next aggregate run"}
+    if not t.has_basis(basis):
+        return {"error": f"the '{basis}' basis needs the rebuilt fire store (schema {fa.BASIS_SCHEMA[basis]}); try again after the next aggregate run"}
     return None
 
 
@@ -358,8 +362,8 @@ def seasons(region: str = "pakistan", season: str = "rice", basis: str = "all", 
         return years_out, headline
 
     years_out, headline = _block(basis)
-    if basis == "all" and t.has_n20:
-        _, h20 = _block("n20")
+    if basis in ("all", "crop") and t.has_n20 and (basis == "all" or t.has_basis("crop_n20")):
+        _, h20 = _block("crop_n20" if basis == "crop" else "n20")
         headline["comparison_n20"] = {k: h20[k] for k in ("basis", "basis_label", "fires", "last_year", "reference")}
         headline["comparison_n20"]["days_with_data"] = h20["window"]["days_with_data"]
         headline["comparison_n20"]["note"] = "year-on-year figures on NOAA-20 alone: quote these, not the all-satellite ratio"
@@ -372,6 +376,8 @@ def seasons(region: str = "pakistan", season: str = "rice", basis: str = "all", 
         caveats.append(f"Archive looks thin (re-fetched with fewer rows than the 2020–2023 median) on some days in {', '.join(map(str, thin))}.")
     if not headline.get("comparison_n20") and basis == "all":
         caveats.append("The store predates the NOAA-20-only series; year-on-year figures here mix satellite rosters.")
+    if basis in ("crop", "crop_n20"):
+        caveats.append(fa.FIRE_DEFINITIONS["classification"] + " " + fc.RULES["status"] + ".")
     if season == "rice":
         caveats.append(fa.SEASON_WINDOW_NOTE)
     out = {"region": {"kind": kind, "name": api, "label": label}, "basis": basis, "basis_label": BASES[basis],
@@ -472,8 +478,17 @@ def split(season: str = "rice", basis: str = "all", *, store: Optional[AggStore]
         totals[sid] = int(upto[cnt].fillna(0).sum())
         days_missing = int((~upto["has_file"]).sum())
     grand = sum(totals[sid] for sid, *_ in SPLIT_REGIONS)
+    classes: Optional[Dict[str, Dict[str, int]]] = None
+    if t.has_basis("crop"):
+        classes = {}
+        for sid, kind, api, _ in SPLIT_REGIONS + TWO_PUNJABS[:1]:
+            s = t.series(kind, api, start, end_nominal, "all")
+            upto = s[(s["pk_day"] <= end_eff) & s["has_file"]]
+            classes[sid] = {c: int(upto[f"n_{c}_hn"].sum()) for c in fc.CLASSES}
     return {"season": {"id": season, "year": year, "start": start.isoformat(), "end": end_nominal.isoformat(), "end_effective": end_eff.isoformat()},
             "basis": basis, "basis_label": BASES[basis],
+            "classes": classes, "class_version": (store.manifest().get("classification") or {}).get("class_version") if classes else None,
+            "class_labels": fc.CLASS_LABELS,
             "days": [_mmdd(start + timedelta(days=i)) for i in range((end_nominal - start).days + 1)],
             "series": series, "totals": totals, "shares": {sid: round(totals[sid] / grand, 2) if grand else None for sid, *_ in SPLIT_REGIONS},
             "labels": {sid: lab for sid, _, _, lab in SPLIT_REGIONS + TWO_PUNJABS[:1]}, "days_missing": days_missing,
@@ -551,6 +566,8 @@ def meta(*, store: Optional[AggStore] = None, today: Optional[date] = None) -> D
         "current_season": next((sid for sid, key in SEASON_IDS.items() if key == cs), None),
         "reference_years": list(fa.REFERENCE_YEARS),
         "bases": BASES, "consistent_satellite": fr.SATELLITE_LABELS[fr.CONSISTENT_SATELLITE], "n20_basis_available": schema >= 2,
+        "bases_available": [b for b in BASES if schema >= fa.BASIS_SCHEMA[b]],
+        "classification": {**fc.describe(None), **(m.get("classification") or {}), "available": schema >= 3},
         "regions": [{"id": pid, "label": label, "kind": kind, "api": api} for pid, label, kind, api in REGION_PRESETS],
         "provinces": PROVINCES,
         "districts": sorted([{"name": n, "province": p} for n, p in idx.district_province.items()], key=lambda r: r["name"]),
@@ -560,6 +577,77 @@ def meta(*, store: Optional[AggStore] = None, today: Optional[date] = None) -> D
         "satellites_by_year": {y: sorted(v) for y, v in sorted(sat_by_year.items())},
         "pass_times": {"day": "about 13:00 PKT", "night": "about 01:00 PKT"},
         "dedup_rule": m.get("dedup_rule"), "definitions": fa.FIRE_DEFINITIONS, "notes": NOTES,
+    }
+
+
+# ── observation-quality audit ────────────────────────────────────────────────
+
+PEAK_MONTHS = (4, 5, 10, 11)
+AUDIT_MIN_ROWS = 200          # a peak-month day with at least this many rows in the box is "busy": a satellite with 0 rows that day missed its passes
+
+
+def audit(*, store: Optional[AggStore] = None, today: Optional[date] = None) -> Dict[str, Any]:
+    """Per year and satellite, from the manifest alone: files, day keys, products, missing passes on busy
+    peak-month days, suspect days. Separates processing gaps and missing passes from a quiet season."""
+    store = store or agg_store()
+    today = today or fa.pkt_today()
+    m = store.manifest()
+    days = m.get("days", {})
+    years: Dict[str, Dict[str, Any]] = {}
+    for k, rec in sorted(days.items()):
+        y = k[:4]
+        d = date.fromisoformat(k)
+        yr = years.setdefault(y, {"days_with_file": 0, "days_empty": 0, "day_basis": {"acq_pkt": 0, "acq_utc": 0}, "products": {},
+                                  "peak_days": 0, "peak_days_busy": 0, "satellites": {}, "rows": 0, "clusters_hn": 0})
+        rows = int(rec.get("rows") or 0)
+        yr["days_with_file"] += 1
+        yr["rows"] += rows
+        yr["clusters_hn"] += int(rec.get("n_dedup_hn") or 0)
+        if rows == 0:
+            yr["days_empty"] += 1
+        yr["day_basis"]["acq_pkt" if rec.get("format") == "pkt_v2" else "acq_utc"] += 1
+        for src in rec.get("sources") or []:
+            s_ = str(src)
+            prod = "SP" if s_.endswith("_SP") else "NRT" if s_.endswith("_NRT") else "legacy"
+            yr["products"][prod] = yr["products"].get(prod, 0) + 1
+        peak = d.month in PEAK_MONTHS
+        busy = peak and rows >= AUDIT_MIN_ROWS
+        yr["peak_days"] += int(peak)
+        yr["peak_days_busy"] += int(busy)
+        rbs = rec.get("rows_by_satellite")
+        if rbs is None:
+            continue
+        for key in ("snpp", "n20", "n21"):
+            if key == "n21" and y < "2026":
+                continue
+            if key == "snpp" and k >= "2026-11-01":
+                continue
+            sat = yr["satellites"].setdefault(key, {"label": fr.SATELLITE_LABELS[key], "days_with_rows": 0, "rows": 0, "busy_days_missing": 0, "busy_days_missing_dates": []})
+            n = int(rbs.get(key, 0))
+            if n:
+                sat["days_with_rows"] += 1
+                sat["rows"] += n
+            elif busy:
+                sat["busy_days_missing"] += 1
+                if len(sat["busy_days_missing_dates"]) < 12:
+                    sat["busy_days_missing_dates"].append(k)
+    sus_by_year: Dict[str, List[str]] = {}
+    for s_ in m.get("suspect_days", []):
+        sus_by_year.setdefault(str(s_.get("day", ""))[:4], []).append(s_["day"])
+    for y, yr in years.items():
+        yr["suspect_days"] = sus_by_year.get(y, [])
+        for sat in yr["satellites"].values():
+            sat["share_of_rows"] = round(sat["rows"] / yr["rows"], 2) if yr["rows"] else None
+    return {
+        "store_built_at": m.get("built_at"), "store_schema_version": int(m.get("schema_version") or 0), "today_pkt": today.isoformat(),
+        "years": years,
+        "method": {"busy_day": f"a peak-month day ({', '.join(str(x) for x in PEAK_MONTHS)}) with at least {AUDIT_MIN_ROWS} rows in the whole box",
+                   "missing_pass": "a busy day on which a satellite that should have flown contributed no rows: a processing or delivery gap, not a quiet day",
+                   "suspect_day": "the store's thin-day rule: a peak-month day under 10 % of the 2020–2023 median for the same calendar date ± 3 days (median ≥ 200)",
+                   "products": "SP = standard processing (final), NRT = near real time, legacy = the pre-2026 archive without product names",
+                   "day_basis": "acq_pkt = Pakistan day with pass times; acq_utc = UTC date without pass times",
+                   "limits": "the audit sees what the archive holds: a satellite outage that also left no rows in FIRMS is counted as a missing pass only on busy days; "
+                             "it cannot tell cloud or smoke obscuration from a quiet field, and it says nothing about fires lit between passes"},
     }
 
 

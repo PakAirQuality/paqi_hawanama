@@ -43,12 +43,18 @@ describe('headline', () => {
   it('on the n20 basis the count itself is NOAA-20 and no extra note is added', () => {
     const p = headlineParts(resp({}, {}, 'n20'), 'Pakistan')
     expect(p.basisNote).toBeNull()
-    expect(p.subline).toContain('NOAA-20 detections alone')
+    expect(p.subline).toContain('from NOAA-20 alone')
   })
   it('drops the gap note, the missing last year, and says "about the same" under 1%', () => {
     const p = headlineParts(resp({ window: { start: '2026-09-15', end: '2026-11-03', days: 50, days_with_data: 50, days_missing: 0, compared_dates: '15 Sep – 3 Nov' }, last_year: null,
       reference: { years: [2020], used_years: [2024, 2025], rows: [], mean: 12700, min: 1, max: 2, pct_change: 0, higher_than_n_of: [1, 2], rank_text: 'higher than 1 of the 2 reference years' } }), 'Sindh')
     expect(headlineSentence(p, 'Sindh')).toBe('So far this season (15 Sep – 3 Nov) Sindh has seen 12,726 fire detections, about the same as the 2024–2025 average on those dates (higher than 1 of the 2 reference years).')
+  })
+  it('names the crop basis in the unit and the subline', () => {
+    const p = headlineParts(resp({ comparison_n20: { ...N20, basis: 'crop_n20' } }, {}, 'crop'), 'Punjab')
+    expect(p.unit).toBe('likely crop-residue fire detections')
+    expect(p.subline).toContain('unvalidated classification')
+    expect(p.basisNote).toBe('NOAA-20 only')
   })
   it('names a complete season', () => {
     const p = headlineParts(resp({}, { complete: true, start: '2026-04-15', end: '2026-05-31' }), 'Punjab')

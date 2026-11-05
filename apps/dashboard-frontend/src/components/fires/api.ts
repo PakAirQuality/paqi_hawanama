@@ -33,8 +33,24 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export type SeasonId = 'rice' | 'wheat'
-/** all = every satellite flown that day (deduplicated); n20 = NOAA-20 only, the series comparable across years. */
-export type Basis = 'all' | 'n20'
+/**
+ * all = every satellite flown that day (deduplicated); n20 = NOAA-20 only, the series comparable across years;
+ * crop = likely crop-residue clusters only (class wc2021-v1); crop_n20 = both.
+ */
+export type Basis = 'all' | 'n20' | 'crop' | 'crop_n20'
+export const BASES: Basis[] = ['all', 'n20', 'crop', 'crop_n20']
+export const isCropBasis = (b: Basis) => b === 'crop' || b === 'crop_n20'
+export const isN20Basis = (b: Basis) => b === 'n20' || b === 'crop_n20'
+export const composeBasis = (crop: boolean, n20: boolean): Basis => (crop ? (n20 ? 'crop_n20' : 'crop') : n20 ? 'n20' : 'all')
+
+export interface Classification {
+  class_version: string
+  rules: Record<string, string>
+  classes: Record<string, string>
+  inputs: Record<string, string | null>
+  available: boolean
+  complete?: boolean
+}
 
 export interface FiresMeta {
   store_built_at: string | null
@@ -45,8 +61,10 @@ export interface FiresMeta {
   current_season: SeasonId | null
   reference_years: number[]
   bases?: Record<Basis, string>
+  bases_available?: Basis[]
   consistent_satellite?: string
   n20_basis_available?: boolean
+  classification?: Classification
   regions: { id: string; label: string; kind: string; api: string }[]
   provinces: string[]
   districts: { name: string; province: string }[]
@@ -162,6 +180,9 @@ export interface SplitResponse {
   totals: Record<SplitSeriesKey, number>
   shares: Record<SplitKey, number | null>
   labels: Record<SplitSeriesKey, string>
+  classes?: Record<SplitSeriesKey, { crop: number; other: number; uncertain: number }> | null
+  class_version?: string | null
+  class_labels?: Record<string, string>
   days_missing: number
   note?: string
   caveats: string[]

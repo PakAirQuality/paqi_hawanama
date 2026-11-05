@@ -13,6 +13,7 @@ describe('fires params', () => {
     const d = parseFiresParams('?region=Sheikhpura&season=wheat&city=Lahore&date=2026-10-20&basis=n20', { today: '2026-11-05', districts: [{ name: 'Sheikhpura' }] })
     expect(d).toEqual({ region: 'Sheikhpura', season: 'wheat', basis: 'n20', city: 'Lahore', date: '2026-10-20' })
     expect(parseFiresParams('?basis=snpp', { today: '2026-11-05' }).basis).toBe('all')
+    expect(parseFiresParams('?basis=crop_n20', { today: '2026-11-05' }).basis).toBe('crop_n20')
   })
   it('serialises only what differs from the defaults', () => {
     expect(serializeFiresParams({ region: 'pakistan', season: 'rice', basis: 'all', city: null, date: '2026-11-04' }, '2026-11-05')).toBe('')

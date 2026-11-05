@@ -11,7 +11,8 @@ Layout (same bucket as the day files, gs://{OPS_FORECASTS_BUCKET}/hindcast/firms
 
 Per detection: pk_day, acq_utc (null for the UTC-keyed archive days), lat, lon, frp, confidence
 (l|n|h), satellite, day_basis (acq_pkt|acq_utc), daynight (D|N|null), country (PK|IN|XX),
-province, district, cell_id (0.02° grid), dup_group, is_primary, grp_hn.
+province, district, cell_id (0.02° grid), dup_group, is_primary, grp_hn, and the source class
+(fire_classify): source_class (crop|other|uncertain), class_reasons (bitmask), crop_frac.
 
 Rules (see fire_regions):
 - dedup: different satellites, ≤ 1 km, ≤ 90 min apart = one detection cluster (the union-find
@@ -46,13 +47,14 @@ import numpy as np
 import pandas as pd
 
 from app.ingestion.runs import RunOutcome, RunRecorder, new_run_id
+from app.services import fire_classify as fc
 from app.services import fire_regions as fr
 from app.services.fires import PK_TZ, blob_paths, parse_firms_csv
 
 logger = logging.getLogger(__name__)
 
 TASK = "fires-aggregate"
-SCHEMA_VERSION = 2                   # 2: n_n20_* metrics, rows_by_satellite, pkt_from; a lower manifest version forces a backfill
+SCHEMA_VERSION = 3                   # 2: n_n20_* metrics, rows_by_satellite, pkt_from; 3: source classification; a lower manifest version forces a backfill
 AGG_PREFIX = "hindcast/firms/agg"
 MANIFEST_PATH = f"{AGG_PREFIX}/manifest.json"
 DAILY_PATH = f"{AGG_PREFIX}/daily_regions.parquet"
@@ -66,9 +68,11 @@ DEDUP_RULE = {"different_satellites": True, "max_km": fr.DEDUP_KM, "max_minutes"
               "primary": "highest FRP", "merged_frp": "max"}
 
 DET_COLUMNS = ["pk_day", "acq_utc", "lat", "lon", "frp", "confidence", "satellite", "day_basis", "daynight",
-               "country", "province", "district", "cell_id", "dup_group", "is_primary", "grp_hn"]
+               "country", "province", "district", "cell_id", "dup_group", "is_primary", "grp_hn",
+               "source_class", "class_reasons", "crop_frac"]
 REGION_METRICS = ["n_raw", "n_hn", "n_dedup", "n_dedup_hn", "n_high", "n_nominal", "n_low", "n_day", "n_night",
-                  "frp_raw", "frp_hn", "frp_dedup_hn", "frp_max", "n_n20_raw", "n_n20_hn", "frp_n20_hn"]
+                  "frp_raw", "frp_hn", "frp_dedup_hn", "frp_max", "n_n20_raw", "n_n20_hn", "frp_n20_hn",
+                  "n_crop_hn", "n_other_hn", "n_uncertain_hn", "frp_crop_hn", "n_crop_n20_hn", "frp_crop_n20_hn"]
 
 
 def year_path(year: int) -> str:
@@ -90,8 +94,10 @@ def _confidence(c: str) -> str:
     return {"high": "h", "nominal": "n", "low": "l"}.get(c, c[:1] if c else "")
 
 
-def build_day(day: date, csv_text: str, meta: Optional[Dict[str, Any]], idx: Optional[fr.RegionIndex] = None) -> DayBuild:
-    """Attribute, deduplicate and roll up one day file. Pure: no I/O."""
+def build_day(day: date, csv_text: str, meta: Optional[Dict[str, Any]], idx: Optional[fr.RegionIndex] = None,
+              classifier: Optional[fc.ClassInputs] = None) -> DayBuild:
+    """Attribute, deduplicate, classify and roll up one day file. Pure: no I/O. Without `classifier`
+    every row is 'uncertain' with the no-mask reason (callers that have the inputs pass them)."""
     header = (csv_text or "").split("\n", 1)[0]
     fmt = "pkt_v2" if "acq_time" in header else "utc_v1"
     rows = parse_firms_csv(csv_text or "")
@@ -112,13 +118,17 @@ def build_day(day: date, csv_text: str, meta: Optional[Dict[str, Any]], idx: Opt
     if n:
         has = pd.Series(hn).groupby(groups).transform("any").to_numpy()
         grp_hn = has.astype(bool)
+    cells = fr.cell_id(lat, lon) if n else np.zeros(0, dtype=np.int64)
+    dn = fr.day_night(hours)
+    cls, reasons, cfrac = fc.classify(lat, lon, [day] * n, dn, cells, classifier)
     det = pd.DataFrame({
         "pk_day": [day] * n, "acq_utc": acq, "lat": lat.astype(np.float32), "lon": lon.astype(np.float32),
         "frp": frp.astype(np.float32), "confidence": conf, "satellite": sat,
-        "day_basis": ["acq_pkt" if fmt == "pkt_v2" else "acq_utc"] * n, "daynight": fr.day_night(hours),
+        "day_basis": ["acq_pkt" if fmt == "pkt_v2" else "acq_utc"] * n, "daynight": dn,
         "country": attr["country"], "province": attr["province"], "district": attr["district"],
-        "cell_id": fr.cell_id(lat, lon) if n else np.zeros(0, dtype=np.int64),
+        "cell_id": cells,
         "dup_group": groups.astype(np.int32), "is_primary": primary, "grp_hn": grp_hn,
+        "source_class": cls, "class_reasons": reasons.astype(np.int16), "crop_frac": cfrac.astype(np.float32),
     }, columns=DET_COLUMNS)
     regions = rollup_regions(det)
     meta = meta or {}
@@ -129,6 +139,7 @@ def build_day(day: date, csv_text: str, meta: Optional[Dict[str, Any]], idx: Opt
         "observation_period": meta.get("observation_period"), "fetched_at": meta.get("fetched_at"),
         "n_dedup_hn": int((primary & grp_hn).sum()),
         "rows_by_satellite": {k: int(v) for k, v in keys.value_counts().items()} if n else {},
+        "n_crop_hn": int((primary & grp_hn & (cls == "crop")).sum()) if n else 0,
     }
     return DayBuild(day, det, regions, info)
 
@@ -141,6 +152,8 @@ def _metrics(g: pd.DataFrame) -> Dict[str, Any]:
     conf = g["confidence"].to_numpy()
     dn = g["daynight"].to_numpy()
     n20 = np.array([fr.satellite_key(x) == fr.CONSISTENT_SATELLITE for x in g["satellite"].tolist()], dtype=bool)
+    cls = g["source_class"].to_numpy() if "source_class" in g.columns else np.full(len(g), "uncertain", dtype=object)
+    head = prim & ghn
     return {
         "n_raw": int(len(g)), "n_hn": int(hn.sum()), "n_dedup": int(prim.sum()), "n_dedup_hn": int((prim & ghn).sum()),
         "n_high": int((conf == "h").sum()), "n_nominal": int((conf == "n").sum()), "n_low": int((conf == "l").sum()),
@@ -149,6 +162,10 @@ def _metrics(g: pd.DataFrame) -> Dict[str, Any]:
         "frp_dedup_hn": round(float(frp[prim & ghn].sum()), 1), "frp_max": round(float(frp.max()), 1) if len(frp) else 0.0,
         # consistent-satellite series: NOAA-20 rows alone (same-satellite pixels never merge, so no dedup is needed)
         "n_n20_raw": int(n20.sum()), "n_n20_hn": int((n20 & hn).sum()), "frp_n20_hn": round(float(frp[n20 & hn].sum()), 1),
+        # source classes of the headline clusters (the primary row's class) and of the NOAA-20 rows
+        "n_crop_hn": int((head & (cls == "crop")).sum()), "n_other_hn": int((head & (cls == "other")).sum()),
+        "n_uncertain_hn": int((head & (cls == "uncertain")).sum()), "frp_crop_hn": round(float(frp[head & (cls == "crop")].sum()), 1),
+        "n_crop_n20_hn": int((n20 & hn & (cls == "crop")).sum()), "frp_crop_n20_hn": round(float(frp[n20 & hn & (cls == "crop")].sum()), 1),
     }
 
 
@@ -360,6 +377,8 @@ class FireAggregateTask:
             return
 
         idx = fr.load_region_index()
+        classifier = fc.load_inputs(bucket)
+        outcome.details["classification"] = fc.describe(classifier)
         day_records: Dict[str, Dict[str, Any]] = dict(manifest.get("days", {}))
         region_frames: List[pd.DataFrame] = []
         touched_days: List[date] = []
@@ -378,7 +397,7 @@ class FireAggregateTask:
                     try:
                         if text is None:
                             raise FileNotFoundError(blob_paths(d)[0])
-                        built = build_day(d, text, meta, idx)
+                        built = build_day(d, text, meta, idx, classifier)
                     except Exception as exc:  # noqa: BLE001
                         c.failed += 1
                         failures.append({"day": d.isoformat(), "error": f"{type(exc).__name__}: {exc}"[:200]})
@@ -418,6 +437,7 @@ class FireAggregateTask:
             "schema_version": SCHEMA_VERSION, "built_at": built_at, "run_id": outcome.run_id,
             "dedup_rule": DEDUP_RULE, "cell_size_deg": fr.CELL_DEG, "day_prefix": DAY_PREFIX,
             "consistent_satellite": fr.CONSISTENT_SATELLITE,
+            "classification": fc.describe(classifier),
             "low_confidence_from": pkt_from, "pkt_from": pkt_from,
             "days": dict(sorted(day_records.items())), "suspect_days": suspects,
         }
@@ -500,7 +520,7 @@ class AggStore:
             return hit[1]
         csv_path, meta_path = blob_paths(day)
         text = _read_text(self.bucket, csv_path)
-        built = build_day(day, text, _read_json(self.bucket, meta_path)) if text is not None else None
+        built = build_day(day, text, _read_json(self.bucket, meta_path), None, fc.default_inputs()) if text is not None else None
         if len(self._csv_days) >= 20:
             self._csv_days.pop(next(iter(self._csv_days)))
         self._csv_days[day] = (time.monotonic(), built)

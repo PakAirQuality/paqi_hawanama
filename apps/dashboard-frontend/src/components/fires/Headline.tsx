@@ -1,6 +1,6 @@
 'use client'
 
-import type { SeasonsResponse } from './api'
+import { isCropBasis, isN20Basis, type SeasonsResponse } from './api'
 import { fmtInt, fmtMw, fmtShare } from './format'
 import { headlineParts } from './headlineText'
 
@@ -22,7 +22,7 @@ export function Headline({ data, regionLabel }: { data: SeasonsResponse; regionL
       <p className="mt-1.5 text-[13px] text-slate-600">{p.subline}</p>
       {data.note && <p className="mt-1 text-[12px] text-slate-500">{data.note}</p>}
       <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-5">
-        <Stat label="Detections season to date" value={fmtInt(h.fires)} hint={data.basis === 'n20' ? 'NOAA-20 only' : 'all satellites, deduplicated'} />
+        <Stat label={isCropBasis(data.basis ?? 'all') ? 'Likely crop-residue, season to date' : 'Detections season to date'} value={fmtInt(h.fires)} hint={isN20Basis(data.basis ?? 'all') ? 'NOAA-20 only' : 'all satellites, deduplicated'} />
         <Stat label="Detections a day" value={h.fires_per_day == null ? '—' : fmtInt(h.fires_per_day)} />
         {n20 ? (
           <Stat label="NOAA-20 only" value={fmtInt(n20.fires)} hint={n20.last_year ? `${fmtInt(n20.last_year.fires)} on the same dates in ${n20.last_year.year}` : 'the comparable series'} />
