@@ -585,13 +585,47 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
     if missing:
         caveats.append(f"{len(missing)} day(s) in the window have no fire file: {', '.join(missing[:5])}" + (" …" if len(missing) > 5 else ""))
     out = {"region": {"kind": kind, "name": rname}, "window": _window_dict(start, end), "season": season_name, "bucket": bucket,
-           "basis": basis, "summary": summary, "rows": rows, "comparison": comparison, "caveats": caveats, "definitions": FIRE_DEFINITIONS,
+           "basis": basis, "summary": summary, "rows": rows, "comparison": comparison,
+           "season_progress": _season_progress(region, season_name, basis, store, today) if season_name else None,
+           "caveats": caveats, "definitions": FIRE_DEFINITIONS,
            "store_built_at": manifest.get("built_at")}
     if season_name == "kharif_rice_residue":
         out["season_window_note"] = SEASON_WINDOW_NOTE
     if note:
         out["note"] = note
     return out
+
+
+def _season_progress(region: str, season_key: str, basis: str, store: AggStore, today: date) -> Optional[Dict[str, Any]]:
+    """Cumulative position and timing of the season, from the public seasons helper, on the comparable basis
+    (NOAA-20 only; crop_n20 when a crop basis was asked). Whole-season totals and p10/p50/p90 dates exist for
+    complete seasons only; a mid-season shortfall can be lateness rather than less burning."""
+    from app.services import fire_public as fp   # lazy: fire_public imports this module
+    sid = next((k for k, v in fp.SEASON_IDS.items() if v == season_key), None)
+    if sid is None:
+        return None
+    b = {"all": "n20", "crop": "crop_n20"}.get(basis, basis)
+    try:
+        out = fp.seasons(region, sid, b, store=store, today=today)
+    except Exception as exc:                      # the trends answer must not fail on the progress block
+        return {"note": f"season progress unavailable: {exc}"}
+    if "error" in out:
+        return {"note": out["error"]}
+    rows = [{"year": y["year"], "role": y["role"], "to_same_date": y["total_to_date"],
+             "whole_season": y["total"] if y["complete"] else None, "complete": y["complete"], "timing": y["timing"]}
+            for y in out["years"]]
+    cur = next((y for y in rows if y["role"] == "current"), None)
+    last = next((y for y in rows if y["role"] == "last"), None)
+    refs = [y for y in rows if y["role"] != "current" and y["whole_season"]]
+    cum = cur["to_same_date"] if cur else None
+    ref_mean = (sum(y["whole_season"] for y in refs) / len(refs)) if refs else None
+    return {"basis": b, "basis_label": fp.BASES[b], "season": out["season"],
+            "cumulative_to_date": cum,
+            "share_of_last_season_total": round(cum / last["whole_season"], 2) if cum is not None and last and last["whole_season"] else None,
+            "share_of_reference_mean_total": round(cum / ref_mean, 2) if cum is not None and ref_mean else None,
+            "years": rows, "timing_method": out["method"]["timing"],
+            "note": "a cumulative shortfall part-way through the season can be a late season rather than a smaller one; "
+                    "only the completed season settles it. Timing dates (p10/p50/p90) exist for complete seasons only."}
 
 
 def compare_years_same_dates(daily: pd.DataFrame, kind: str, rname: str, start: date, end: date, s: pd.DataFrame, observed: set,
