@@ -1,4 +1,4 @@
-import type { SeasonsResponse } from './api'
+import { isCropBasis, isN20Basis, type SeasonsResponse } from './api'
 import { dayLabel, fmtInt } from './format'
 
 export interface HeadlineParts {
@@ -33,18 +33,22 @@ export function headlineParts(data: SeasonsResponse, regionLabel: string): Headl
     ? `In the ${seasonYear} season (${dayLabel(data.season.start)} – ${dayLabel(data.season.end)}${gapNote})`
     : `So far this season (${dates}${gapNote})`
   const cmp = h.comparison_n20 ?? h
-  const onN20 = h.comparison_n20 != null || data.basis === 'n20'
+  const basis = data.basis ?? 'all'
+  const crop = isCropBasis(basis)
+  const onN20 = h.comparison_n20 != null || isN20Basis(basis)
   const ref = cmp.reference
   const refYears = ref.used_years.length ? `${ref.used_years[0]}–${ref.used_years[ref.used_years.length - 1]}` : null
-  const basisSentence = data.basis === 'n20'
-    ? 'Counts are NOAA-20 detections alone, the satellite flown every year since 2020, so the series is comparable across years.'
+  const what = crop ? 'detections classified as likely crop-residue burning (cropland, harvest window, no listed kiln or industrial site within 1 km, not a persistent out-of-season cell; an unvalidated classification)' : 'deduplicated detection clusters'
+  const basisSentence = isN20Basis(basis)
+    ? `Counts are ${what} from NOAA-20 alone, the satellite flown every year since 2020, so the series is comparable across years.`
     : onN20
-      ? 'Counts are deduplicated detection clusters from every satellite flown that day; the year-on-year figures hold the satellite fixed (NOAA-20 only), because deduplication cannot remove the extra fires an added satellite sees.'
-      : 'Counts are deduplicated detection clusters from every satellite flown that day; the satellite roster changed over the years, so the year-on-year figures are indicative only.'
+      ? `Counts are ${what} from every satellite flown that day; the year-on-year figures hold the satellite fixed (NOAA-20 only), because deduplication cannot remove the extra fires an added satellite sees.`
+      : `Counts are ${what} from every satellite flown that day; the satellite roster changed over the years, so the year-on-year figures are indicative only.`
+  const unitBase = crop ? 'likely crop-residue fire detection' : 'fire detection'
   return {
     lead,
     count: fmtInt(h.fires),
-    unit: h.fires === 1 ? 'fire detection' : 'fire detections',
+    unit: h.fires === 1 ? unitBase : `${unitBase}s`,
     vsLast: cmp.last_year ? compare(cmp.last_year.pct_change, `the same dates in ${cmp.last_year.year}`) : null,
     vsRef: refYears && ref.pct_change != null ? compare(ref.pct_change, `the ${refYears} average on those dates`) : null,
     rank: ref.rank_text,

@@ -27,6 +27,7 @@ from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
+from app.services import fire_classify as fc
 from app.services import fire_regions as fr
 from app.services.fire_aggregates import AggStore, DayBuild, agg_store
 from app.services.fires import PK_TZ
@@ -40,17 +41,22 @@ MAX_ROWS = 60
 PERSISTENT_WINDOW_DAYS = 30
 REFERENCE_YEARS = (2020, 2021, 2022, 2023, 2024, 2025)
 SEASONS = {
-    "kharif_rice_residue": ("09-15", "11-30"),   # rice stubble before wheat sowing: the ISRO/CAQM paddy-residue reporting window
-    "rabi_wheat_residue": ("04-15", "05-31"),    # wheat stubble before rice transplanting
+    "kharif_rice_residue": fc.HARVEST_WINDOWS["rice"],     # rice stubble before wheat sowing: the ISRO/CAQM paddy-residue reporting window
+    "rabi_wheat_residue": fc.HARVEST_WINDOWS["wheat"],     # wheat stubble before rice transplanting
 }
 SEASON_WINDOW_NOTE = ("The rice window follows the ISRO/CAQM paddy-residue protocol (15 Sep – 30 Nov); earlier Hawanama reports "
                       "used 1 Oct – 30 Nov. Pakistan Punjab burning before 1 Oct is shown so the choice can be checked.")
 BASES = {"all": "every satellite flown that day (deduplicated across satellites, high/nominal confidence)",
          "n20": "NOAA-20 detections only (high/nominal confidence): the consistent series for year comparisons, since NOAA-20 "
-                "flew and was processed in every archive year while Suomi NPP and NOAA-21 came and went"}
-COUNT_COL = {"all": "n_dedup_hn", "n20": "n_n20_hn"}
-FRP_COL = {"all": "frp_dedup_hn", "n20": "frp_n20_hn"}
-SERIES_COLS = ["n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night", "n_n20_hn", "frp_n20_hn"]
+                "flew and was processed in every archive year while Suomi NPP and NOAA-21 came and went",
+         "crop": f"likely crop-residue clusters only (class {fc.CLASS_VERSION}: {fc.RULES['crop']}); every satellite, deduplicated",
+         "crop_n20": f"likely crop-residue detections (class {fc.CLASS_VERSION}) from NOAA-20 only: the crop series comparable across years"}
+BASIS_SCHEMA = {"all": 0, "n20": 2, "crop": 3, "crop_n20": 3}          # store schema a basis needs
+COUNT_COL = {"all": "n_dedup_hn", "n20": "n_n20_hn", "crop": "n_crop_hn", "crop_n20": "n_crop_n20_hn"}
+FRP_COL = {"all": "frp_dedup_hn", "n20": "frp_n20_hn", "crop": "frp_crop_hn", "crop_n20": "frp_crop_n20_hn"}
+SERIES_COLS = ["n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night", "n_n20_hn", "frp_n20_hn",
+               "n_crop_hn", "n_other_hn", "n_uncertain_hn", "frp_crop_hn", "n_crop_n20_hn", "frp_crop_n20_hn"]
+N20_BASES = ("n20", "crop_n20")
 SEASON_ALIASES = {"rice": "kharif_rice_residue", "kharif": "kharif_rice_residue", "autumn": "kharif_rice_residue",
                   "october": "kharif_rice_residue", "november": "kharif_rice_residue", "winter": "kharif_rice_residue",
                   "wheat": "rabi_wheat_residue", "rabi": "rabi_wheat_residue", "spring": "rabi_wheat_residue",
@@ -61,7 +67,8 @@ FIRE_DEFINITIONS = {
     "fire": "a deduplicated detection cluster: detections from different satellites within 1 km and 90 minutes are grouped (transitively) and counted once, highest FRP kept. A cluster is not a verified individual fire: neighbouring burning fields can merge and one incident can still leave several clusters",
     "headline_count": "deduplicated detection clusters with at least one high- or nominal-confidence detection; 'fires' in the text means these clusters. Raw detections and low-confidence rows are reported separately",
     "comparison_basis": "year-on-year comparisons use the NOAA-20-only series (basis n20): deduplication cannot remove the extra fires an added satellite sees, so the roster change (Suomi NPP + NOAA-20 in 2020–2025, NOAA-21 added in 2026, Suomi NPP retired 2026-11-01) is handled by holding the satellite fixed",
-    "what_burns": "a thermal detection does not identify what burns; until the crop-residue classification ships, counts in cropland during the harvest windows are 'detections in the burning season', not 'crop-residue fires'",
+    "what_burns": f"a thermal detection does not identify what burns. The store classifies each detection (class {fc.CLASS_VERSION}) as likely crop-residue burning, likely other source or uncertain from the cropland share around it, the harvest window, listed kilns and industrial sites, and out-of-season persistence; the classification is unvalidated until the labelled sample is scored, so say 'likely crop-residue detections', never 'crop fires'",
+    "classification": f"crop: {fc.RULES['crop']}. other: {fc.RULES['other']}. uncertain: {fc.RULES['uncertain']}. Night is a reason only.",
     "frp": "fire radiative power in megawatts summed over deduplicated fires: burning intensity, not a PM2.5 contribution",
     "day": "Pakistan calendar day (Asia/Karachi): the ~13:00 PKT day pass and the ~01:00 PKT night pass of that date",
     "day_basis": "acq_pkt = keyed by Pakistan day with pass times; acq_utc = older archive days keyed by UTC date without pass times",
@@ -476,11 +483,12 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
         return {"message": f"basis must be one of {', '.join(BASES)}."}
     manifest = store.manifest()
     days_with_file = {date.fromisoformat(k) for k in manifest.get("days", {})}
-    has_n20 = int(manifest.get("schema_version") or 0) >= 2
+    schema = int(manifest.get("schema_version") or 0)
+    has_n20 = schema >= 2
     n20_days = satellite_days(manifest, fr.CONSISTENT_SATELLITE) if has_n20 else set()
-    if basis == "n20" and not has_n20:
-        return {"message": "The NOAA-20-only basis needs the rebuilt store (schema 2); ask again after the next aggregate run."}
-    observed = days_with_file & n20_days if basis == "n20" else days_with_file
+    if schema < BASIS_SCHEMA[basis]:
+        return {"message": f"The '{basis}' basis needs the rebuilt store (schema {BASIS_SCHEMA[basis]}); ask again after the next aggregate run."}
+    observed = days_with_file & n20_days if basis in N20_BASES else days_with_file
     cnt, frpc = COUNT_COL[basis], FRP_COL[basis]
     daily = store.daily_regions()
     s = _series(daily, kind, rname, start, end, observed)
@@ -502,6 +510,13 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
         n20_valid = s[s["pk_day"].isin(n20_days) & s["has_file"]]
         summary["noaa20_only"] = {"fires": int(n20_valid["n_n20_hn"].sum()) if len(n20_valid) else 0, "days_with_data": int(len(n20_valid)),
                                   "note": "NOAA-20 detections alone; the series to compare across years"}
+    if schema >= 3 and basis in ("all", "n20") and len(valid):
+        tot = max(int(valid["n_dedup_hn"].sum()), 1)
+        summary["source_classes"] = {"class_version": manifest.get("classification", {}).get("class_version", fc.CLASS_VERSION),
+                                     "crop": int(valid["n_crop_hn"].sum()), "other": int(valid["n_other_hn"].sum()),
+                                     "uncertain": int(valid["n_uncertain_hn"].sum()),
+                                     "crop_share": _r(valid["n_crop_hn"].sum() / tot, 2),
+                                     "note": "of the all-satellite headline clusters; unvalidated classification"}
     if kind == "country" and rname == "Pakistan":
         share = {}
         for lab in fr.COUNTRY_LABELS.values():
@@ -540,11 +555,12 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
     if compare_years:
         comparison = compare_years_same_dates(daily, kind, rname, start, end, s, observed, cnt, frpc, compare_years)
         comparison["basis"] = basis
-        if has_n20 and basis != "n20":
+        if has_n20 and basis not in N20_BASES:
+            b20 = "crop_n20" if basis == "crop" else "n20"
             s20 = _series(daily, kind, rname, start, end, days_with_file & n20_days)
-            c20 = compare_years_same_dates(daily, kind, rname, start, end, s20, days_with_file & n20_days, "n_n20_hn", "frp_n20_hn", compare_years)
-            c20["basis"] = "n20"
-            comparison["noaa20_only"] = {"fires": int(s20.loc[s20["has_file"], "n_n20_hn"].sum()) if s20["has_file"].any() else 0, **c20,
+            c20 = compare_years_same_dates(daily, kind, rname, start, end, s20, days_with_file & n20_days, COUNT_COL[b20], FRP_COL[b20], compare_years)
+            c20["basis"] = b20
+            comparison["noaa20_only"] = {"fires": int(s20.loc[s20["has_file"], COUNT_COL[b20]].sum()) if s20["has_file"].any() else 0, **c20,
                                          "note": "Quote this block for 'more or fewer than last year': the satellite is held fixed."}
     caveats = [FIRE_DEFINITIONS["headline_count"], FIRE_DEFINITIONS["what_burns"]]
     if any(d.year < 2026 for d in s["pk_day"]) or comparison:

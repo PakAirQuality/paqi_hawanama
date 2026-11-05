@@ -68,7 +68,7 @@ function FiresPageInner() {
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <SeasonToggle value={season} onChange={s => set({ season: s })} />
-          <BasisToggle value={basis} onChange={b => set({ basis: b })} available={meta.data?.n20_basis_available !== false} />
+          <BasisToggle value={basis} onChange={b => set({ basis: b })} available={meta.data?.bases_available} />
         </div>
       </div>
       <RegionChips value={region} onChange={r => set({ region: r })} districts={meta.data?.districts} />

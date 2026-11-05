@@ -43,6 +43,15 @@ export function BorderSplit({ data }: { data: SplitResponse }) {
           </BarChart>
         </ResponsiveContainer>
       </div>
+      {data.classes && (
+        <p className="mt-1.5 text-[11px] text-slate-500">
+          Source classes (class {data.class_version ?? '—'}, unvalidated): {(['pakistan_punjab', 'indian_punjab', 'haryana'] as const).filter(k => data.classes?.[k]).map(k => {
+            const c = data.classes![k]
+            const tot = c.crop + c.other + c.uncertain
+            return `${data.labels[k]} ${tot ? Math.round((c.crop / tot) * 100) : 0}% likely crop-residue, ${tot ? Math.round((c.other / tot) * 100) : 0}% likely other`
+          }).join(' · ')}.
+        </p>
+      )}
       <p className="mt-1.5 text-[11px] text-slate-500">
         {fmtInt(grand)} detection clusters in the box season to date{data.totals.pakistan_punjab != null ? ` (Pakistan Punjab ${fmtInt(data.totals.pakistan_punjab)} of Pakistan's ${fmtInt(data.totals.pakistan)})` : ''}{data.days_missing ? `; ${data.days_missing} day(s) unobserved` : ''}. Other = Rajasthan, J&K, Himachal, Afghanistan, Iran.{data.basis === 'n20' ? ' NOAA-20 only.' : ''}
       </p>

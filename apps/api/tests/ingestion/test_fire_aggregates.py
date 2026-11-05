@@ -155,7 +155,7 @@ async def test_task_backfill_then_incremental(tmp_path):
     assert out.counts.rows_fetched == 8 and out.counts.rows_written == 8 and out.details["years_written"] == [2020, 2026]
     assert set(b.writes) == {fa.year_path(2020), fa.year_path(2026), fa.DAILY_PATH, fa.MANIFEST_PATH}
     m = json.loads(b.store[fa.MANIFEST_PATH])
-    assert m["schema_version"] == 2 and m["low_confidence_from"] == "2026-11-03" and m["pkt_from"] == "2026-11-03"
+    assert m["schema_version"] == 3 and m["low_confidence_from"] == "2026-11-03" and m["pkt_from"] == "2026-11-03"
     assert set(m["days"]) == {"2020-11-05", "2026-11-03", "2026-11-04"} and m["consistent_satellite"] == "n20"
     assert m["days"]["2026-11-04"]["rows_by_satellite"] == {}
     assert m["days"]["2026-11-04"]["status"] == "partial" and m["days"]["2026-11-04"]["rows"] == 0
@@ -195,8 +195,8 @@ async def test_task_backfill_then_incremental(tmp_path):
     b.store[fa.MANIFEST_PATH] = json.dumps(m)
     b.writes.clear()
     out4 = await _task(tmp_path, b).run(backfill=False)
-    assert out4.details["schema_upgrade"] == {"from": 1, "to": 2} and out4.details["days_built"] == 3 and set(out4.details["years_written"]) == {2020, 2026}
-    assert json.loads(b.store[fa.MANIFEST_PATH])["schema_version"] == 2
+    assert out4.details["schema_upgrade"] == {"from": 1, "to": 3} and out4.details["days_built"] == 3 and set(out4.details["years_written"]) == {2020, 2026}
+    assert json.loads(b.store[fa.MANIFEST_PATH])["schema_version"] == 3
 
 
 def test_store_fills_missing_metrics_from_an_older_build():
@@ -212,10 +212,10 @@ async def test_task_reports_a_broken_day_as_partial_and_all_broken_as_failed(tmp
     b = _bucket()
     real = fa.build_day
 
-    def boom(day, text, meta, idx=None):
+    def boom(day, text, meta, idx=None, classifier=None):
         if day == date(2026, 11, 3):
             raise ValueError("bad csv")
-        return real(day, text, meta, idx)
+        return real(day, text, meta, idx, classifier)
     monkeypatch.setattr(fa, "build_day", boom)
     out = await _task(tmp_path, b).run(backfill=True)
     assert out.status is RunStatus.partial and (out.counts.completed, out.counts.failed) == (2, 1)

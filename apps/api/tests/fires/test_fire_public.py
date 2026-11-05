@@ -80,7 +80,7 @@ def test_seasons_alignment_headline_and_comparison():
     b20 = fp.seasons("pakistan", "rice", "n20", store=_store(), today=TODAY)
     assert b20["basis"] == "n20" and b20["headline"]["fires"] == 3 and "comparison_n20" not in b20["headline"]
     assert next(y for y in b20["years"] if y["year"] == 2025)["total"] == 24
-    assert fp.seasons("pakistan", "rice", "snpp", store=_store(), today=TODAY) == {"error": "basis must be one of all, n20"}
+    assert fp.seasons("pakistan", "rice", "snpp", store=_store(), today=TODAY) == {"error": "basis must be one of all, n20, crop, crop_n20"}
     # a plain "Punjab" chip is Pakistan's Punjab
     pb = fp.seasons("punjab", "rice", store=_store(), today=TODAY)
     assert pb["region"]["name"] == "Punjab" and pb["headline"]["fires"] == 3
@@ -148,7 +148,7 @@ def test_districts_split_persistent_and_meta():
     assert m["archive"]["gaps"]["rice"]["2026"] == [["2026-09-15", "2026-10-31"]] and "2024" in m["archive"]["gaps"]["rice"]
     assert m["satellites_by_year"]["2026"] == ["NOAA-20", "NOAA-21"] and m["regions"][0]["id"] == "pakistan" and len(m["notes"]) == 7
     assert m["archive"]["first_day"] == "2024-11-01" and m["archive"]["last_day"] == "2026-11-03"
-    assert m["n20_basis_available"] is True and m["consistent_satellite"] == "NOAA-20" and set(m["bases"]) == {"all", "n20"}
+    assert m["n20_basis_available"] is True and m["consistent_satellite"] == "NOAA-20" and set(m["bases"]) == {"all", "n20", "crop", "crop_n20"}
     assert "ISRO/CAQM" in m["season_window_note"] and m["archive"]["days_without_pass_by_year"] == {"2026": {"n21": 1}}   # 1 Nov has N20 rows only
 
 
@@ -170,3 +170,20 @@ def test_memo_keys_and_resolution():
     assert fp.resolve_public_region("kp")[0] == ("province", "Khyber Pakhtunkhwa") and fp.resolve_public_region("indian-punjab")[1] == "Indian Punjab"
     assert fp.resolve_public_region("Haryana")[0] == ("india_state", "Haryana (IN)") and fp.resolve_public_region("Sheikhpura")[0] == ("district", "Sheikhpura")
     assert fp.resolve_public_region("Narnia")[0] is None
+
+
+def test_audit_counts_files_products_and_missing_passes():
+    store = _store()
+    m = store.manifest()
+    m["days"]["2026-11-02"]["rows"] = 500                       # a busy peak-month day …
+    m["days"]["2026-11-02"]["rows_by_satellite"] = {"n21": 500}  # … on which NOAA-20 contributed nothing: a missing pass
+    out = fp.audit(store=store, today=TODAY)
+    y26 = out["years"]["2026"]
+    assert y26["days_with_file"] == 3 and y26["day_basis"] == {"acq_pkt": 3, "acq_utc": 0} and y26["products"] == {"NRT": 6}
+    assert y26["peak_days"] == 3 and y26["peak_days_busy"] == 1
+    assert y26["satellites"]["n20"]["busy_days_missing"] == 1 and y26["satellites"]["n20"]["busy_days_missing_dates"] == ["2026-11-02"]
+    assert y26["satellites"]["n21"]["days_with_rows"] == 2 and y26["satellites"]["n20"]["days_with_rows"] == 2
+    assert "snpp" not in y26["satellites"]                                                            # retired on 1 Nov 2026: not expected after that
+    y25 = out["years"]["2025"]
+    assert y25["products"] == {"legacy": 6} and y25["satellites"] == {} and y25["suspect_days"] == []   # no rows_by_satellite before schema 2
+    assert "missing_pass" in out["method"]

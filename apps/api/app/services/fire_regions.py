@@ -44,6 +44,7 @@ DEDUP_KM = 1.0                  # two VIIRS pixels (375 m) plus geolocation erro
 DEDUP_MINUTES = 90              # one inter-satellite gap (~50 min) plus slack
 CONE_HALF_DEG = 60.0            # upwind cone half-width
 DAY_UTC_HOURS = (3, 15)         # VIIRS day passes ~07:30–09:30 UTC, night ~19:30–21:30 UTC
+KM_PER_DEG_MIN = 85.0           # 1° of longitude at the box's northern edge (37°N) ≈ 88.7 km: the search radius in degrees uses this
 INDIA_REGIONS = ("Punjab (IN)", "Haryana (IN)")
 COUNTRY_LABELS = {"PK": "Pakistan", "IN": "India (Punjab+Haryana)", "XX": "other in bbox"}
 
@@ -242,8 +243,10 @@ def dedup_groups(lats: Sequence[float], lons: Sequence[float], sats: Sequence[st
     t_a = np.array([np.nan if t is None else float(t) for t in acq_minutes], dtype=float)
     pts = shapely.points(lon_a, lat_a)
     tree = STRtree(pts)
-    # max_km in degrees of latitude is a safe search radius (longitude degrees are shorter here)
-    ai, bi = tree.query(pts, predicate="dwithin", distance=max_km / 111.0 * 1.001)
+    # a degree of longitude is *shorter* in km than a degree of latitude here, so a radius in degrees must be
+    # wide enough for the longitude scale; the km test below is what decides (the old 1/111° radius missed
+    # east–west pairs between ~0.9 and 1 km apart)
+    ai, bi = tree.query(pts, predicate="dwithin", distance=max_km / KM_PER_DEG_MIN)
     m = ai < bi
     ai, bi = ai[m], bi[m]
     if len(ai):

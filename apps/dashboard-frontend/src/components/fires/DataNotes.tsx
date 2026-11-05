@@ -19,6 +19,9 @@ export function DataNotes({ meta, season, basis }: { meta?: FiresMeta; season: S
         <li><span className="font-medium text-slate-700">Counting basis on this page:</span> {meta.bases?.[basis] ?? (basis === 'n20' ? 'NOAA-20 only' : 'all satellites')}.</li>
         {meta.notes.map((n, i) => <li key={i}>{n}</li>)}
         {season === 'rice' && meta.season_window_note && <li>{meta.season_window_note}</li>}
+        {meta.classification?.available && (
+          <li><span className="font-medium text-slate-700">Source classes (class {meta.classification.class_version}):</span> likely crop-residue = {meta.classification.rules.crop}; likely other = {meta.classification.rules.other}; uncertain = {meta.classification.rules.uncertain}. Cropland is ESA WorldCover 2021 (CC BY 4.0); kilns and industrial sites come from the APAD/Zenodo kiln inventory, OpenStreetMap and the emission-source list. {meta.classification.rules.status}.</li>
+        )}
         <li><span className="font-medium text-slate-700">Satellites counted:</span> {roster.join(' · ')}.</li>
         {noPass.length > 0 && <li><span className="font-medium text-slate-700">Days with a file but no rows from one satellite (a missing pass, shown as a gap on that basis):</span> {noPass.join(' · ')}.</li>}
         {gapText.length > 0 && <li><span className="font-medium text-slate-700">Days without a file in this season:</span> {gapText.join(' · ')}.</li>}
