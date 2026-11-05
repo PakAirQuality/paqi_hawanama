@@ -226,7 +226,10 @@ def test_trends_regions_seasons_weeks_and_messages():
     assert x.season_window("wheat", today=D3) == (date(2026, 4, 15), date(2026, 5, 31), "rabi_wheat_residue")
     assert x.season_window("monsoon", today=D3) is None and x.current_season(D3) == "kharif_rice_residue" and x.current_season(date(2026, 7, 1)) is None
     season = x.fire_trends("Pakistan", season="rice", store=store, today=D3, compare_years=())
-    assert season["season"] == "kharif_rice_residue" and season["window"]["start_pkt_day"] == "2026-09-15" and season["window"]["end_pkt_day"] == "2026-11-03"
+    assert season["season"] == "kharif_rice_residue" and season["window"]["start_pkt_day"] == "2026-09-15" and season["window"]["end_pkt_day"] == "2026-11-02"
+    assert any("ends 2026-11-02 (yesterday)" in c for c in season["caveats"])
+    assert x.fire_trends("Pakistan", season="rice", store=store, today=date(2026, 11, 4), compare_years=())["window"]["end_pkt_day"] == "2026-11-03"
+    assert x.fire_trends("Pakistan", D1, D3, store=store, today=D3)["window"]["end_pkt_day"] == "2026-11-03"   # an explicit end is kept
     assert season["summary"]["days_missing"] == 47 and any("no fire file" in c for c in season["caveats"])
     assert "Unknown season" in x.fire_trends("Pakistan", season="monsoon", store=store, today=D3)["message"]
     # > 60 days → ISO-week rows
