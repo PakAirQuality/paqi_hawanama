@@ -658,6 +658,37 @@ resource "google_cloud_scheduler_job" "firms_fire_aggregate" {
 # One log line per run ("SMOKE OUTLOOK: …") feeds the Cloud Monitoring policy. Starts paused.
 # ---------------------------------------------------------------------------
 
+# Trajectories: planned every six hours; stays paused until the Linux HYSPLIT build is in the image
+# (the task is a dry run without it). Backward 72 h to Lahore and Delhi, forward from crop clusters.
+resource "google_cloud_scheduler_job" "fires_trajectories" {
+  name             = "fires-trajectories"
+  description      = "Fires: HYSPLIT trajectories for Lahore and Delhi (dry run until the binary is installed)"
+  schedule         = "10 */6 * * *"
+  time_zone        = "UTC"
+  attempt_deadline = "1200s"
+  paused           = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/fires/trajectories?dry_run=false"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "900s"
+    min_backoff_duration = "120s"
+  }
+}
+
 resource "google_cloud_scheduler_job" "fires_smoke_outlook" {
   name             = "fires-smoke-outlook"
   description      = "Fires: smoke outlook per city from forecast winds and current fires"
