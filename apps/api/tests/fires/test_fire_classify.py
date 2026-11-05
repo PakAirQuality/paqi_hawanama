@@ -108,3 +108,10 @@ def test_build_day_carries_classes_into_the_store_and_the_crop_bases():
     store.manifest()["schema_version"] = 2
     fp._TABLE = None
     assert "schema 3" in fp.seasons("pakistan", "rice", "crop", store=store, today=date(2026, 11, 4))["error"]
+
+
+def test_rules_state_source_coverage():
+    import app.services.fire_classify as fc
+    import app.services.fire_analytics as fa
+    assert "Pakistan lists only" in fc.RULES["coverage"]
+    assert "Pakistan lists only" in fa.FIRE_DEFINITIONS["classification"]

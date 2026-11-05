@@ -73,6 +73,7 @@ RULES = {
     "uncertain": "everything else: mixed land cover, cropland outside the harvest windows, or no mask coverage",
     "night": "recorded as a reason only; it never decides the class",
     "status": "unvalidated until the stratified sample is labelled; precision is reported per class and region, never as completeness",
+    "coverage": "the listed-source rule uses Pakistan lists only (APAD kilns, OSM factories, the emissions inventory); in Indian Punjab and Haryana 'other' comes from land cover and persistent out-of-season cells alone, so kiln-adjacent fires there are not screened out",
 }
 
 
