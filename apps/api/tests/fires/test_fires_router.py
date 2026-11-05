@@ -94,3 +94,25 @@ async def test_cities_endpoint(monkeypatch):
         r = await c.get("/api/v1/fires/cities")
     assert r.status_code == 200 and r.json() == {"cities": [{"id": 10, "name": "Lahore", "province": "Punjab", "lat": 31.52, "lon": 74.35, "stations": 40}], "count": 1}
     assert r.headers["cache-control"] == fires_router.CC_CITIES
+
+
+async def test_outlook_endpoints(client, monkeypatch):
+    doc = {"generated_at": "2026-11-04T06:00:00Z", "today_pkt": "2026-11-04", "model": "ecmwf_ifs025", "fires_as_of": {"days": ["2026-11-03", "2026-11-04"]},
+           "definitions": {}, "caveats": [],
+           "cities": [{"city": "Lahore", "province": "Punjab", "lat": 31.5, "lon": 74.3,
+                       "leads": [{"lead": "D+0", "status": "ok", "band": "low", "upwind_load_mw": 120.0, "by_country": {}, "fires_in_cone": 1, "wind_850": {"from_compass": "NW"}},
+                                 {"lead": "D+1", "status": "ok", "band": "high", "upwind_load_mw": 1500.0, "by_country": {"Pakistan": 9}, "fires_in_cone": 9, "wind_850": {"from_compass": "NW"}}]}],
+           "summary": {"lead": "D+1", "alert": [{"city": "Lahore", "upwind_load_mw": 1500.0, "from_compass": "NW"}], "top": [], "cities_by_band": {"high": ["Lahore"]}, "n_cities": 1}}
+    monkeypatch.setattr(fires_router.fo, "read_latest", lambda bucket=None: doc)
+    monkeypatch.setattr(fires_router.fo, "outlook_status", lambda d, now=None: "ok")
+    async with client as c:
+        r = await c.get("/api/v1/fires/outlook")
+        assert r.status_code == 200 and r.headers["cache-control"] == fires_router.CC_OUTLOOK
+        body = r.json()
+        assert body["status"] == "ok" and body["cities"][0]["d1"] == {"band": "high", "upwind_load_mw": 1500.0, "by_country": {"Pakistan": 9}, "fires_in_cone": 9, "from_compass": "NW"}
+        r = await c.get("/api/v1/fires/outlook?city=lahore")
+        assert r.status_code == 200 and r.json()["city"] == "Lahore" and len(r.json()["leads"]) == 2 and r.json()["others_at_alert_d1"] == []
+        assert (await c.get("/api/v1/fires/outlook?city=atlantis")).status_code == 404
+        monkeypatch.setattr(fires_router.fo, "read_latest", lambda bucket=None: None)
+        fp._MEMO.clear()
+        assert (await c.get("/api/v1/fires/outlook")).json()["status"] == "unavailable"

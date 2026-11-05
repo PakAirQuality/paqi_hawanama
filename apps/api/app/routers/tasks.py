@@ -262,6 +262,22 @@ async def run_fires_aggregate(
         raise HTTPException(status_code=500, detail=f"FIRMS aggregate failed: {e}")
 
 
+@router.post("/tasks/fires/outlook")
+async def run_fires_outlook(
+    request: Request,
+    dry_run: bool = Query(False, description="Build the outlook and report it, but write nothing"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Smoke outlook per city for D+0…D+3 (ECMWF winds × the last two days' fires) → forecasts/smoke_outlook/latest.json."""
+    from app.services.fire_outlook import SmokeOutlookTask
+    try:
+        outcome = await SmokeOutlookTask().run(dry_run=dry_run, trigger=_trigger(request))
+        return _outcome_response(outcome, "Smoke outlook " + ("built (dry run)" if dry_run else "written"))
+    except Exception as e:
+        logger.error("Smoke outlook failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Smoke outlook failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Station registry: province links by one rule (city first, geography second)
 # ---------------------------------------------------------------------------
@@ -360,6 +376,7 @@ async def get_task_status(
                 "POST /tasks/openaq/reconcile",
                 "POST /tasks/icimod/ingest?dry_run=true|false",
                 "POST /tasks/fires/aggregate?backfill=true|false&dry_run=true|false&since=YYYY-MM-DD",
+                "POST /tasks/fires/outlook?dry_run=true|false",
                 "POST /tasks/registry/provinces?dry_run=true|false",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"

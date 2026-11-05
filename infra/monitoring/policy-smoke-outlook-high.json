@@ -1,0 +1,21 @@
+{
+  "displayName": "Hawanama smoke outlook: high upwind fire load for tomorrow",
+  "documentation": {
+    "mimeType": "text/markdown",
+    "content": "The smoke outlook (task fires-outlook on hawanama-ingest) put at least one city in the high or very_high band for D+1: the fires seen in the last two days, carried forward, sit upwind of the city on the ECMWF 850 hPa wind and within a day's transport, with more than 1,000 MW of fire radiative power. It is a smoke-source outlook, not a PM2.5 forecast. See the log line for the cities, `GET /api/v1/fires/outlook` for the full picture, and hawanama.org/fires. Runbook: apps/api/app/services/fire_outlook.py."
+  },
+  "combiner": "OR",
+  "conditions": [{
+    "displayName": "smoke outlook D+1 high or very_high",
+    "conditionMatchedLog": {
+      "filter": "resource.type=\"cloud_run_revision\" AND resource.labels.service_name=\"hawanama-ingest\" AND textPayload:\"SMOKE OUTLOOK: D+1 high\"",
+      "labelExtractors": { "cities": "REGEXP_EXTRACT(textPayload, \"very_high: (.*)\")" }
+    }
+  }],
+  "alertStrategy": {
+    "notificationRateLimit": { "period": "43200s" },
+    "autoClose": "86400s"
+  },
+  "notificationChannels": ["__CHANNEL__"],
+  "enabled": true
+}

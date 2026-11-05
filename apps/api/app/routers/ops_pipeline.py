@@ -1825,6 +1825,7 @@ You are an air quality analyst writing the daily operational brief for Pakistan 
 
 ### Fire Activity
 {fires_text}
+{outlook_text}
 
 ## INSTRUCTIONS
 
@@ -2055,6 +2056,21 @@ def _build_brief_context(
             fires_text += f" (Detections are for {fires_date}, the latest day stored; none stored for {date}.)"
     else:
         fires_text = "FIRMS fire data unavailable for this date and the two days before it."
+    # smoke outlook for the day after the brief's date, when a fresh outlook exists
+    outlook_text = ""
+    try:
+        from app.services import fire_outlook as _fo
+        from app.services.fire_aggregates import default_bucket as _default_bucket
+        odoc = _fo.read_latest(_default_bucket())
+        if odoc and _fo.outlook_status(odoc) == "ok":
+            hits = odoc.get("summary", {}).get("alert", [])
+            if hits:
+                outlook_text = ("Smoke outlook for tomorrow (forecast wind x current fires, fires assumed to persist): high upwind fire load for "
+                                + ", ".join(f"{h['city']} ({h['upwind_load_mw']:,.0f} MW from the {h['from_compass']})" for h in hits[:6]) + ".")
+            else:
+                outlook_text = "Smoke outlook for tomorrow: no city above the elevated band of upwind fire load."
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("Brief smoke outlook unavailable: %s", exc)
 
     return {
         "station_count": str(station_count),
@@ -2071,6 +2087,7 @@ def _build_brief_context(
         "enhanced_mean": str(enhanced_mean),
         "enhanced_bias": str(enhanced_bias),
         "fires_text": fires_text,
+        "outlook_text": outlook_text,
     }
 
 

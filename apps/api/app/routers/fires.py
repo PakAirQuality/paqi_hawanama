@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Callable, Dict, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_database
 from app.services import fire_analytics as fa
+from app.services import fire_outlook as fo
 from app.services import fire_public as fp
 from app.services.fire_aggregates import agg_store
 
@@ -122,6 +123,39 @@ async def get_persistent(region: str = Query("pakistan", max_length=80), min_day
     key = ("persistent", region.strip().lower(), min_days, limit)
     data = await _single_flight(key, _cached("persistent", key[1:], lambda s, t: fp.persistent(region, min_days=min_days, limit=limit, store=s, today=t)))
     return _respond(data, CC_LIVE)
+
+
+# ── smoke outlook (read side) ────────────────────────────────────────────────
+
+CC_OUTLOOK = "public, max-age=300, s-maxage=300, stale-while-revalidate=1800"
+
+
+def _load_outlook() -> Dict[str, Any]:
+    doc = fo.read_latest()                      # the bucket client is built inside, lazily (tests patch read_latest)
+    return {"doc": doc, "status": fo.outlook_status(doc)}
+
+
+@router.get("/outlook", summary="Smoke outlook: forecast wind × current fires for every city (D+1 summary) or one city (D+0…D+3)")
+async def get_outlook(city: Optional[str] = Query(None, max_length=80)):
+    key = ("outlook", _pkt_today(), datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")[:12])     # memo per 10 min slot
+    loaded = await _single_flight(key, lambda: fp.memo(key, _load_outlook))
+    doc, status = loaded["doc"], loaded["status"]
+    if doc is None:
+        return JSONResponse({"status": "unavailable", "message": "No smoke outlook has been generated yet."}, headers={"Cache-Control": CC_OUTLOOK})
+    base = {"status": status, "generated_at": doc.get("generated_at"), "model": doc.get("model"), "fires_as_of": doc.get("fires_as_of"),
+            "definitions": doc.get("definitions"), "caveats": doc.get("caveats")}
+    if city:
+        view = fo.city_view(doc, city)
+        if view is None:
+            raise HTTPException(status_code=404, detail=f"No outlook for city '{city}'")
+        others = [h for h in doc.get("summary", {}).get("alert", []) if h["city"].lower() != city.strip().lower()]
+        return JSONResponse({**base, **view, "others_at_alert_d1": others}, headers={"Cache-Control": CC_OUTLOOK})
+    cities = []
+    for c in doc.get("cities", []):
+        d1 = next((l for l in c["leads"] if l["lead"] == "D+1"), None)
+        cities.append({"city": c["city"], "province": c.get("province"), "lat": c["lat"], "lon": c["lon"],
+                       "d1": {k: d1.get(k) for k in ("band", "upwind_load_mw", "by_country", "fires_in_cone")} | {"from_compass": (d1.get("wind_850") or {}).get("from_compass")} if d1 else None})
+    return JSONResponse({**base, "summary": doc.get("summary"), "cities": cities}, headers={"Cache-Control": CC_OUTLOOK})
 
 
 # ── city endpoints (database) ────────────────────────────────────────────────

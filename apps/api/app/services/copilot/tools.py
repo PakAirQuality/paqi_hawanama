@@ -6,6 +6,7 @@ FastAPI's Depends lifecycle) and calls the corresponding analytics
 function directly — same process, zero network overhead.
 """
 
+import asyncio
 import logging
 from typing import Optional
 
@@ -1093,6 +1094,52 @@ async def aq_fire_pm25_link(
             "basis": _fire_basis(f"daily upwind fire FRP vs reporting-station PM2.5 for {name}", ["station_wind_observations", "readings"]),
             "followups": [f"Which fires were upwind of {name} on the flagged days?", f"What else was driving PM2.5 in {name}?",
                           "How does this fire season compare with earlier years?"]}
+
+
+# ── Tool 15f: aq_smoke_outlook ───────────────────────────────────────────
+
+
+async def aq_smoke_outlook(
+    ctx: RunContext[CopilotSession],
+    city: str = "",
+    days: int = 3,
+) -> dict:
+    """Will smoke reach a city in the coming days? For each lead day D+0…D+3: the ECMWF forecast wind at
+    850 hPa (transport) and 10 m, the upwind fire load (FRP of the fires seen in the last two days that
+    sit within ±60° of the wind-from direction and within one day's transport), its band (none / low /
+    elevated / high / very_high), the country split and the strongest upwind fires. Without a city: the
+    D+1 summary across cities. It assumes today's fires keep burning and is not a PM2.5 forecast.
+
+    Args:
+        city: City name (optional). Without it the national D+1 summary is returned.
+        days: Lead days to include, 1–4 (default 3).
+    """
+    from app.services import fire_outlook as fo
+
+    doc = await asyncio.to_thread(fo.read_latest)
+    status = fo.outlook_status(doc)
+    if doc is None:
+        return {"date": "", "data": {"message": "No smoke outlook has been generated yet."}, "followups": []}
+    base = {"status": status, "generated_at": doc.get("generated_at"), "fires_as_of": doc.get("fires_as_of"), "definitions": doc.get("definitions"),
+            "caveats": doc.get("caveats", []) + (["The outlook is older than 6 hours."] if status == "stale" else [])}
+    if city.strip():
+        view = fo.city_view(doc, city)
+        if view is None:
+            return {"date": doc.get("today_pkt", ""), "data": {"message": f"No outlook for '{city}'; it is produced for active Pakistan cities with stations."}, "followups": []}
+        n = max(1, min(int(days or 3), 4))
+        data = {**base, "city": view["city"], "leads": view["leads"][:n],
+                "others_at_alert_d1": [h for h in doc.get("summary", {}).get("alert", []) if h["city"].lower() != view["city"].lower()]}
+        _update_session(ctx, tool="aq_smoke_outlook", focus_type="city", focused_city=view["city"], entities=[view["city"]])
+        followups = [f"Which fires are upwind of {view['city']} today?", f"Is fire smoke consistent with {view['city']}'s PM2.5 this week?"]
+    else:
+        data = {**base, "summary": doc.get("summary")}
+        _update_session(ctx, tool="aq_smoke_outlook", focus_type="national")
+        followups = ["Which fires are upwind of Lahore?", "How does this fire season compare with earlier years?"]
+    return {"date": doc.get("today_pkt", ""), "data": data,
+            "basis": {"description": "ECMWF IFS forecast winds (Open-Meteo) × deduplicated VIIRS fires of the last two Pakistan days, carried forward",
+                      "sources": ["open_meteo_ecmwf_ifs025", "firms_viirs_archive"],
+                      "limitations": ["fires are assumed to persist; new fires are not predicted", "a smoke-source outlook, not a PM2.5 forecast"]},
+            "followups": followups}
 
 
 # ── Tool 16: aq_trajectory ───────────────────────────────────────────────
