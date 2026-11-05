@@ -22,6 +22,7 @@ Conventions shared with the copilot tools:
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from datetime import date, timedelta
@@ -580,6 +581,91 @@ def meta(*, store: Optional[AggStore] = None, today: Optional[date] = None) -> D
     }
 
 
+# ── the exportable regional report ───────────────────────────────────────────
+
+EXPORT_REGIONS = [("pakistan", "country", "Pakistan", "Pakistan"), *TWO_PUNJABS, ("other", "country", "other in bbox", "Rest of the box")]
+
+
+def export(season: str = "rice", year: Optional[int] = None, basis: str = "all", *, store: Optional[AggStore] = None,
+           today: Optional[date] = None) -> Dict[str, Any]:
+    """One season of daily series for the two Punjabs, Haryana, Pakistan and the rest of the box: detections,
+    7-day mean, cumulative, gap flags, with the basis, roster, class version and store build in the header.
+    `year` picks a past season (default: the latest); the rows are what the CSV export streams."""
+    store = store or agg_store()
+    today = today or fa.pkt_today()
+    if season not in SEASON_IDS:
+        return {"error": f"season must be one of {', '.join(SEASON_IDS)}"}
+    t = region_table(store)
+    basis = (basis or "all").strip().lower()
+    err = _basis_error(basis, t)
+    if err:
+        return err
+    start, end_nominal, end_eff, latest = season_bounds(season, today=today)
+    y = int(year or latest)
+    if y > latest or y < 2020:
+        return {"error": f"year must be between 2020 and {latest}"}
+    if y != latest:
+        start, end_nominal = date(y, start.month, start.day), date(y, end_nominal.month, end_nominal.day)
+        end_eff = end_nominal
+    cnt, frpc = fa.COUNT_COL[basis], fa.FRP_COL[basis]
+    m = store.manifest()
+    series: Dict[str, pd.DataFrame] = {}
+    for rid, kind, api, _ in EXPORT_REGIONS:
+        sdf = t.series(kind, api, start, end_nominal, basis)
+        sdf.loc[sdf["pk_day"] > end_eff, [*METRICS, "has_file"]] = [np.nan] * len(METRICS) + [False]
+        sdf["r7"] = sdf[cnt].rolling(7, min_periods=R7_MIN_DAYS).mean()
+        sdf.loc[sdf[cnt].isna(), "r7"] = np.nan
+        sdf["cum"] = _cumulative(sdf[cnt])
+        series[rid] = sdf
+    days = series["pakistan"]["pk_day"].tolist()
+    rows = []
+    for i, d in enumerate(days):
+        row: Dict[str, Any] = {"day": d.isoformat()}
+        for rid, *_ in EXPORT_REGIONS:
+            sdf = series[rid]
+            obs = bool(sdf["has_file"].iloc[i])
+            row[f"{rid}_detections"] = int(sdf[cnt].iloc[i]) if obs else None
+            row[f"{rid}_r7"] = round(float(sdf["r7"].iloc[i]), 1) if obs and not np.isnan(sdf["r7"].iloc[i]) else None
+            row[f"{rid}_cum"] = int(sdf["cum"].iloc[i]) if obs else None
+            row[f"{rid}_frp_mw"] = round(float(sdf[frpc].iloc[i])) if obs else None
+            row[f"{rid}_observed"] = obs
+            if d > end_eff:
+                row[f"{rid}_observed"] = None            # not yet: the season is in progress
+        rows.append(row)
+    sat_years = sorted({fr.satellite_name(src) for k, rec in m.get("days", {}).items() if k[:4] == str(y) for src in (rec.get("sources") or [])})
+    header = {
+        "season": {"id": season, "label": SEASON_LABELS[season], "year": y, "start": start.isoformat(), "end": end_nominal.isoformat(),
+                   "end_effective": end_eff.isoformat(), "complete": today > end_nominal},
+        "basis": basis, "basis_label": BASES[basis], "count_definition": fa.FIRE_DEFINITIONS["headline_count"],
+        "regions": {rid: lab for rid, _, _, lab in EXPORT_REGIONS}, "pakistan_punjab_note": "pakistan_punjab is a subset of pakistan",
+        "satellites_in_year": sat_years, "class_version": (m.get("classification") or {}).get("class_version") if basis in ("crop", "crop_n20") else None,
+        "observed": "false = no file or no rows on this basis that day (a gap, not zero); null = the day has not happened yet",
+        "r7": f"trailing 7-day mean over observed days, null when fewer than {R7_MIN_DAYS}", "cum": "running total over observed days",
+        "store_built_at": m.get("built_at"), "store_schema_version": int(m.get("schema_version") or 0), "generated_for_pkt_day": today.isoformat(),
+        "source": "NASA FIRMS VIIRS (NOAA-20, NOAA-21, Suomi NPP) via the Hawanama fire store; https://hawanama.org/fires",
+        "caveats": [fa.FIRE_DEFINITIONS["headline_count"], fa.FIRE_DEFINITIONS["comparison_basis"], fa.FIRE_DEFINITIONS["what_burns"]],
+    }
+    return {"header": header, "columns": list(rows[0].keys()) if rows else [], "rows": rows}
+
+
+def export_csv(doc: Dict[str, Any]) -> str:
+    """The export as CSV: '#'-prefixed header lines, then the table."""
+    import csv
+    import io as _io
+    h = doc["header"]
+    buf = _io.StringIO()
+    for k in ("season", "basis", "basis_label", "count_definition", "regions", "pakistan_punjab_note", "satellites_in_year", "class_version",
+              "observed", "r7", "cum", "store_built_at", "store_schema_version", "generated_for_pkt_day", "source"):
+        buf.write(f"# {k}: {json.dumps(h[k]) if not isinstance(h[k], str) else h[k]}\n")
+    for c in h["caveats"]:
+        buf.write(f"# caveat: {c}\n")
+    w = csv.DictWriter(buf, fieldnames=doc["columns"], lineterminator="\n")
+    w.writeheader()
+    for r in doc["rows"]:
+        w.writerow({k: ("" if v is None else v) for k, v in r.items()})
+    return buf.getvalue()
+
+
 # ── observation-quality audit ────────────────────────────────────────────────
 
 PEAK_MONTHS = (4, 5, 10, 11)
@@ -680,6 +766,12 @@ def brief_lines(*, store: Optional[AggStore] = None, today: Optional[date] = Non
             piece += f"; NOAA-20 only {c20['fires']:,} vs {ly['fires']:,} on the same dates in {ly['year']} ({ly['pct_change']:+d} %)"
             if c20["reference"].get("rank_text"):
                 piece += f", {c20['reference']['rank_text']}"
+        last = next((y for y in d["years"] if y["role"] == "last"), None)
+        if last and last.get("total") and cur and cur.get("total_to_date") is not None and not d["season"]["complete"]:
+            piece += f"; cumulative so far = {cur['total_to_date'] / last['total']:.0%} of the whole {last['year']} season"
+        if d["season"]["complete"] and cur and cur.get("timing") and cur["timing"].get("p50"):
+            tm = cur["timing"]
+            piece += f"; half of the season's detections by {_day_label(date(d['season']['year'], int(tm['p50'][:2]), int(tm['p50'][3:])))} (10 % by {tm['p10']}, 90 % by {tm['p90']})"
         parts.append(piece)
         if rid == "pakistan_punjab":
             w = h["window"]
