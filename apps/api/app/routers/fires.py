@@ -23,7 +23,7 @@ from app.core.database import get_database
 from app.services import fire_analytics as fa
 from app.services import fire_outlook as fo
 from app.services import fire_public as fp
-from app.services.fire_aggregates import agg_store, default_bucket
+from app.services.fire_aggregates import agg_store
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -131,7 +131,7 @@ CC_OUTLOOK = "public, max-age=300, s-maxage=300, stale-while-revalidate=1800"
 
 
 def _load_outlook() -> Dict[str, Any]:
-    doc = fo.read_latest(default_bucket())
+    doc = fo.read_latest()                      # the bucket client is built inside, lazily (tests patch read_latest)
     return {"doc": doc, "status": fo.outlook_status(doc)}
 
 

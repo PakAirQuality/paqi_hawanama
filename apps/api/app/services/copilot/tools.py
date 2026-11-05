@@ -1115,9 +1115,8 @@ async def aq_smoke_outlook(
         days: Lead days to include, 1–4 (default 3).
     """
     from app.services import fire_outlook as fo
-    from app.services.fire_aggregates import default_bucket
 
-    doc = await asyncio.to_thread(fo.read_latest, default_bucket())
+    doc = await asyncio.to_thread(fo.read_latest)
     status = fo.outlook_status(doc)
     if doc is None:
         return {"date": "", "data": {"message": "No smoke outlook has been generated yet."}, "followups": []}
