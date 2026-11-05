@@ -124,3 +124,40 @@ async def test_outlook_endpoints(client, monkeypatch):
         monkeypatch.setattr(fires_router.fo, "read_latest", lambda bucket=None: None)
         fp._MEMO.clear()
         assert (await c.get("/api/v1/fires/outlook")).json()["status"] == "unavailable"
+
+
+async def test_trajectory_endpoint(client, monkeypatch):
+    from app.services import fire_kinematic as fk
+    import app.services.fire_aggregates as agg
+    import httpx
+    calls = []
+
+    async def fake_run(http, store, lat, lon, at_utc, *, direction="backward", hours=72, bucket=None, now=None, label="", **kw):
+        calls.append((lat, lon, at_utc.isoformat(), direction, hours, label))
+        if lat > 35:
+            return {"status": "unavailable", "message": "On-demand trajectories cover arrivals in the last 88 days", "engine": fk.ENGINE}
+        return {"status": fk.STATUS, "engine": fk.ENGINE, "direction": direction, "hours": hours, "paths": {}, "sectors": {}}
+
+    class NoClient:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+    monkeypatch.setattr(fk, "run", fake_run)
+    monkeypatch.setattr(agg, "default_bucket", lambda: None)
+    monkeypatch.setattr(httpx, "AsyncClient", NoClient)
+    async with client as c:
+        r = await c.get("/api/v1/fires/trajectory?lat=31.52&lon=74.36&at=2026-11-05T06:30:00Z&direction=backward&hours=48&label=Lahore")
+        assert r.status_code == 200 and r.headers["cache-control"] == fires_router.CC_OUTLOOK
+        assert r.json()["engine"] == fk.ENGINE and r.json()["hours"] == 48
+        assert calls[-1] == (31.52, 74.36, "2026-11-05T06:00:00", "backward", 48, "Lahore")     # the hour is floored, the label passed
+        assert (await c.get("/api/v1/fires/trajectory?lat=31.52&lon=74.36&at=yesterday")).status_code == 400
+        assert (await c.get("/api/v1/fires/trajectory?lat=31.52&lon=74.36&direction=sideways")).status_code == 422
+        assert (await c.get("/api/v1/fires/trajectory?lat=31.52&lon=74.36&hours=100")).status_code == 422
+        old = await c.get("/api/v1/fires/trajectory?lat=36.0&lon=74.36")                        # the engine says unavailable
+        assert old.status_code == 422 and "88 days" in old.json()["detail"]
+        assert (await c.get("/api/v1/fires/trajectory?lon=74.36")).status_code == 422               # lat required

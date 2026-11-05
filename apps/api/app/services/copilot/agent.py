@@ -89,7 +89,7 @@ from the monitoring network — these show real current conditions, not predicti
 | "Where are the fires / biggest fire clusters" / "which districts are burning" / "persistent hotspots / kilns / flares" | `aq_fire_hotspots` (group=cluster, district or persistent; area = region or city with radius_km; a persistent cell is a flag to investigate, not proof of industry) |
 | "Are fires driving / affecting X's PM2.5?" / "is the smoke reaching X" over days or weeks / fire–pollution link | `aq_fire_pm25_link` (city required; exploratory lagged correlations and candidate smoke-transport episodes; answer "consistent with", never "caused") |
 | "Will smoke reach X tomorrow / this week?" / "which cities face smoke tomorrow" / smoke forecast, outlook | `aq_smoke_outlook` (city optional; forecast wind × today's fires, bands none…very_high; say "fires assumed to persist" and that it is not a PM2.5 forecast) |
-| "Where did the air come from?" / trajectory / transport | `aq_trajectory` (city required) |
+| "Where did the air come from?" / "was Lahore's air over Indian Punjab?" / "where is the smoke from Hafizabad heading?" / trajectory, transport pathway | `aq_trajectory` (city or lat/lon; date and hour_pkt; direction="backward" for where the air came from, "forward" for where air or smoke goes; computed on demand on ECMWF winds, HYSPLIT when a run exists) |
 
 When user mentions @StationName or asks about a specific station, use aq_station_focus first. \
 For follow-up questions about trend/history/neighbors on the focused station, use aq_station_history. \
@@ -144,9 +144,13 @@ fall back to observations; exposure and impact brief return a message instead �
 NOT forecasts. It returns actual measured PM2.5 values.
 - `aq_fire_activity` uses archived VIIRS satellite fire detections from FIRMS (2020+). \
 These are real satellite observations, not predictions.
-- `aq_trajectory` returns back-trajectory analysis. If status is "wind_estimated", \
-clearly caveat that this is a surface wind estimate, not a full HYSPLIT trajectory. \
-If status is "ok", this is a real HYSPLIT 72h back-trajectory.
+- `aq_trajectory` computes trajectories on demand. Status "kinematic": a simplified isobaric \
+trajectory on ECMWF IFS 0.25° winds, three levels; quote the sector at 24/48/72 h with its agreement \
+across levels, the residence hours over each Punjab, the fires met along the path (strict and loose) \
+and the error band ("roughly 10–20 % of the distance travelled"); say "transport pathway consistent \
+with", never a smoke-arrival probability. Status "ok": a real HYSPLIT run on GFS 0.25°. Status \
+"wind_estimated": only the surface-wind corridor, say so plainly. Backward answers where the air came \
+from; forward answers where air or smoke goes: never confuse the two.
 
 ## Fire wording
 - Quote the deduplicated high/nominal-confidence count as "fire detections" or "detection \
@@ -167,6 +171,9 @@ Say which when the question is about smoke reaching a city.
 ±60° cone; if the wind is unavailable, give the rings and say the upwind split is unavailable.
 - Never say fires caused or drove PM2.5. Say the pattern is "consistent with smoke transport" \
 and name the other candidates (stagnation, local sources). FRP is burning intensity, not PM2.5.
+- A trajectory (kinematic or HYSPLIT) is a plausibility screen: name the engine, give the sector, \
+residence hours and error band, and the fires along the path as "fires the parcel passed near", not \
+as sources of the city's PM2.5.
 - Comparisons with earlier years: state the window ("1–4 Nov in each year"), the reference \
 years with data, and the tool's rank_text ("lower than every reference year", "higher than 3 \
 of the 6 reference years"); mention satellite-roster, thin-day and missing-day caveats when the \
