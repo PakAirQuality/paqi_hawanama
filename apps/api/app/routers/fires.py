@@ -183,6 +183,29 @@ async def get_outlook(city: Optional[str] = Query(None, max_length=80)):
     return JSONResponse({**base, "summary": doc.get("summary"), "cities": cities}, headers={"Cache-Control": CC_OUTLOOK})
 
 
+# ── trajectories (read side) ─────────────────────────────────────────────────
+
+@router.get("/trajectories", summary="HYSPLIT trajectories for Lahore and Delhi: the latest run, or the plan while the runner is not installed")
+async def get_trajectories(city: Optional[str] = Query(None, max_length=40)):
+    from app.services import fire_trajectories as ft
+    key = ("trajectories", _pkt_today(), datetime.now(timezone.utc).strftime("%Y%m%dT%H%M")[:12])
+    loaded = await _single_flight(key, lambda: fp.memo(key, lambda: {"latest": ft.read_latest(), "plan": ft.read_plan()}))
+    latest, plan = loaded["latest"], loaded["plan"]
+    base = {"receptors": {k: {"lat": v[0], "lon": v[1]} for k, v in ft.RECEPTORS.items()}, "definitions": ft.DEFINITIONS}
+    if latest is None:
+        return JSONResponse({**base, "status": "not_run", "message": "No trajectory run has completed yet; the runner needs a Linux HYSPLIT build.",
+                             "plan": {k: plan[k] for k in ("generated_at", "fires_day", "clusters", "met", "status") if plan and k in plan} if plan else None},
+                            headers={"Cache-Control": CC_OUTLOOK})
+    st = ft.status(latest)
+    if city:
+        view = next((r for r in latest.get("receptors_out", []) if r["city"].lower() == city.strip().lower()), None)
+        if view is None:
+            raise HTTPException(status_code=404, detail=f"No trajectories for '{city}'")
+        return JSONResponse({**base, "status": st, "generated_at": latest.get("generated_at"), **view}, headers={"Cache-Control": CC_OUTLOOK})
+    return JSONResponse({**base, "status": st, **{k: v for k, v in latest.items() if k != "receptors_out"},
+                         "cities": [r["city"] for r in latest.get("receptors_out", [])]}, headers={"Cache-Control": CC_OUTLOOK})
+
+
 # ── city endpoints (database) ────────────────────────────────────────────────
 
 CITIES_SQL = text("""

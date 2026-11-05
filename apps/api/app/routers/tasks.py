@@ -278,6 +278,23 @@ async def run_fires_outlook(
         raise HTTPException(status_code=500, detail=f"Smoke outlook failed: {e}")
 
 
+@router.post("/tasks/fires/trajectories")
+async def run_fires_trajectories(
+    request: Request,
+    dry_run: bool = Query(True, description="Plan the runs and write the CONTROL files; nothing is written to the bucket"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """HYSPLIT trajectories for Lahore and Delhi (backward, forward from crop clusters, ensemble). Without a Linux
+    HYSPLIT build (HYSPLIT_EXEC) every run is a dry run; with dry_run=false the plan and met inventory are written."""
+    from app.services.fire_trajectories import FireTrajectoryTask
+    try:
+        outcome = await FireTrajectoryTask().run(dry_run=dry_run, trigger=_trigger(request))
+        return _outcome_response(outcome, "Trajectories " + ("planned (dry run)" if dry_run else "planned and recorded"))
+    except Exception as e:
+        logger.error("Trajectory task failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Trajectory task failed: {e}")
+
+
 # ---------------------------------------------------------------------------
 # Station registry: province links by one rule (city first, geography second)
 # ---------------------------------------------------------------------------
@@ -377,6 +394,7 @@ async def get_task_status(
                 "POST /tasks/icimod/ingest?dry_run=true|false",
                 "POST /tasks/fires/aggregate?backfill=true|false&dry_run=true|false&since=YYYY-MM-DD",
                 "POST /tasks/fires/outlook?dry_run=true|false",
+                "POST /tasks/fires/trajectories?dry_run=true|false",
                 "POST /tasks/registry/provinces?dry_run=true|false",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
