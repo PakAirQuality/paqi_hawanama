@@ -7,13 +7,20 @@ export interface ChartRow {
   [year: string]: number | string | null
 }
 
+/** r7 = 7-day mean of daily detections; cum = running total over observed days. */
+export type CurveMode = 'r7' | 'cum'
+
 export const yearKey = (y: number) => `y${y}`
 
-/** One row per day of season; each year's 7-day mean under y<year> (null = gap). */
-export function toChartRows(data: SeasonsResponse): ChartRow[] {
+export function curve(y: SeasonYear, mode: CurveMode): (number | null)[] {
+  return mode === 'cum' ? (y.cum ?? []) : y.r7
+}
+
+/** One row per day of season; each year's curve under y<year> (null = gap). */
+export function toChartRows(data: SeasonsResponse, mode: CurveMode = 'r7'): ChartRow[] {
   return data.days.map((mmdd, i) => {
     const row: ChartRow = { d: i, label: dayLabel(mmdd) }
-    for (const y of data.years) row[yearKey(y.year)] = y.r7[i] ?? null
+    for (const y of data.years) row[yearKey(y.year)] = curve(y, mode)[i] ?? null
     return row
   })
 }
@@ -34,10 +41,10 @@ export function lastNonNullIndex(values: (number | null)[]): number {
   return -1
 }
 
-/** A pleasant axis maximum above the largest 7-day mean. */
-export function niceMax(years: SeasonYear[]): number {
+/** A pleasant axis maximum above the largest value of the chosen curve. */
+export function niceMax(years: SeasonYear[], mode: CurveMode = 'r7'): number {
   let max = 0
-  for (const y of years) for (const v of y.r7) if (v != null && v > max) max = v
+  for (const y of years) for (const v of curve(y, mode)) if (v != null && v > max) max = v
   if (max <= 0) return 10
   const mag = 10 ** Math.floor(Math.log10(max))
   const steps = [1, 2, 2.5, 5, 10]

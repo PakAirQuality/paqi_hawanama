@@ -9,6 +9,7 @@ import {
 import { CardShell } from '@/components/fires/CardShell'
 import { RegionChips } from '@/components/fires/RegionChips'
 import { SeasonToggle } from '@/components/fires/SeasonToggle'
+import { BasisToggle } from '@/components/fires/BasisToggle'
 import { Headline } from '@/components/fires/Headline'
 import { SeasonCurves } from '@/components/fires/SeasonCurves'
 import { DistrictTable } from '@/components/fires/DistrictTable'
@@ -32,18 +33,18 @@ export default function FiresPage() {
 function FiresPageInner() {
   const meta = useQuery({ queryKey: ['fires', 'meta'], queryFn: fetchFiresMeta, staleTime: 60 * 60 * 1000, retry: retryServerErrorsOnly })
   const { params, set } = useFiresParams(meta.data?.districts)
-  const { region, season, date } = params
+  const { region, season, date, basis } = params
   const label = regionLabel(region, meta.data?.districts)
   const yesterday = shiftDateOnly(pktToday(), -1)
 
   useEffect(() => { document.title = 'Fire trends: Pakistan and the cross-border burning season | Hawanama' }, [])
 
-  const seasons = useQuery({ queryKey: ['fires', 'seasons', region, season], queryFn: () => fetchSeasons(region, season),
+  const seasons = useQuery({ queryKey: ['fires', 'seasons', region, season, basis], queryFn: () => fetchSeasons(region, season, basis),
     placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const scope = districtScope(region)
-  const districts = useQuery({ queryKey: ['fires', 'districts', season, scope], queryFn: () => fetchDistricts(season, scope ?? 'pakistan'),
+  const districts = useQuery({ queryKey: ['fires', 'districts', season, scope, basis], queryFn: () => fetchDistricts(season, scope ?? 'pakistan', basis),
     enabled: scope != null, placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
-  const split = useQuery({ queryKey: ['fires', 'split', season], queryFn: () => fetchSplit(season), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
+  const split = useQuery({ queryKey: ['fires', 'split', season, basis], queryFn: () => fetchSplit(season, basis), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const persistent = useQuery({ queryKey: ['fires', 'persistent', region], queryFn: () => fetchPersistent(region), placeholderData: keepPreviousData, retry: retryServerErrorsOnly })
   const cities = useQuery({ queryKey: ['fires', 'cities'], queryFn: fetchCities, staleTime: 60 * 60 * 1000, retry: retryServerErrorsOnly })
   const cityList = useMemo(() => cities.data?.cities ?? [], [cities.data])
@@ -63,9 +64,12 @@ function FiresPageInner() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Fire trends</p>
-          <p className="text-[12px] text-slate-500">Crop-residue burning across Pakistan and the Indian plains, from NASA FIRMS satellite detections since 2020.</p>
+          <p className="text-[12px] text-slate-500">Satellite fire detections in the burning seasons across Pakistan and the Indian plains, from NASA FIRMS VIIRS since 2020.</p>
         </div>
-        <SeasonToggle value={season} onChange={s => set({ season: s })} />
+        <div className="flex flex-wrap items-center gap-2">
+          <SeasonToggle value={season} onChange={s => set({ season: s })} />
+          <BasisToggle value={basis} onChange={b => set({ basis: b })} available={meta.data?.n20_basis_available !== false} />
+        </div>
       </div>
       <RegionChips value={region} onChange={r => set({ region: r })} districts={meta.data?.districts} />
 
@@ -88,7 +92,7 @@ function FiresPageInner() {
                 : districts.data && <DistrictTable data={districts.data} date={date} />}
             </CardShell>
           </div>
-          <CardShell id="split" title="Across the border" subtitle="Fires a day by country, whole season" isLoading={split.isPending} error={split.error} onRetry={() => split.refetch()} skeletonHeight={260}>
+          <CardShell id="split" title="Across the border" subtitle="Detections a day by region, whole season" isLoading={split.isPending} error={split.error} onRetry={() => split.refetch()} skeletonHeight={260}>
             {split.data && <BorderSplit data={split.data} />}
           </CardShell>
           <CardShell id="persistent" title="Persistent sources" subtitle="Cells burning on many of the last 30 days" isLoading={persistent.isPending} error={persistent.error} onRetry={() => persistent.refetch()} skeletonHeight={200}>
@@ -117,7 +121,7 @@ function FiresPageInner() {
         </div>
       </div>
 
-      <DataNotes meta={meta.data} season={season} />
+      <DataNotes meta={meta.data} season={season} basis={basis} />
     </div>
   )
 }

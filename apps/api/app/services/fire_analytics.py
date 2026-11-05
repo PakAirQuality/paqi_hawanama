@@ -7,9 +7,12 @@ Fire analytics on the FIRMS aggregate store (fire_aggregates) and the day files:
   fire_activity  — the old one-day summary, now without the national-numbers-as-city fallback
 
 Every result carries FIRE_DEFINITIONS, the window (Pakistan and UTC), the satellites and pass
-window from the day sidecars, and caveats. Counts quoted as the headline are deduplicated fires
-with a high- or nominal-confidence detection (see fire_aggregates). Nothing here asserts that
-fires caused PM2.5; the wording rule is "consistent with".
+window from the day sidecars, and caveats. Counts quoted as the headline are deduplicated
+detection clusters with a high- or nominal-confidence detection (see fire_aggregates); year
+comparisons also carry the NOAA-20-only series (basis "n20"), the one that does not change with
+the satellite roster. Nothing here asserts that fires caused PM2.5; the wording rule is
+"consistent with", and the fire–PM2.5 rule flags *candidate smoke-transport episodes*, not
+fire-influenced days.
 """
 
 from __future__ import annotations
@@ -37,18 +40,28 @@ MAX_ROWS = 60
 PERSISTENT_WINDOW_DAYS = 30
 REFERENCE_YEARS = (2020, 2021, 2022, 2023, 2024, 2025)
 SEASONS = {
-    "kharif_rice_residue": ("10-01", "11-30"),   # rice stubble before wheat sowing
+    "kharif_rice_residue": ("09-15", "11-30"),   # rice stubble before wheat sowing: the ISRO/CAQM paddy-residue reporting window
     "rabi_wheat_residue": ("04-15", "05-31"),    # wheat stubble before rice transplanting
 }
+SEASON_WINDOW_NOTE = ("The rice window follows the ISRO/CAQM paddy-residue protocol (15 Sep – 30 Nov); earlier Hawanama reports "
+                      "used 1 Oct – 30 Nov. Pakistan Punjab burning before 1 Oct is shown so the choice can be checked.")
+BASES = {"all": "every satellite flown that day (deduplicated across satellites, high/nominal confidence)",
+         "n20": "NOAA-20 detections only (high/nominal confidence): the consistent series for year comparisons, since NOAA-20 "
+                "flew and was processed in every archive year while Suomi NPP and NOAA-21 came and went"}
+COUNT_COL = {"all": "n_dedup_hn", "n20": "n_n20_hn"}
+FRP_COL = {"all": "frp_dedup_hn", "n20": "frp_n20_hn"}
+SERIES_COLS = ["n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night", "n_n20_hn", "frp_n20_hn"]
 SEASON_ALIASES = {"rice": "kharif_rice_residue", "kharif": "kharif_rice_residue", "autumn": "kharif_rice_residue",
                   "october": "kharif_rice_residue", "november": "kharif_rice_residue", "winter": "kharif_rice_residue",
                   "wheat": "rabi_wheat_residue", "rabi": "rabi_wheat_residue", "spring": "rabi_wheat_residue",
                   "april": "rabi_wheat_residue", "may": "rabi_wheat_residue"}
 
 FIRE_DEFINITIONS = {
-    "detection": "one VIIRS 375 m pixel flagged as a thermal anomaly by NASA FIRMS; a large field burn is several detections",
-    "fire": "deduplicated detection: detections from different satellites within 1 km and 90 minutes are one fire (highest FRP kept)",
-    "headline_count": "deduplicated fires with at least one high- or nominal-confidence detection; raw detections and low-confidence rows are reported separately because the satellite roster changed over the years",
+    "detection": "one VIIRS 375 m pixel flagged as a thermal anomaly by NASA FIRMS; a large field burn is several detections and one burning field can be seen by two satellites",
+    "fire": "a deduplicated detection cluster: detections from different satellites within 1 km and 90 minutes are grouped (transitively) and counted once, highest FRP kept. A cluster is not a verified individual fire: neighbouring burning fields can merge and one incident can still leave several clusters",
+    "headline_count": "deduplicated detection clusters with at least one high- or nominal-confidence detection; 'fires' in the text means these clusters. Raw detections and low-confidence rows are reported separately",
+    "comparison_basis": "year-on-year comparisons use the NOAA-20-only series (basis n20): deduplication cannot remove the extra fires an added satellite sees, so the roster change (Suomi NPP + NOAA-20 in 2020–2025, NOAA-21 added in 2026, Suomi NPP retired 2026-11-01) is handled by holding the satellite fixed",
+    "what_burns": "a thermal detection does not identify what burns; until the crop-residue classification ships, counts in cropland during the harvest windows are 'detections in the burning season', not 'crop-residue fires'",
     "frp": "fire radiative power in megawatts summed over deduplicated fires: burning intensity, not a PM2.5 contribution",
     "day": "Pakistan calendar day (Asia/Karachi): the ~13:00 PKT day pass and the ~01:00 PKT night pass of that date",
     "day_basis": "acq_pkt = keyed by Pakistan day with pass times; acq_utc = older archive days keyed by UTC date without pass times",
@@ -413,21 +426,25 @@ def current_season(today: Optional[date] = None) -> Optional[str]:
 
 
 def _series(daily: pd.DataFrame, kind: str, region: str, start: date, end: date, days_with_file: set) -> pd.DataFrame:
+    """One row per day: SERIES_COLS summed over the region's rows; NaN on days outside `days_with_file`
+    (no file, or no rows on the requested satellite basis), 0 on observed days without rows."""
     sel = daily[(daily["region_kind"] == kind) & (daily["region"] == region) & (daily["pk_day"] >= start) & (daily["pk_day"] <= end)]
-    sel = sel.groupby("pk_day", as_index=False)[["n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"]].sum()   # older builds may hold split rows
+    sel = sel.groupby("pk_day", as_index=False)[SERIES_COLS].sum()   # older builds may hold split rows
     idx = pd.date_range(start, end, freq="D").date
     out = pd.DataFrame({"pk_day": idx})
     out = out.merge(sel, on="pk_day", how="left")
     out["has_file"] = [d in days_with_file for d in out["pk_day"]]
-    for c in ("n_dedup_hn", "n_raw", "frp_dedup_hn", "n_day", "n_night"):
+    for c in SERIES_COLS:
         out[c] = np.where(out["has_file"], out[c].fillna(0), np.nan)
     return out
 
 
 def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Optional[date] = None, *, season: str = "",
-                compare_years: Sequence[int] = REFERENCE_YEARS, store: Optional[AggStore] = None,
+                compare_years: Sequence[int] = REFERENCE_YEARS, basis: str = "all", store: Optional[AggStore] = None,
                 today: Optional[date] = None) -> Dict[str, Any]:
-    """Daily (or weekly) fire series for a region with a same-window comparison against earlier years."""
+    """Daily (or weekly) series of detection clusters for a region with a same-window comparison against
+    earlier years. `basis` 'all' counts every satellite; 'n20' counts NOAA-20 alone (the comparable series).
+    Whatever the basis, the comparison block also carries the NOAA-20-only figures."""
     store = store or agg_store()
     today = today or pkt_today()
     resolved, note, districts = resolve_region(region, store)
@@ -454,28 +471,42 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
         end = today
     if start > end:
         return {"message": f"Start {start} is after end {end}."}
+    basis = (basis or "all").strip().lower()
+    if basis not in BASES:
+        return {"message": f"basis must be one of {', '.join(BASES)}."}
     manifest = store.manifest()
     days_with_file = {date.fromisoformat(k) for k in manifest.get("days", {})}
+    has_n20 = int(manifest.get("schema_version") or 0) >= 2
+    n20_days = satellite_days(manifest, fr.CONSISTENT_SATELLITE) if has_n20 else set()
+    if basis == "n20" and not has_n20:
+        return {"message": "The NOAA-20-only basis needs the rebuilt store (schema 2); ask again after the next aggregate run."}
+    observed = days_with_file & n20_days if basis == "n20" else days_with_file
+    cnt, frpc = COUNT_COL[basis], FRP_COL[basis]
     daily = store.daily_regions()
-    s = _series(daily, kind, rname, start, end, days_with_file)
-    s["rolling7_fires"] = s["n_dedup_hn"].rolling(7, min_periods=1).mean().round(1)
-    s["rolling7_frp_mw"] = s["frp_dedup_hn"].rolling(7, min_periods=1).mean().round(0)
+    s = _series(daily, kind, rname, start, end, observed)
+    s["rolling7_fires"] = s[cnt].rolling(7, min_periods=1).mean().round(1)
+    s["rolling7_frp_mw"] = s[frpc].rolling(7, min_periods=1).mean().round(0)
     missing = [d.isoformat() for d, f in zip(s["pk_day"], s["has_file"]) if not f]
     valid = s[s["has_file"]]
-    total = int(valid["n_dedup_hn"].sum()) if len(valid) else 0
-    peak = (valid.sort_values(["n_dedup_hn", "frp_dedup_hn"], ascending=False).iloc[0]
-            if len(valid) and valid["n_dedup_hn"].max() > 0 else None)
+    total = int(valid[cnt].sum()) if len(valid) else 0
+    peak = (valid.sort_values([cnt, frpc], ascending=False).iloc[0]
+            if len(valid) and valid[cnt].max() > 0 else None)
     summary: Dict[str, Any] = {
-        "fires": total, "detections": int(valid["n_raw"].sum()) if len(valid) else 0, "frp_mw": _r(valid["frp_dedup_hn"].sum()) if len(valid) else 0.0,
+        "basis": basis, "basis_label": BASES[basis],
+        "fires": total, "detections": int(valid["n_raw"].sum()) if len(valid) else 0, "frp_mw": _r(valid[frpc].sum()) if len(valid) else 0.0,
         "days_with_data": int(len(valid)), "days_missing": len(missing), "fires_per_day": _r(total / len(valid)) if len(valid) else None,
-        "peak_day": {"day": peak["pk_day"].isoformat(), "fires": int(peak["n_dedup_hn"]), "frp_mw": _r(peak["frp_dedup_hn"])} if peak is not None else None,
+        "peak_day": {"day": peak["pk_day"].isoformat(), "fires": int(peak[cnt]), "frp_mw": _r(peak[frpc])} if peak is not None else None,
         "night_share": _r(valid["n_night"].sum() / max(valid["n_day"].sum() + valid["n_night"].sum(), 1), 2) if len(valid) else None,
     }
+    if has_n20:
+        n20_valid = s[s["pk_day"].isin(n20_days) & s["has_file"]]
+        summary["noaa20_only"] = {"fires": int(n20_valid["n_n20_hn"].sum()) if len(n20_valid) else 0, "days_with_data": int(len(n20_valid)),
+                                  "note": "NOAA-20 detections alone; the series to compare across years"}
     if kind == "country" and rname == "Pakistan":
         share = {}
         for lab in fr.COUNTRY_LABELS.values():
-            cs_ = _series(daily, "country", lab, start, end, days_with_file)
-            share[lab] = int(cs_["n_dedup_hn"].fillna(0).sum())
+            cs_ = _series(daily, "country", lab, start, end, observed)
+            share[lab] = int(cs_[cnt].fillna(0).sum())
         summary["by_country"] = share
     if kind in ("country", "province") and rname != "other in bbox":
         dsel = daily[(daily["region_kind"] == "district") & (daily["pk_day"] >= start) & (daily["pk_day"] <= end)]
@@ -484,63 +515,42 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
             dsel = dsel[dsel["region"].map(idx.district_province) == rname]
         if kind == "country" and rname != "Pakistan":
             dsel = dsel.iloc[0:0]
-        top = dsel.groupby("region")[["n_dedup_hn", "frp_dedup_hn"]].sum()
-        top = top[top["n_dedup_hn"] > 0].sort_values("n_dedup_hn", ascending=False).head(10)
-        summary["top_districts"] = [{"district": k, "fires": int(v["n_dedup_hn"]), "frp_mw": _r(v["frp_dedup_hn"])} for k, v in top.iterrows()]
+        top = dsel.groupby("region")[[cnt, frpc]].sum()
+        top = top[top[cnt] > 0].sort_values(cnt, ascending=False).head(10)
+        summary["top_districts"] = [{"district": k, "fires": int(v[cnt]), "frp_mw": _r(v[frpc])} for k, v in top.iterrows()]
     # rows: daily, or weekly when the window is long
     if len(s) > MAX_ROWS:
         wk = s.assign(week=[d - timedelta(days=d.weekday()) for d in s["pk_day"]])
         g = wk.groupby("week")
         rows_df = pd.DataFrame({
-            "week_start": list(g.groups.keys()), "fires": g["n_dedup_hn"].sum(min_count=1).values, "detections": g["n_raw"].sum(min_count=1).values,
-            "frp_mw": g["frp_dedup_hn"].sum(min_count=1).values, "days_with_data": g["has_file"].sum().values,
+            "week_start": list(g.groups.keys()), "fires": g[cnt].sum(min_count=1).values, "detections": g["n_raw"].sum(min_count=1).values,
+            "frp_mw": g[frpc].sum(min_count=1).values, "days_with_data": g["has_file"].sum().values,
         })
         rows = [{"week_start": r.week_start.isoformat(), "fires": _int(r.fires), "detections": _int(r.detections), "frp_mw": _r(r.frp_mw, 0),
                  "days_with_data": int(r.days_with_data)} for r in rows_df.itertuples()]
         bucket = "week"
     else:
-        rows = [{"day": r.pk_day.isoformat(), "fires": _int(r.n_dedup_hn), "detections": _int(r.n_raw), "frp_mw": _r(r.frp_dedup_hn, 0),
+        rows = [{"day": r.pk_day.isoformat(), "fires": _int(getattr(r, cnt)), "detections": _int(r.n_raw), "frp_mw": _r(getattr(r, frpc), 0),
                  "rolling7_fires": _r(r.rolling7_fires), "night": _int(r.n_night)} if r.has_file
-                else {"day": r.pk_day.isoformat(), "fires": None, "note": "no file"} for r in s.itertuples()]
+                else {"day": r.pk_day.isoformat(), "fires": None, "note": "no file" if r.pk_day not in days_with_file else "no NOAA-20 rows"}
+                for r in s.itertuples()]
         bucket = "day"
-    # same-window comparison with earlier years
+    # same-window comparison with earlier years, on the requested basis and always on NOAA-20 alone
     comparison: Optional[Dict[str, Any]] = None
     if compare_years:
-        # like for like: reference years are summed over the calendar days that have data in the
-        # current window (the 2026 archive has gaps), and a reference year needs 60 % of those days
-        mmdd_with_data = {d.strftime("%m-%d") for d, f in zip(s["pk_day"], s["has_file"]) if f}
-        ref = []
-        for y in compare_years:
-            if y >= start.year:
-                continue
-            try:
-                ys, ye = start.replace(year=y), end.replace(year=y)
-            except ValueError:                       # 29 Feb
-                continue
-            rs = _series(daily, kind, rname, ys, ye, days_with_file)
-            rv = rs[rs["has_file"] & rs["pk_day"].map(lambda d: d.strftime("%m-%d") in mmdd_with_data)]
-            ref.append({"year": y, "fires": int(rv["n_dedup_hn"].sum()) if len(rv) else None, "frp_mw": _r(rv["frp_dedup_hn"].sum(), 0) if len(rv) else None,
-                        "days_with_data": int(len(rv)), "days_missing": int(len(mmdd_with_data) - len(rv))})
-        vals = [r["fires"] for r in ref if r["fires"] is not None and r["days_with_data"] >= max(1, int(0.6 * len(mmdd_with_data)))]
-        comparison = {"window": f"{start.strftime('%m-%d')} to {end.strftime('%m-%d')} in each year",
-                      "days_compared": len(mmdd_with_data), "years": ref}
-        if len(mmdd_with_data) < len(s):
-            comparison["note"] = (f"Only the {len(mmdd_with_data)} calendar days with data in the current window are summed in each "
-                                  f"reference year ({len(s) - len(mmdd_with_data)} days of the window have no 2026 file).")
-        if vals:
-            comparison.update({
-                "reference_mean": _r(float(np.mean(vals)), 0), "reference_min": int(min(vals)), "reference_max": int(max(vals)),
-                "ratio_to_mean": _r(total / float(np.mean(vals)), 2) if np.mean(vals) > 0 else None,
-                "higher_than_n_of": [sum(1 for v in vals if total > v), len(vals)],
-            })
-            k, n = comparison["higher_than_n_of"]
-            comparison["rank_text"] = ("higher than every reference year" if k == n else
-                                       "lower than every reference year" if k == 0 else
-                                       f"higher than {k} of the {n} reference years")
-    caveats = [FIRE_DEFINITIONS["headline_count"]]
-    if any(d.year < 2026 for d in s["pk_day"]) or (comparison and ref):
+        comparison = compare_years_same_dates(daily, kind, rname, start, end, s, observed, cnt, frpc, compare_years)
+        comparison["basis"] = basis
+        if has_n20 and basis != "n20":
+            s20 = _series(daily, kind, rname, start, end, days_with_file & n20_days)
+            c20 = compare_years_same_dates(daily, kind, rname, start, end, s20, days_with_file & n20_days, "n_n20_hn", "frp_n20_hn", compare_years)
+            c20["basis"] = "n20"
+            comparison["noaa20_only"] = {"fires": int(s20.loc[s20["has_file"], "n_n20_hn"].sum()) if s20["has_file"].any() else 0, **c20,
+                                         "note": "Quote this block for 'more or fewer than last year': the satellite is held fixed."}
+    caveats = [FIRE_DEFINITIONS["headline_count"], FIRE_DEFINITIONS["what_burns"]]
+    if any(d.year < 2026 for d in s["pk_day"]) or comparison:
         caveats.append("Archive days before the 2026 ingester are keyed by UTC date and lack pass times; the satellite roster differs by year "
-                       "(Suomi NPP + NOAA-20 in 2020–2022, NOAA-21 from 2023, Suomi NPP retired 2026-11-01), so deduplicated counts are the comparable ones.")
+                       "(Suomi NPP + NOAA-20 in 2020–2025, NOAA-21 in the 2026 NRT files, Suomi NPP retired 2026-11-01), so year comparisons "
+                       "use the NOAA-20-only series (comparison.noaa20_only or basis='n20').")
     if manifest.get("suspect_days"):
         sus = [x["day"] for x in manifest["suspect_days"] if start.strftime("%m-%d") <= x["day"][5:] <= end.strftime("%m-%d")]
         if sus:
@@ -549,10 +559,64 @@ def fire_trends(region: str = "Pakistan", start: Optional[date] = None, end: Opt
     if missing:
         caveats.append(f"{len(missing)} day(s) in the window have no fire file: {', '.join(missing[:5])}" + (" …" if len(missing) > 5 else ""))
     out = {"region": {"kind": kind, "name": rname}, "window": _window_dict(start, end), "season": season_name, "bucket": bucket,
-           "summary": summary, "rows": rows, "comparison": comparison, "caveats": caveats, "definitions": FIRE_DEFINITIONS,
+           "basis": basis, "summary": summary, "rows": rows, "comparison": comparison, "caveats": caveats, "definitions": FIRE_DEFINITIONS,
            "store_built_at": manifest.get("built_at")}
+    if season_name == "kharif_rice_residue":
+        out["season_window_note"] = SEASON_WINDOW_NOTE
     if note:
         out["note"] = note
+    return out
+
+
+def compare_years_same_dates(daily: pd.DataFrame, kind: str, rname: str, start: date, end: date, s: pd.DataFrame, observed: set,
+                             cnt: str, frpc: str, compare_years: Sequence[int]) -> Dict[str, Any]:
+    """Like for like: reference years are summed over the calendar days that have data in the current
+    window (on the same basis), and a reference year needs 60 % of those days to be used."""
+    total = int(s.loc[s["has_file"], cnt].sum()) if s["has_file"].any() else 0
+    mmdd_with_data = {d.strftime("%m-%d") for d, f in zip(s["pk_day"], s["has_file"]) if f}
+    ref = []
+    for y in compare_years:
+        if y >= start.year:
+            continue
+        try:
+            ys, ye = start.replace(year=y), end.replace(year=y)
+        except ValueError:                       # 29 Feb
+            continue
+        rs = _series(daily, kind, rname, ys, ye, observed)
+        rv = rs[rs["has_file"] & rs["pk_day"].map(lambda d: d.strftime("%m-%d") in mmdd_with_data)]
+        ref.append({"year": y, "fires": int(rv[cnt].sum()) if len(rv) else None, "frp_mw": _r(rv[frpc].sum(), 0) if len(rv) else None,
+                    "days_with_data": int(len(rv)), "days_missing": int(len(mmdd_with_data) - len(rv))})
+    vals = [r["fires"] for r in ref if r["fires"] is not None and r["days_with_data"] >= max(1, int(0.6 * len(mmdd_with_data)))]
+    comparison: Dict[str, Any] = {"window": f"{start.strftime('%m-%d')} to {end.strftime('%m-%d')} in each year",
+                                  "days_compared": len(mmdd_with_data), "years": ref}
+    if len(mmdd_with_data) < len(s):
+        comparison["note"] = (f"Only the {len(mmdd_with_data)} calendar days observed in the current window are summed in each "
+                              f"reference year ({len(s) - len(mmdd_with_data)} days of the window have no file or no rows on this basis).")
+    if vals:
+        comparison.update({
+            "reference_mean": _r(float(np.mean(vals)), 0), "reference_min": int(min(vals)), "reference_max": int(max(vals)),
+            "ratio_to_mean": _r(total / float(np.mean(vals)), 2) if np.mean(vals) > 0 else None,
+            "higher_than_n_of": [sum(1 for v in vals if total > v), len(vals)],
+        })
+        k, n = comparison["higher_than_n_of"]
+        comparison["rank_text"] = ("higher than every reference year" if k == n else
+                                   "lower than every reference year" if k == 0 else
+                                   f"higher than {k} of the {n} reference years")
+    return comparison
+
+
+def satellite_days(manifest: Dict[str, Any], key: str) -> set:
+    """Pakistan days on which satellite `key` ('n20' …) contributed rows, or the file is empty (a
+    legitimate zero). A day with rows from other satellites only is a missing pass for `key`."""
+    out = set()
+    for d, rec in manifest.get("days", {}).items():
+        rbs = rec.get("rows_by_satellite")
+        if rbs is None:                          # built before schema 2: fall back to the sources list
+            srcs = rec.get("sources") or []
+            if not rec.get("rows") or any(fr.satellite_key(x) == key for x in srcs):
+                out.add(date.fromisoformat(d))
+        elif rbs.get(key, 0) > 0 or not rec.get("rows"):
+            out.add(date.fromisoformat(d))
     return out
 
 
@@ -697,8 +761,9 @@ def fire_hotspots(*, region: Optional[str] = None, center: Optional[Tuple[float,
     n_cells = int(len(cells))
     return {**base, "min_days": min_days, "window_days": PERSISTENT_WINDOW_DAYS, "cells_total": n_cells,
             "persistent_cells": int(len(persistent)), "one_off_share": _r((cells["days_active"] == 1).sum() / max(n_cells, 1), 2),
-            "rows": rows, "label": "persistent thermal source: a ~2 km cell with detections on many days, consistent with kilns, gas flares, "
-                                   "landfills or industry rather than a one-off field burn"}
+            "rows": rows, "label": f"persistent thermal source: a ~2 km cell with detections on at least {min_days} of the last {PERSISTENT_WINDOW_DAYS} days. "
+                                   "A flag for investigation, not a verdict: kilns, gas flares, landfills and industry burn like this, but so do "
+                                   "many fields in one cell burning on successive days. Persistent cells are reported, never removed from counts."}
 
 
 # ── 4. the old one-day summary, fixed ─────────────────────────────────────────
@@ -732,7 +797,8 @@ LINK_DEFINITIONS = {
     "fire_series": "deduplicated high/nominal fires within 200 km of the city per Pakistan day: upwind FRP uses the ±60° cone on that day's station wind; frp_200 is the whole ring",
     "lag": "lag k pairs the fire day d with the PM2.5 day d+k (k = 0, 1, 2)",
     "correlation": "Pearson and Spearman over the paired days (n given); |r| < 0.3 weak, < 0.6 moderate, else strong; no significance test",
-    "fire_influenced_day": "upwind FRP on the day or the day before above the window's 75th percentile AND PM2.5 ≥ 120 % of the prior three days' mean AND at least 10 µg/m³ higher",
+    "candidate_smoke_transport_episode": "upwind FRP on the day or the day before above the window's 75th percentile AND PM2.5 ≥ 120 % of the prior three days' mean AND at least 10 µg/m³ higher. A candidate only: meteorology drives both fire activity and accumulation, so the rule is a screen, not an attribution",
+    "fire_influenced_day": "former name of candidate_smoke_transport_episode (kept one release for older readers)",
     "not_causation": FIRE_DEFINITIONS["not_causation"],
 }
 
@@ -869,11 +935,11 @@ async def fire_pm25_link(db, city: str, start: Optional[date] = None, end: Optio
     best = max(((k, lag, v) for k, lags in corr.items() for lag, v in lags.items() if v["spearman"] is not None),
                key=lambda t: abs(t[2]["spearman"]), default=None)
     if n_pm and flagged:
-        summary = (f"On {len(flagged)} of {n_pm} days with PM2.5, upwind fire FRP was above the window's 75th percentile and PM2.5 rose "
-                   f"≥ 20 % (and ≥ 10 µg/m³) on the prior three days' mean — a pattern consistent with smoke transport; stagnation and "
-                   f"local sources can produce the same rise, so this is not an attribution.")
+        summary = (f"{len(flagged)} of {n_pm} days with PM2.5 are candidate smoke-transport episodes: upwind fire FRP above the window's "
+                   f"75th percentile and PM2.5 ≥ 20 % (and ≥ 10 µg/m³) above the prior three days' mean, a pattern consistent with smoke "
+                   f"transport; stagnation, a shallow boundary layer and local sources produce the same rise, so this is a screen, not an attribution.")
     elif n_pm:
-        summary = "No day met the fire-influenced rule in this window; fires upwind did not coincide with a PM2.5 rise on the prior three days."
+        summary = "No candidate smoke-transport episode in this window: upwind fires did not coincide with a PM2.5 rise on the prior three days."
     else:
         summary = f"No PM2.5 reporting days for {match.name} in this window."
     if best:
@@ -884,12 +950,16 @@ async def fire_pm25_link(db, city: str, start: Optional[date] = None, end: Optio
     rows = series if len(series) <= MAX_ROWS else sorted(series, key=lambda r: (not r["flag"], r["day"]))[:MAX_ROWS]
     rows = sorted(rows, key=lambda r: r["day"])
     out_rows = [{**{k: v for k, v in r.items() if k not in ("has_fire_file",)}, "day": r["day"].isoformat()} for r in rows]
-    caveats = [LINK_DEFINITIONS["not_causation"]]
+    caveats = [LINK_DEFINITIONS["not_causation"],
+               "The lagged correlation is exploratory: it is not controlled for wind, boundary-layer depth, humidity or the prior PM2.5, "
+               "and it has not been tested against a meteorology-only baseline."]
     if n_wind < n_pm:
         caveats.append(f"Upwind FRP is defined on {n_wind} of {len(series)} days (station wind or fire file missing on the others); frp_200 covers the whole ring regardless of wind.")
     if passes.get("day_basis") and "acq_utc" in passes["day_basis"]:
         caveats.append("Some days in the window are UTC-keyed archive days without pass times.")
     return {"city": match.name, "window": _window_dict(start, end), "pm25_statistic": pm.get("statistic"), "days": len(series),
             "days_with_pm25": n_pm, "days_with_upwind": n_wind, "upwind_p75_mw": _r(p75), "correlations": corr,
-            "fire_influenced_days": [d.isoformat() for d in flagged], "rows": out_rows, "rows_truncated": len(series) > MAX_ROWS,
+            "candidate_episodes": [d.isoformat() for d in flagged],
+            "fire_influenced_days": [d.isoformat() for d in flagged],       # deprecated alias, one release
+            "rows": out_rows, "rows_truncated": len(series) > MAX_ROWS,
             "summary": summary, "passes": passes, "caveats": caveats, "definitions": LINK_DEFINITIONS}

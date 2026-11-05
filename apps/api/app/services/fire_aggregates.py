@@ -14,10 +14,16 @@ Per detection: pk_day, acq_utc (null for the UTC-keyed archive days), lat, lon, 
 province, district, cell_id (0.02° grid), dup_group, is_primary, grp_hn.
 
 Rules (see fire_regions):
-- dedup: different satellites, ≤ 1 km, ≤ 90 min apart = one fire; primary = highest FRP.
-- the headline count everywhere is n_dedup_hn — deduplicated fires with at least one high or
-  nominal-confidence detection. Raw counts depend on how many satellites flew (SNPP+N20 in
-  2020, N21 from 2023, SNPP retired 2026-11-01) and old files carry no low-confidence rows.
+- dedup: different satellites, ≤ 1 km, ≤ 90 min apart = one detection cluster (the union-find
+  grouping is transitive); primary = highest FRP. A cluster is not a verified individual fire.
+- the operational count everywhere is n_dedup_hn — deduplicated clusters with at least one high
+  or nominal-confidence detection. Raw counts depend on how many satellites flew (SNPP+N20 in
+  2020–2025, N21 in the 2026 NRT files, SNPP retired 2026-11-01) and old files carry no
+  low-confidence rows.
+- the *comparison* basis across years is n_n20_hn: NOAA-20 detections (high/nominal) alone.
+  NOAA-20 flew and was processed in every archive year, so that series does not change with the
+  roster. Dedup cannot remove the extra fires a third satellite sees; a single-satellite series can.
+  Per-day row counts by satellite sit in the manifest (`rows_by_satellite`) for the pass audit.
 
 Task: FireAggregateTask.run(backfill=…, dry_run=…, since=…) — POST /api/v1/tasks/fires/aggregate.
 Incremental runs rebuild only days whose CSV changed (blob `updated`) plus the last 4 Pakistan
@@ -46,7 +52,7 @@ from app.services.fires import PK_TZ, blob_paths, parse_firms_csv
 logger = logging.getLogger(__name__)
 
 TASK = "fires-aggregate"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2                   # 2: n_n20_* metrics, rows_by_satellite, pkt_from; a lower manifest version forces a backfill
 AGG_PREFIX = "hindcast/firms/agg"
 MANIFEST_PATH = f"{AGG_PREFIX}/manifest.json"
 DAILY_PATH = f"{AGG_PREFIX}/daily_regions.parquet"
@@ -62,7 +68,7 @@ DEDUP_RULE = {"different_satellites": True, "max_km": fr.DEDUP_KM, "max_minutes"
 DET_COLUMNS = ["pk_day", "acq_utc", "lat", "lon", "frp", "confidence", "satellite", "day_basis", "daynight",
                "country", "province", "district", "cell_id", "dup_group", "is_primary", "grp_hn"]
 REGION_METRICS = ["n_raw", "n_hn", "n_dedup", "n_dedup_hn", "n_high", "n_nominal", "n_low", "n_day", "n_night",
-                  "frp_raw", "frp_hn", "frp_dedup_hn", "frp_max"]
+                  "frp_raw", "frp_hn", "frp_dedup_hn", "frp_max", "n_n20_raw", "n_n20_hn", "frp_n20_hn"]
 
 
 def year_path(year: int) -> str:
@@ -116,11 +122,13 @@ def build_day(day: date, csv_text: str, meta: Optional[Dict[str, Any]], idx: Opt
     }, columns=DET_COLUMNS)
     regions = rollup_regions(det)
     meta = meta or {}
+    keys = pd.Series([fr.satellite_key(x) or "other" for x in sat.tolist()], dtype=object)
     info = {
         "rows": n, "format": fmt, "status": meta.get("status", "archive"),
         "sources": [s.get("source") for s in meta.get("sources", []) if s.get("status") == "ok"] or sorted({s for s in sat.tolist() if s}),
         "observation_period": meta.get("observation_period"), "fetched_at": meta.get("fetched_at"),
         "n_dedup_hn": int((primary & grp_hn).sum()),
+        "rows_by_satellite": {k: int(v) for k, v in keys.value_counts().items()} if n else {},
     }
     return DayBuild(day, det, regions, info)
 
@@ -132,12 +140,15 @@ def _metrics(g: pd.DataFrame) -> Dict[str, Any]:
     frp = g["frp"].to_numpy(dtype=float)
     conf = g["confidence"].to_numpy()
     dn = g["daynight"].to_numpy()
+    n20 = np.array([fr.satellite_key(x) == fr.CONSISTENT_SATELLITE for x in g["satellite"].tolist()], dtype=bool)
     return {
         "n_raw": int(len(g)), "n_hn": int(hn.sum()), "n_dedup": int(prim.sum()), "n_dedup_hn": int((prim & ghn).sum()),
         "n_high": int((conf == "h").sum()), "n_nominal": int((conf == "n").sum()), "n_low": int((conf == "l").sum()),
         "n_day": int((dn == "D").sum()), "n_night": int((dn == "N").sum()),
         "frp_raw": round(float(frp.sum()), 1), "frp_hn": round(float(frp[hn].sum()), 1),
         "frp_dedup_hn": round(float(frp[prim & ghn].sum()), 1), "frp_max": round(float(frp.max()), 1) if len(frp) else 0.0,
+        # consistent-satellite series: NOAA-20 rows alone (same-satellite pixels never merge, so no dedup is needed)
+        "n_n20_raw": int(n20.sum()), "n_n20_hn": int((n20 & hn).sum()), "frp_n20_hn": round(float(frp[n20 & hn].sum()), 1),
     }
 
 
@@ -325,6 +336,11 @@ class FireAggregateTask:
         bucket = self.bucket
         c = outcome.counts
         manifest = _read_json(bucket, MANIFEST_PATH) or {}
+        if manifest.get("days") and int(manifest.get("schema_version") or 0) < SCHEMA_VERSION and not backfill:
+            # an older store lacks columns the readers expect: rebuild everything once
+            logger.info("%s: manifest schema %s < %s, forcing a backfill", TASK, manifest.get("schema_version"), SCHEMA_VERSION)
+            outcome.details["schema_upgrade"] = {"from": manifest.get("schema_version"), "to": SCHEMA_VERSION}
+            backfill = True
         blobs = list_day_blobs(bucket)
         days = plan_days(blobs, manifest, backfill=backfill, since=since, today_pkt=self.today_pkt)
         by_year: Dict[int, List[date]] = {}
@@ -397,10 +413,12 @@ class FireAggregateTask:
         _write_parquet(bucket, DAILY_PATH, daily)
         suspects = suspect_days(daily)
         built_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        pkt_from = min((d for d, r in day_records.items() if r.get("format") == "pkt_v2"), default=None)
         manifest = {
             "schema_version": SCHEMA_VERSION, "built_at": built_at, "run_id": outcome.run_id,
             "dedup_rule": DEDUP_RULE, "cell_size_deg": fr.CELL_DEG, "day_prefix": DAY_PREFIX,
-            "low_confidence_from": min((d for d, r in day_records.items() if r.get("format") == "pkt_v2"), default=None),
+            "consistent_satellite": fr.CONSISTENT_SATELLITE,
+            "low_confidence_from": pkt_from, "pkt_from": pkt_from,
             "days": dict(sorted(day_records.items())), "suspect_days": suspects,
         }
         bucket.blob(MANIFEST_PATH).upload_from_string(json.dumps(manifest), content_type="application/json")
@@ -449,6 +467,9 @@ class AggStore:
         df = _read_parquet(self.bucket, DAILY_PATH)
         if df is None:
             df = pd.DataFrame(columns=["pk_day", "region_kind", "region", *REGION_METRICS])
+        for c in REGION_METRICS:                 # a store built before a schema bump lacks the newer metrics
+            if c not in df.columns:
+                df[c] = np.nan
         df["pk_day"] = pd.to_datetime(df["pk_day"]).dt.date
         self._daily = (built, df)
         return df

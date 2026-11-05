@@ -62,6 +62,7 @@ DEFINITIONS = {
     "wind": "ECMWF IFS 0.25° forecast (Open-Meteo point API), speed-weighted vector mean of the hourly 'from' direction over the Pakistan day; 850 hPa drives the outlook, 10 m is shown alongside",
     "upwind_load": "sum of FRP (MW) of deduplicated high/nominal fires within 200 km, inside ±60° of the 850 hPa wind-from direction, and within one day's transport at the forecast speed (speed floor 1 m/s)",
     "bands": "none < 100 MW; low 100–300; elevated 300–1,000 (the forecast model's fire-driver threshold); high 1,000–3,000; very_high > 3,000",
+    "bands_status": "unvalidated screening categories: the bands rank cities by upwind fire load under the forecast wind; no skill against observed PM2.5 has been established yet, so a band is not a health or air-quality claim",
     "fires_carried_forward": "the fires seen on the latest two Pakistan days are assumed to keep burning through the outlook days; new fires are not predicted",
     "not_pm25": "a smoke-source outlook, not a PM2.5 forecast: stagnation, boundary-layer depth and local sources decide the concentration",
     "not_causation": fa.FIRE_DEFINITIONS["not_causation"],
@@ -269,7 +270,7 @@ async def build_outlook(store: AggStore, cities: List[Dict[str, Any]], *, http, 
         "generated_at": now_utc.isoformat().replace("+00:00", "Z"), "today_pkt": today.isoformat(), "model": MODEL,
         "fires_as_of": fires_info, "fires_total_recent": int(len(fires)), "cities": results, "summary": summarise(results),
         "definitions": DEFINITIONS,
-        "caveats": [DEFINITIONS["fires_carried_forward"], DEFINITIONS["not_pm25"],
+        "caveats": [DEFINITIONS["fires_carried_forward"], DEFINITIONS["not_pm25"], DEFINITIONS["bands_status"],
                     "The 850 hPa and 10 m winds can disagree; the band follows 850 hPa, both are shown."],
     }
     return doc, failures

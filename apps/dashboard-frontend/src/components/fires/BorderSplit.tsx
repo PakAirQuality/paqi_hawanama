@@ -44,7 +44,7 @@ export function BorderSplit({ data }: { data: SplitResponse }) {
         </ResponsiveContainer>
       </div>
       <p className="mt-1.5 text-[11px] text-slate-500">
-        {fmtInt(grand)} fires in the box season to date{data.days_missing ? `; ${data.days_missing} day(s) have no file` : ''}. Other = Rajasthan, J&K, Himachal, Afghanistan, Iran.
+        {fmtInt(grand)} detection clusters in the box season to date{data.totals.pakistan_punjab != null ? ` (Pakistan Punjab ${fmtInt(data.totals.pakistan_punjab)} of Pakistan's ${fmtInt(data.totals.pakistan)})` : ''}{data.days_missing ? `; ${data.days_missing} day(s) unobserved` : ''}. Other = Rajasthan, J&K, Himachal, Afghanistan, Iran.{data.basis === 'n20' ? ' NOAA-20 only.' : ''}
       </p>
     </div>
   )

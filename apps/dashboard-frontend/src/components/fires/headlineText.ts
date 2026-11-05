@@ -4,10 +4,11 @@ import { dayLabel, fmtInt } from './format'
 export interface HeadlineParts {
   lead: string        // "So far this season (16 Oct – 3 Nov, the 19 days with data)"
   count: string       // "12,726"
-  unit: string        // "fires"
+  unit: string        // "fire detections"
   vsLast: string | null
   vsRef: string | null
   rank: string | null
+  basisNote: string | null   // "NOAA-20 only" when the comparison is on the consistent series
   subline: string
 }
 
@@ -17,7 +18,11 @@ function compare(pct: number | null, what: string): string | null {
   return `${Math.abs(pct)}% ${pct < 0 ? 'fewer' : 'more'} than ${what}`
 }
 
-/** The sentence at the top of the page, built from /seasons only. */
+/**
+ * The sentence at the top of the page, built from /seasons only. The count is on the page's basis; the
+ * year-on-year clauses come from the NOAA-20-only block when the store carries it, because the satellite
+ * roster changed and the all-satellite ratio is not comparable across years.
+ */
 export function headlineParts(data: SeasonsResponse, regionLabel: string): HeadlineParts {
   const h = data.headline
   const w = h.window
@@ -27,16 +32,24 @@ export function headlineParts(data: SeasonsResponse, regionLabel: string): Headl
   const lead = data.season.complete
     ? `In the ${seasonYear} season (${dayLabel(data.season.start)} – ${dayLabel(data.season.end)}${gapNote})`
     : `So far this season (${dates}${gapNote})`
-  const ref = h.reference
+  const cmp = h.comparison_n20 ?? h
+  const onN20 = h.comparison_n20 != null || data.basis === 'n20'
+  const ref = cmp.reference
   const refYears = ref.used_years.length ? `${ref.used_years[0]}–${ref.used_years[ref.used_years.length - 1]}` : null
+  const basisSentence = data.basis === 'n20'
+    ? 'Counts are NOAA-20 detections alone, the satellite flown every year since 2020, so the series is comparable across years.'
+    : onN20
+      ? 'Counts are deduplicated detection clusters from every satellite flown that day; the year-on-year figures hold the satellite fixed (NOAA-20 only), because deduplication cannot remove the extra fires an added satellite sees.'
+      : 'Counts are deduplicated detection clusters from every satellite flown that day; the satellite roster changed over the years, so the year-on-year figures are indicative only.'
   return {
     lead,
     count: fmtInt(h.fires),
-    unit: h.fires === 1 ? 'fire' : 'fires',
-    vsLast: h.last_year ? compare(h.last_year.pct_change, `the same dates in ${h.last_year.year}`) : null,
+    unit: h.fires === 1 ? 'fire detection' : 'fire detections',
+    vsLast: cmp.last_year ? compare(cmp.last_year.pct_change, `the same dates in ${cmp.last_year.year}`) : null,
     vsRef: refYears && ref.pct_change != null ? compare(ref.pct_change, `the ${refYears} average on those dates`) : null,
     rank: ref.rank_text,
-    subline: `${regionLabel}. Counts are deduplicated fires with a high- or nominal-confidence detection, the measure that stays comparable as satellites change; they are a floor, not a census.`,
+    basisNote: onN20 && h.comparison_n20 ? 'NOAA-20 only' : null,
+    subline: `${regionLabel}. ${basisSentence} A detection cluster is not a verified fire and does not say what burns; counts are a floor, not a census.`,
   }
 }
 
@@ -46,7 +59,7 @@ export function headlineSentence(p: HeadlineParts, regionLabel: string): string 
   if (p.vsLast) tail.push(p.vsLast)
   if (p.vsRef) tail.push(p.vsRef)
   let s = parts[0]
-  if (tail.length) s += `, ${tail.join(' and ')}`
+  if (tail.length) s += `, ${tail.join(' and ')}${p.basisNote ? ` (${p.basisNote})` : ''}`
   if (p.rank) s += ` (${p.rank})`
   return `${s}.`
 }

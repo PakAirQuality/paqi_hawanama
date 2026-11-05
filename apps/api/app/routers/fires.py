@@ -94,26 +94,29 @@ async def get_meta():
     return _respond(data, CC_META)
 
 
-@router.get("/seasons", summary="Every burning season since 2020 as daily and 7-day-mean fire counts, with the season-to-date headline")
+BASIS = Query("all", pattern="^(all|n20)$", description="all = every satellite (deduplicated); n20 = NOAA-20 only, the series that is comparable across years")
+
+
+@router.get("/seasons", summary="Every burning season since 2020 as daily, 7-day-mean and cumulative detection counts, with the season-to-date headline")
 async def get_seasons(region: str = Query("pakistan", max_length=80, description="Chip id, province, district, 'Indian Punjab', 'Haryana', 'India' or 'bbox'"),
-                      season: str = Query("rice", pattern="^(rice|wheat)$")):
-    key = ("seasons", region.strip().lower(), season)
-    data = await _single_flight(key, _cached("seasons", key[1:], lambda s, t: fp.seasons(region, season, store=s, today=t)))
+                      season: str = Query("rice", pattern="^(rice|wheat)$"), basis: str = BASIS):
+    key = ("seasons", region.strip().lower(), season, basis)
+    data = await _single_flight(key, _cached("seasons", key[1:], lambda s, t: fp.seasons(region, season, basis, store=s, today=t)))
     return _respond(data, CC_LIVE)
 
 
 @router.get("/districts", summary="District league table for the season to date, with the same dates last year")
 async def get_districts(season: str = Query("rice", pattern="^(rice|wheat)$"), region: str = Query("pakistan", max_length=80),
-                        limit: int = Query(40, ge=1, le=60)):
-    key = ("districts", season, region.strip().lower(), limit)
-    data = await _single_flight(key, _cached("districts", key[1:], lambda s, t: fp.districts(season, region, limit=limit, store=s, today=t)))
+                        limit: int = Query(40, ge=1, le=60), basis: str = BASIS):
+    key = ("districts", season, region.strip().lower(), limit, basis)
+    data = await _single_flight(key, _cached("districts", key[1:], lambda s, t: fp.districts(season, region, basis, limit=limit, store=s, today=t)))
     return _respond(data, CC_LIVE)
 
 
-@router.get("/split", summary="Daily fires by country for the season: Pakistan, Indian Punjab, Haryana, rest of the box")
-async def get_split(season: str = Query("rice", pattern="^(rice|wheat)$")):
-    key = ("split", season)
-    data = await _single_flight(key, _cached("split", key[1:], lambda s, t: fp.split(season, store=s, today=t)))
+@router.get("/split", summary="Daily detections by region for the season: Pakistan, Pakistan Punjab, Indian Punjab, Haryana, rest of the box")
+async def get_split(season: str = Query("rice", pattern="^(rice|wheat)$"), basis: str = BASIS):
+    key = ("split", season, basis)
+    data = await _single_flight(key, _cached("split", key[1:], lambda s, t: fp.split(season, basis, store=s, today=t)))
     return _respond(data, CC_LIVE)
 
 

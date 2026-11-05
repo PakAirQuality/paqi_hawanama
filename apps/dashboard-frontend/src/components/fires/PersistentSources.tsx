@@ -12,8 +12,9 @@ export function PersistentSources({ data, date }: { data: PersistentResponse; da
     <div>
       <p className="text-[13px] text-slate-700">
         In the last {data.window_days} days ({fmtInt(data.fires_in_area)} fires in {data.region.label}), {oneOff != null ? `${oneOff}% of burning cells lit on a single day` : 'most burning cells lit once'};{' '}
-        <span className="font-semibold">{fmtInt(data.persistent_cells)}</span> cell{data.persistent_cells === 1 ? '' : 's'} burned on {data.min_days} or more days — kilns, gas flares, landfills or industry rather than field burns.
+        <span className="font-semibold">{fmtInt(data.persistent_cells)}</span> cell{data.persistent_cells === 1 ? '' : 's'} burned on {data.min_days} or more days.
       </p>
+      <p className="mt-1 text-[12px] text-slate-500">A flag for investigation, not a verdict: kilns, gas flares, landfills and industry burn like this, but so do many fields in one ~2 km cell lighting on successive days. Persistent cells stay in every count above.</p>
       {data.rows.length > 0 && (
         <ul className="mt-3 divide-y divide-slate-100 text-[12px]">
           {data.rows.slice(0, 12).map(r => (
