@@ -56,6 +56,7 @@ LEVEL_AGL_M = {1000: 100.0, 925: 700.0, 850: 1400.0, 700: 2900.0}   # nominal he
 ENSEMBLE_DX_DEG = 0.25                                    # one IFS grid cell sideways
 ENSEMBLE_DP_HPA = 25.0                                    # vertical offset of the members
 ENSEMBLE_AGES: Tuple[int, ...] = (24, 48, 72)
+ENSEMBLE_DT_MIN = 30                                      # the members are a sensitivity test: half the central path's resolution
 HOURS = 72
 MAX_HOURS = 72
 DT_MIN = 15
@@ -372,17 +373,156 @@ def member_starts(level: int) -> List[Tuple[float, float, float]]:
     return out
 
 
+def _field_stack(field: WindField) -> Tuple[List[int], np.ndarray]:
+    """All levels and variables of a field as one array (L, nlat, nlon, T, 3), built once per field."""
+    stack = getattr(field, "_stack", None)
+    if stack is None:
+        levels = sorted(field.u, reverse=True)
+        stack = np.stack([np.stack([field.u[lv], field.v[lv], field.z[lv]], axis=-1) for lv in levels], axis=0)
+        field._levels, field._stack = levels, stack          # type: ignore[attr-defined]
+    return field._levels, stack                               # type: ignore[attr-defined]
+
+
+def _sample_stack(field: WindField, lats: np.ndarray, lons: np.ndarray, th: float) -> np.ndarray:
+    """Vectorised WindField.sample on every level at once: (L, n, 3) of u, v, z, NaN where a point is outside or on missing cells."""
+    levels, S = _field_stack(field)
+    la, lo = field.lat_axis, field.lon_axis
+    n = len(lats)
+    out = np.full((len(levels), n, 3), np.nan)
+    if not (0.0 <= th <= field.n_hours - 1):
+        return out
+    inside = (lats >= la[0]) & (lats <= la[-1]) & (lons >= lo[0]) & (lons <= lo[-1])
+    if not inside.any():
+        return out
+    i = np.clip(np.searchsorted(la, lats, side="right") - 1, 0, max(len(la) - 2, 0))
+    j = np.clip(np.searchsorted(lo, lons, side="right") - 1, 0, max(len(lo) - 2, 0))
+    k = min(int(math.floor(th)), field.n_hours - 2)
+    ftt = th - k
+    i1 = np.minimum(i + 1, len(la) - 1)
+    j1 = np.minimum(j + 1, len(lo) - 1)
+    fy = (lats - la[i]) / (la[i1] - la[i]) if len(la) > 1 else np.zeros(n)
+    fx = (lons - lo[j]) / (lo[j1] - lo[j]) if len(lo) > 1 else np.zeros(n)
+    num = np.zeros_like(out)
+    den = np.zeros_like(out)
+    for ci, cj, w in ((i, j, (1 - fy) * (1 - fx)), (i1, j, fy * (1 - fx)), (i, j1, (1 - fy) * fx), (i1, j1, fy * fx)):
+        ab = S[:, ci, cj, k:k + 2, :]                         # (L, n, 2, 3): both hours in one gather
+        a, b = ab[:, :, 0, :], ab[:, :, 1, :]
+        w3 = w[None, :, None]
+        ok = (w3 > 0) & ~np.isnan(a) & ~np.isnan(b)
+        num += np.where(ok, w3 * ((1 - ftt) * a + ftt * b), 0.0)
+        den += np.where(ok, w3, 0.0)
+    np.divide(num, den, out=out, where=den >= 0.25)          # fewer than a quarter of the weight on valid cells: left the data
+    out[:, ~inside, :] = np.nan
+    out[np.isnan(out).any(axis=2)] = np.nan                   # as the scalar sampler: any missing component voids the point
+    return out
+
+
+def _p_weights(levels: List[int], ps: np.ndarray) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """For each pressure the stack indices of the bracketing levels and the log-pressure weight of the upper one."""
+    asc = np.array(levels[::-1], dtype=float)                 # ascending pressure
+    p = np.clip(ps.astype(float), asc[0], asc[-1])
+    pos = np.searchsorted(asc, p, side="left")                # asc[pos] >= p
+    below = np.maximum(pos - 1, 0)                            # the lower-pressure (upper) level
+    hi_p, lo_p = asc[pos], asc[below]
+    with np.errstate(divide="ignore", invalid="ignore"):
+        w = np.where(hi_p > lo_p, (np.log(hi_p) - np.log(p)) / (np.log(hi_p) - np.log(lo_p)), 0.0)
+    L = len(levels)
+    return L - 1 - pos, L - 1 - below, w                      # stack order is descending pressure
+
+
+def _sample_groups(field, ps: np.ndarray, lats: np.ndarray, lons: np.ndarray, th: float) -> np.ndarray:
+    """Every member at once: one gather per field, then each member's log-pressure interpolation; the composite falls back to the coarse field."""
+    fine, coarse = (field.fine, field.coarse) if isinstance(field, CompositeField) else (field, None)
+    n = len(lats)
+    ar = np.arange(n)
+
+    def on(f: WindField, idx: np.ndarray, t: float) -> np.ndarray:
+        levels, _ = _field_stack(f)
+        hi, lo, w = _p_weights(levels, ps[idx])
+        S = _sample_stack(f, lats[idx], lons[idx], t)
+        sub = np.arange(len(idx))
+        return (1 - w)[:, None] * S[hi, sub] + w[:, None] * S[lo, sub]   # (m, 3); NaN in either level voids the point
+
+    val = on(fine, ar, th)
+    if coarse is not None:
+        miss = np.flatnonzero(np.isnan(val[:, 0]))
+        if len(miss):
+            val[miss] = on(coarse, miss, th + field._shift)
+    return val.T
+
+
+def integrate_many(field, lats0: np.ndarray, lons0: np.ndarray, ps: np.ndarray, t_start: datetime, hours: int,
+                   direction: str = "backward", dt_min: int = ENSEMBLE_DT_MIN) -> Dict[str, np.ndarray]:
+    """`integrate` for many parcels at once (the same scheme, vectorised): hourly arrays (hours+1, n), NaN once a parcel has left."""
+    sign = -1.0 if direction == "backward" else 1.0
+    dt_s = sign * dt_min * 60.0
+    steps_per_hour = int(round(60 / dt_min))
+    n = len(lats0)
+    lat, lon = lats0.astype(float).copy(), lons0.astype(float).copy()
+    th = field.hours_since_t0(t_start)
+    s0 = _sample_groups(field, ps, lat, lon, th)
+    alive = ~np.isnan(s0[0])
+    H = hours + 1
+    out_lat, out_lon = np.full((H, n), np.nan), np.full((H, n), np.nan)
+    out_z, out_spd = np.full((H, n), np.nan), np.full((H, n), np.nan)
+    out_lat[0], out_lon[0] = lat, lon
+    out_z[0], out_spd[0] = s0[2], np.hypot(s0[0], s0[1])
+
+    def step(la, lo, u, v):
+        return la + v * dt_s / M_PER_DEG, lo + u * dt_s / (M_PER_DEG * np.cos(np.radians(la)))
+
+    for k in range(1, hours * steps_per_hour + 1):
+        if not alive.any():
+            break
+        s = _sample_groups(field, ps, lat, lon, th)
+        alive &= ~np.isnan(s[0])
+        p_lat, p_lon = step(lat, lon, s[0], s[1])
+        th_next = th + sign * dt_min / 60.0
+        s2 = _sample_groups(field, ps, p_lat, p_lon, th_next)
+        alive &= ~np.isnan(s2[0])
+        for _ in range(2):                                   # Petterssen corrector, twice
+            lat_c, lon_c = step(lat, lon, 0.5 * (s[0] + s2[0]), 0.5 * (s[1] + s2[1]))
+            s3 = _sample_groups(field, ps, lat_c, lon_c, th_next)
+            alive &= ~np.isnan(s3[0])
+            p_lat, p_lon, s2 = lat_c, lon_c, s3
+        lat = np.where(alive, p_lat, np.nan)
+        lon = np.where(alive, p_lon, np.nan)
+        th = th_next
+        if k % steps_per_hour == 0:
+            h = k // steps_per_hour
+            out_lat[h], out_lon[h] = np.round(lat, 4), np.round(lon, 4)
+            out_z[h] = np.where(alive, np.round(s2[2], 0), np.nan)
+            out_spd[h] = np.where(alive, np.round(np.hypot(s2[0], s2[1]), 1), np.nan)
+    return {"lat": out_lat, "lon": out_lon, "z": out_z, "speed": out_spd}
+
+
 def ensemble_paths(field, lat0: float, lon0: float, levels: Sequence[int], t_start: datetime, hours: int,
                    direction: str) -> Dict[int, List[pd.DataFrame]]:
-    """Every member path per level, attributed to regions in one pass."""
-    members: Dict[int, List[pd.DataFrame]] = {}
-    for lv in levels:
-        members[lv] = []
-        for k, (dlat, dlon, p) in enumerate(member_starts(lv)):
-            m = integrate(field, lat0 + dlat, lon0 + dlon, lv, t_start, hours, direction, p_hpa=p)
-            m.attrs["member"] = k
-            m.attrs["start"] = (dlat, dlon, p)
-            members[lv].append(m)
+    """Every member path per level (one vectorised integration for all of them), attributed to regions in one pass."""
+    sign = -1.0 if direction == "backward" else 1.0
+    starts = [(lv, k, s) for lv in levels for k, s in enumerate(member_starts(lv))]
+    lats0 = np.array([lat0 + s[0] for _, _, s in starts])
+    lons0 = np.array([lon0 + s[1] for _, _, s in starts])
+    ps = np.array([s[2] for _, _, s in starts])
+    arrs = integrate_many(field, lats0, lons0, ps, t_start, hours, direction)
+    members: Dict[int, List[pd.DataFrame]] = {lv: [] for lv in levels}
+    for col, (lv, k, (dlat, dlon, p)) in enumerate(starts):
+        valid = ~np.isnan(arrs["lat"][:, col])
+        n_rows = int(np.argmin(valid)) if not valid.all() else len(valid)   # rows up to the first NaN
+        n_rows = max(n_rows, 1)
+        ages = sign * np.arange(n_rows, dtype=float)
+        m = pd.DataFrame({
+            "traj_id": lv, "time": [t_start + timedelta(hours=float(a)) for a in ages], "age_h": ages,
+            "lat": arrs["lat"][:n_rows, col], "lon": arrs["lon"][:n_rows, col], "height_agl": agl_for_p(p),
+            "z_msl": arrs["z"][:n_rows, col], "speed_ms": arrs["speed"][:n_rows, col],
+        })
+        if n_rows == 1 and np.isnan(arrs["lat"][0, col]):   # never sampled: keep the start point, as `integrate` does
+            m.loc[0, ["lat", "lon"]] = [lats0[col], lons0[col]]
+        m.attrs["left_domain"] = n_rows < hours + 1
+        m.attrs["p_hpa"] = float(p)
+        m.attrs["member"] = k
+        m.attrs["start"] = (dlat, dlon, p)
+        members[lv].append(m)
     frames = [m for ms in members.values() for m in ms if not m.empty]
     if frames:
         allpts = pd.concat(frames, ignore_index=True)
@@ -683,7 +823,8 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
     timings["attribution_s"] = round(time.monotonic() - clock3, 2)
     # the ensemble: members on the fine corridor, the coarse field behind it
     clock_e = time.monotonic()
-    members = ensemble_paths(CompositeField(fine, coarse), lat, lon, levels, at_utc, hours, direction)
+    # 81 integrations are seconds of CPU on Cloud Run: run them off the event loop so other requests keep flowing
+    members = await asyncio.to_thread(ensemble_paths, CompositeField(fine, coarse), lat, lon, levels, at_utc, hours, direction)
     ensemble = {**ensemble_summary(members, paths, lat, lon), "starts": {str(lv): [list(m.attrs["start"]) for m in ms] for lv, ms in members.items()},
                 "members": _member_coords(members)}
     timings["ensemble_s"] = round(time.monotonic() - clock_e, 2)
