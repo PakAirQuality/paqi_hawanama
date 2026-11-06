@@ -1262,6 +1262,7 @@ async def aq_trajectory(
             doc = await fk.run(http, agg_store(), lat, lon, at_utc, direction=direction, hours=hours, bucket=bucket, now=now_utc, label=name)
     except Exception as exc:  # noqa: BLE001
         # 3. the last resort: the station-wind cone of the old tool, with the failure named
+        logger.warning("aq_trajectory: engine failed for %s %s %s: %s: %s", name, at_utc.isoformat(), direction, type(exc).__name__, exc)
         from app.services.trajectory import get_trajectory_for_copilot
         db = await _get_db()
         try:
