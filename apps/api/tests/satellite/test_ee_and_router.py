@@ -111,6 +111,20 @@ def test_aai_is_not_zero_masked_and_maiac_reduces_both_platforms_under_the_stric
     assert any(k.endswith(".select") and a == (["Optical_Depth_055", "Optical_Depth_047"], ["aod550", "aod470"]) for k, a, _ in mod.log)
     assert {(r["product"], r["platform"]) for r in rows} == {("aod550", "terra"), ("aod550", "aqua"), ("aod470", "terra"), ("aod470", "aqua")}
     assert c.n_possible("tropomi", date(2026, 11, 1)) == {"lahore": 100}
+    mod.log.clear()
+    assert c.n_possible("maiac", date(2026, 11, 5)) == {"lahore": 100}
+    assert any(k == "ImageCollection.filterDate" and a == ("2026-10-05", "2026-11-06") for k, a, _ in mod.log)   # a month of granules, not just the day
+
+
+def test_sizing_the_maiac_grid_fails_clearly_when_no_granule_exists(monkeypatch):
+    c, mod = _client(monkeypatch)
+    orig = Node.getInfo
+    Node.getInfo = lambda self: 0 if self.kind.endswith("size") else orig(self)
+    try:
+        with pytest.raises(RuntimeError, match="no MAIAC granules"):
+            c.n_possible("maiac", date(2026, 11, 5))
+    finally:
+        Node.getInfo = orig
 
 
 def test_unpublished_days_give_no_rows(monkeypatch):
