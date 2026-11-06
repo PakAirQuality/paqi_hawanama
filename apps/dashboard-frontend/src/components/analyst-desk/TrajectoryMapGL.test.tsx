@@ -159,7 +159,7 @@ describe('TrajectoryMapGL', () => {
     const [small, big] = maps
     expect(small.removed).toBe(true)                                     // the preview gives up its WebGL context
     expect(big.options.interactive).toBe(true)
-    expect(big.options.cooperativeGestures).toBe(true)
+    expect(big.options.cooperativeGestures).toBe(false)                 // the wheel zooms the overlay map; no "⌘ + scroll" prompt
     expect(big.options.fitBoundsOptions).toEqual({ padding: 60 })
     expect((big.options.bounds as number[][])[1][1]).toBeGreaterThan(33.5)      // the expanded view holds every member
     big.fire('load')
