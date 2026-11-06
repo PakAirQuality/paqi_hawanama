@@ -118,6 +118,7 @@ def test_uniform_wind_back_trajectory_ends_upwind_at_the_right_distance():
     assert doc["left_domain"] == {"1000": False, "925": False, "850": False}
     assert doc["at_pkt"] == "2026-11-05 11:00 PKT" and doc["uses_forecast"] is False
     assert "10–20 %" in doc["definitions"]["error"] and any("never 'caused'" in c for c in doc["caveats"])
+    assert set(doc["timings"]) == {"winds_coarse_s", "winds_fine_s", "attribution_s", "fires_s", "total_s"} and doc["timings"]["total_s"] >= 0
 
 
 def test_forward_run_mirrors_backward_and_rotating_wind_curves_the_path():

@@ -61,6 +61,7 @@ MEMO_TTL_S = 600.0
 MEMO_MAX = 100
 CACHE_PREFIX = "forecasts/trajectories/kinematic"
 FORECAST_REFRESH_H = 6.0
+SLOW_RUN_S = 20.0                                         # a run slower than this is logged with its timings
 EXTRA_RECEPTORS: Dict[str, Tuple[float, float]] = {       # places the Pakistan registry does not hold
     "Delhi": ft.RECEPTORS["Delhi"], "New Delhi": ft.RECEPTORS["Delhi"],
     "Amritsar": (31.6340, 74.8723), "Chandigarh": (30.7333, 76.7794), "Ludhiana": (30.9010, 75.8573),
@@ -473,13 +474,18 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
         return {**cached, "cached": True}
     t_start = at_utc - timedelta(hours=hours) if direction == "backward" else at_utc
     t_end = at_utc if direction == "backward" else at_utc + timedelta(hours=hours)
+    timings: Dict[str, float] = {}
+    clock = time.monotonic()
     # pass 1: coarse field, draft paths
     coarse_pts = _thin(_grid(lat, lon, COARSE_DEG, COARSE_HALF_LAT, COARSE_HALF_LON), MAX_LOCATIONS)
     coarse = await fetch_winds(http, coarse_pts, t_start - timedelta(hours=1), t_end + timedelta(hours=1), levels)
+    timings["winds_coarse_s"] = round(time.monotonic() - clock, 2)
     drafts = {lv: integrate(coarse, lat, lon, lv, at_utc, hours, direction) for lv in levels}
     # pass 2: fine corridor around the drafts
     fine_pts = _thin(_corridor(list(drafts.values()) + [pd.DataFrame({"lat": [lat], "lon": [lon]})], FINE_DEG, CORRIDOR_DEG), MAX_LOCATIONS)
+    clock2 = time.monotonic()
     fine = await fetch_winds(http, fine_pts, t_start - timedelta(hours=1), t_end + timedelta(hours=1), levels)
+    timings["winds_fine_s"] = round(time.monotonic() - clock2, 2)
     paths = {lv: integrate(fine, lat, lon, lv, at_utc, hours, direction) for lv in levels}
     for lv, p in paths.items():                             # a parcel that left the fine corridor keeps its draft beyond that point
         if p.attrs.get("left_domain") and len(drafts[lv]) > len(p):
@@ -487,10 +493,13 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
             tail["from_draft"] = True
             paths[lv] = pd.concat([p, tail], ignore_index=True)
             paths[lv].attrs["left_domain"] = drafts[lv].attrs.get("left_domain", False)
+    clock3 = time.monotonic()
     attribute(paths)
+    timings["attribution_s"] = round(time.monotonic() - clock3, 2)
     # fires along the path
     det = None
     passes: Dict[str, Any] = {}
+    clock4 = time.monotonic()
     if store is not None:
         try:
             from app.services.fire_analytics import _detections_for, _headline
@@ -502,12 +511,16 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
             log.info("kinematic: fire detections unavailable: %s", exc)
             passes = {"note": f"fire detections unavailable: {type(exc).__name__}"}
     fires = fire_matches(paths, det) if det is not None else {"note": "fire store unavailable"}
+    timings["fires_s"] = round(time.monotonic() - clock4, 2)
+    timings["total_s"] = round(time.monotonic() - clock, 2)
+    if timings["total_s"] > SLOW_RUN_S:
+        log.warning("kinematic run slow: %s (%s %s %dh, %d+%d locations)", timings, direction, at_utc.isoformat(), hours, len(coarse_pts), len(fine_pts))
     uses_forecast = t_end > now
     doc: Dict[str, Any] = {
         "engine": ENGINE, "status": STATUS, "direction": direction, "hours": hours, "levels_hpa": list(levels),
         "origin": {"lat": round(lat, 4), "lon": round(lon, 4), "label": label or None},
         "at_utc": at_utc.isoformat(), "at_pkt": _pkt(at_utc), "generated_at": now.isoformat() + "Z", "uses_forecast": uses_forecast,
-        "wind_source": WIND_SOURCE, "locations_requested": [len(coarse_pts), len(fine_pts)],
+        "wind_source": WIND_SOURCE, "locations_requested": [len(coarse_pts), len(fine_pts)], "timings": timings,
         "paths": {str(lv): [{"age_h": float(r.age_h), "time_utc": r.time.isoformat(), "lat": float(r.lat), "lon": float(r.lon),
                              "height_agl_m": float(r.height_agl), "z_msl_m": (None if r.z_msl is None or pd.isna(r.z_msl) else float(r.z_msl)),
                              "speed_ms": (None if r.speed_ms is None or pd.isna(r.speed_ms) else float(r.speed_ms)),
