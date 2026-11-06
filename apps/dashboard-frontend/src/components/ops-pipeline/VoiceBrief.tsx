@@ -90,7 +90,9 @@ export function VoiceBrief({ target, availability, locationFailed, onRequestLoca
       const ac = new AbortController()
       const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT_MS)
       try {
-        const res = await fetch(`${API_BASE}/api/v1/voice/brief`, {
+        // The trailing slash matters: the site's hosting answers /brief with a 301 to /brief/, and a browser
+        // follows a 301 on a POST as a GET (the API answers both forms)
+        const res = await fetch(`${API_BASE}/api/v1/voice/brief/`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(requestBody(t, l)),
