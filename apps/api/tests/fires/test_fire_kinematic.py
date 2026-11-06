@@ -19,8 +19,9 @@ NOW = datetime(2026, 11, 5, 12)
 class FakeHttp:
     """Open-Meteo stand-in: a wind field that is uniform, or rotates with time, for every requested location."""
 
-    def __init__(self, from_deg=315.0, speed=5.0, rotate_deg_per_h=0.0, fail=False, calls_before_fail=99):
+    def __init__(self, from_deg=315.0, speed=5.0, rotate_deg_per_h=0.0, fail=False, calls_before_fail=99, shear=None):
         self.from_deg, self.speed, self.rot, self.fail, self.limit = from_deg, speed, rotate_deg_per_h, fail, calls_before_fail
+        self.shear = shear or {}                              # speed multiplier per level, e.g. {850: 2.0}
         self.calls = []
 
     async def get(self, url, params=None, timeout=None):
@@ -34,13 +35,14 @@ class FakeHttp:
         while t <= d1 + timedelta(hours=23):
             times.append(t.strftime("%Y-%m-%dT%H:%M"))
             t += timedelta(hours=1)
+        levels = sorted({int(v.split("_")[-1][:-3]) for v in params["hourly"].split(",")}, reverse=True)
         recs = []
         for la, lo in zip(lats, lons):
             h = {"time": times}
-            for lv in fk.LEVELS:
-                h[f"wind_speed_{lv}hPa"] = [self.speed] * len(times)
+            for lv in levels:
+                h[f"wind_speed_{lv}hPa"] = [self.speed * self.shear.get(lv, 1.0)] * len(times)
                 h[f"wind_direction_{lv}hPa"] = [(self.from_deg + self.rot * k) % 360 for k in range(len(times))]
-                h[f"geopotential_height_{lv}hPa"] = [{1000: 120, 925: 780, 850: 1500}[lv]] * len(times)
+                h[f"geopotential_height_{lv}hPa"] = [{1000: 120, 925: 780, 850: 1500, 700: 3100}[lv]] * len(times)
             recs.append({"latitude": la, "longitude": lo, "hourly": h})
         return NS(status_code=200, json=lambda: recs)
 
@@ -118,7 +120,53 @@ def test_uniform_wind_back_trajectory_ends_upwind_at_the_right_distance():
     assert doc["left_domain"] == {"1000": False, "925": False, "850": False}
     assert doc["at_pkt"] == "2026-11-05 11:00 PKT" and doc["uses_forecast"] is False
     assert "10–20 %" in doc["definitions"]["error"] and any("never 'caused'" in c for c in doc["caveats"])
-    assert set(doc["timings"]) == {"winds_coarse_s", "winds_fine_s", "attribution_s", "fires_s", "total_s"} and doc["timings"]["total_s"] >= 0
+    assert set(doc["timings"]) == {"winds_coarse_s", "winds_fine_s", "attribution_s", "ensemble_s", "fires_s", "total_s"} and doc["timings"]["total_s"] >= 0
+    assert set(http.calls[0]["hourly"].split(",")) >= {"wind_speed_700hPa", "geopotential_height_1000hPa"}   # 700 hPa fetched for the members
+
+
+def test_ensemble_members_fan_out_with_shear_and_collapse_in_uniform_wind():
+    uni = asyncio.run(fk.run(FakeHttp(315.0, 4.0), None, *LAHORE, ARRIVAL, now=NOW))   # 4 m/s: the offset members stay inside BOX
+    ens = uni["ensemble"]
+    assert ens["n_members"] == {"1000": 18, "925": 27, "850": 27} and ens["offsets"] == {"horizontal_deg": 0.25, "vertical_hpa": 25.0}
+    assert [len(m) for m in ens["members"]["925"]] == [73] * 27 and ens["left_domain"] == {"1000": 0, "925": 0, "850": 0}
+    assert ens["starts"]["925"][0] == [0.0, 0.0, 925.0] and [925.0 - 25, 925.0 + 25] == sorted({s[2] for s in ens["starts"]["925"]} - {925.0})
+    assert ens["starts"]["1000"][0] == [0.0, 0.0, 1000.0] and {s[2] for s in ens["starts"]["1000"]} == {1000.0, 975.0}
+    # uniform wind: every member is a parallel copy, so the spread is the start offset itself (~25-35 km), the sectors all NW
+    for age in ("24", "48", "72"):
+        assert ens["sectors"][age]["925"]["modal"] == "NW" and ens["sectors"][age]["925"]["n"] == 27 and ens["sectors"][age]["all"]["n"] == 72
+        assert 15 <= ens["spread_km"][age]["925"] <= 40, ens["spread_km"][age]
+    assert ens["sectors"]["24"]["925"]["agreement"] >= 0.9 and sum(ens["regions_at"]["24"]["925"].values()) == 27
+    # vertical shear: the ±25 hPa members travel at other speeds, so the spread grows with age
+    fk._MEMO.clear()                                                      # same place and hour: do not serve the uniform run
+    sh = asyncio.run(fk.run(FakeHttp(315.0, 4.0, shear={1000: 0.7, 850: 1.4, 700: 1.8}), None, *LAHORE, ARRIVAL, now=NOW))
+    s = sh["ensemble"]["spread_km"]
+    assert s["72"]["925"] > 2 * s["24"]["925"] > 2 * uni["ensemble"]["spread_km"]["24"]["925"], s   # grows with age, wider than the offsets alone
+    # the view carries the summary, not the paths; the definitions explain the members
+    view = fk.copilot_view(sh)
+    assert set(view["ensemble"]) == {"n_members", "offsets", "left_domain", "sectors", "regions_at", "spread_km"}
+    assert "not a probability" in view["definitions"]["ensemble"] and any("not a probability" in c for c in view["caveats"])
+
+
+def test_pressure_interpolation_and_the_composite_field():
+    http = FakeHttp(315.0, 4.0, shear={925: 1.2})           # slow enough that a 72 h member stays inside BOX
+    big = fk._grid(31.5, 74.4, 2.0, 10.0, 12.0)
+    coarse = asyncio.run(fk.fetch_winds(http, big, ARRIVAL - timedelta(hours=73), ARRIVAL + timedelta(hours=1)))
+    small = fk._grid(31.5, 74.4, 0.5, 1.0, 1.0)
+    fine = asyncio.run(fk.fetch_winds(http, small, ARRIVAL - timedelta(hours=73), ARRIVAL + timedelta(hours=1)))
+    th = fine.hours_since_t0(ARRIVAL)
+    u1000, _, z1000 = fine.sample(1000, 31.5, 74.4, th)
+    u925, _, z925 = fine.sample(925, 31.5, 74.4, th)
+    u_mid, _, z_mid = fine.sample_p(962.5, 31.5, 74.4, th)
+    w = (np.log(1000) - np.log(962.5)) / (np.log(1000) - np.log(925))
+    assert abs(u_mid - ((1 - w) * u1000 + w * u925)) < 1e-9 and abs(z_mid - ((1 - w) * z1000 + w * z925)) < 1e-9
+    assert fine.sample_p(925, 31.5, 74.4, th) == fine.sample(925, 31.5, 74.4, th) and fine.sample_p(1100, 31.5, 74.4, th) == fine.sample(1000, 31.5, 74.4, th)
+    assert fk.agl_for_p(925) == 700.0 and 100 < fk.agl_for_p(962.5) < 700 and fk.agl_for_p(1100) == 100.0
+    # the member leaves the 2°-wide fine field within a day on its own, but keeps going on the composite
+    alone = fk.integrate(fine, 31.5, 74.4, 925, ARRIVAL, 72, "backward", p_hpa=950.0)
+    assert alone.attrs["left_domain"] and len(alone) < 73 and alone.attrs["p_hpa"] == 950.0 and alone["height_agl"].iloc[0] == fk.agl_for_p(950.0)
+    comp = fk.integrate(fk.CompositeField(fine, coarse), 31.5, 74.4, 925, ARRIVAL, 72, "backward", p_hpa=950.0)
+    assert not comp.attrs["left_domain"] and len(comp) == 73
+    assert len(fk.member_starts(925)) == 27 and len(fk.member_starts(1000)) == 18 and fk.member_starts(850)[0] == (0.0, 0.0, 850.0)
 
 
 def test_forward_run_mirrors_backward_and_rotating_wind_curves_the_path():
@@ -159,7 +207,7 @@ def test_cache_memo_and_bucket_skip_the_wind_requests():
     doc = asyncio.run(fk.run(http, None, *LAHORE, ARRIVAL, now=NOW, bucket=bucket))
     assert len(http.calls) == 2 and "cached" not in doc
     path = fk.cache_path(LAHORE[0], LAHORE[1], ARRIVAL, "backward", 72)
-    assert path in bucket.objects
+    assert path in bucket.objects and path.startswith("forecasts/trajectories/kinematic_v2/")
     again = asyncio.run(fk.run(http, None, *LAHORE, ARRIVAL, now=NOW, bucket=bucket))
     assert again["cached"] is True and len(http.calls) == 2
     fk._MEMO.clear()                                                      # memo gone: the bucket copy serves

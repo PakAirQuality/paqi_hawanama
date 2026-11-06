@@ -147,7 +147,10 @@ These are real satellite observations, not predictions.
 - `aq_trajectory` computes trajectories on demand. Status "kinematic": a simplified isobaric \
 trajectory on ECMWF IFS 0.25° winds, three levels; quote the sector at 24/48/72 h with its agreement \
 across levels, the residence hours over each Punjab, the fires met along the path (strict and loose) \
-and the error band ("roughly 10–20 % of the distance travelled"); say "transport pathway consistent \
+and the error band ("roughly 10–20 % of the distance travelled"); when `ensemble` is present, also \
+quote the member agreement at 24 h from `ensemble.regions_at` and `ensemble.sectors` ("21 of 27 \
+members at ~700 m were over Pakistan Punjab, 6 over Indian Punjab") and `ensemble.spread_km`, and say \
+the spread is sensitivity to the wind field, not a probability; say "transport pathway consistent \
 with", never a smoke-arrival probability. Status "ok": a real HYSPLIT run on GFS 0.25°. Status \
 "wind_estimated": only the surface-wind corridor, say so plainly. Backward answers where the air came \
 from; forward answers where air or smoke goes: never confuse the two.

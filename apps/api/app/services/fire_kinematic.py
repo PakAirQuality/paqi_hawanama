@@ -13,10 +13,16 @@ Method
 - Petterssen predictor–corrector with a 15-minute step, bilinear in space, linear in time;
 - three levels (1000, 925, 850 hPa ≈ 100, 700 and 1,400 m above the plains); agreement across
   levels is reported, disagreement means the pathway is uncertain;
+- an ensemble per level in HYSPLIT's hyts_ens manner: the start point shifted by one IFS grid cell
+  (±0.25°) sideways and by ±25 hPa vertically (winds interpolated in log-pressure between the fetched
+  levels, 700 hPa fetched for the member above 850), 27 members per level (18 at 1000 hPa, where the
+  lower offset is clamped), run on the fine corridor with the coarse field as fallback; the members'
+  sector counts, the region each is over at 24/48/72 h and their mean distance from the central
+  path are the empirical spread; the spread is sensitivity to the wind field, not a probability;
 - hourly points are attributed to Pakistan / Indian Punjab / Haryana with the fire store's
   boundaries, and matched to deduplicated fire detections (strict: 10 km, ±1 h, inside the mixed
   layer, as the HYSPLIT job does; loose: 25 km, ±3 h, because the path carries tens of km of error
-  by 48 h).
+  by 48 h); fires are matched on the central paths only.
 
 The HYSPLIT job (`fire_trajectories`) remains the preferred engine whenever its output exists.
 """
@@ -44,8 +50,12 @@ STATUS = "kinematic"
 OPEN_METEO_URL = "https://api.open-meteo.com/v1/forecast"
 MODEL = "ecmwf_ifs025"
 WIND_SOURCE = "ECMWF IFS 0.25° hourly winds via Open-Meteo (CC BY 4.0)"
-LEVELS: Tuple[int, ...] = (1000, 925, 850)
-LEVEL_AGL_M = {1000: 100.0, 925: 700.0, 850: 1400.0}     # nominal height above the Indus–Ganges plains (~200 m ASL)
+LEVELS: Tuple[int, ...] = (1000, 925, 850)                # start levels
+FETCH_LEVELS: Tuple[int, ...] = (1000, 925, 850, 700)     # fetched: 700 hPa carries the member above 850
+LEVEL_AGL_M = {1000: 100.0, 925: 700.0, 850: 1400.0, 700: 2900.0}   # nominal height above the Indus–Ganges plains (~200 m ASL)
+ENSEMBLE_DX_DEG = 0.25                                    # one IFS grid cell sideways
+ENSEMBLE_DP_HPA = 25.0                                    # vertical offset of the members
+ENSEMBLE_AGES: Tuple[int, ...] = (24, 48, 72)
 HOURS = 72
 MAX_HOURS = 72
 DT_MIN = 15
@@ -59,7 +69,7 @@ LOOSE_KM, LOOSE_HOURS = 25.0, 3.0
 MAX_FIRE_POINTS = 300                                     # fire coordinates carried for the map, by FRP
 MEMO_TTL_S = 600.0
 MEMO_MAX = 100
-CACHE_PREFIX = "forecasts/trajectories/kinematic"
+CACHE_PREFIX = "forecasts/trajectories/kinematic_v2"      # v2: documents carry the ensemble
 FORECAST_REFRESH_H = 6.0
 SLOW_RUN_S = 20.0                                         # a run slower than this is logged with its timings
 EXTRA_RECEPTORS: Dict[str, Tuple[float, float]] = {       # places the Pakistan registry does not hold
@@ -73,6 +83,10 @@ DEFINITIONS = {
               "(Petterssen predictor–corrector, 15-minute step, bilinear in space, linear in time); no vertical motion, turbulence or terrain",
     "levels": "1000, 925 and 850 hPa, about 100, 700 and 1,400 m above the plains; agreement across levels is reported, disagreement means the pathway is uncertain",
     "error": "position error of roughly 10–20 % of the distance travelled (tens of km by 24 h, up to 100–200 km by 72 h)",
+    "ensemble": f"per level, members from start points shifted by ±{ENSEMBLE_DX_DEG:g}° sideways and ±{ENSEMBLE_DP_HPA:g} hPa vertically "
+                "(27 per level, 18 at 1000 hPa where the lower offset is clamped), as HYSPLIT's hyts_ens does; the sector counts, the region "
+                "each member is over at 24/48/72 h and spread_km (mean distance of the members from the central path) show how sensitive the "
+                "path is to the wind field; the spread is not a probability",
     "match_strict": ft.DEFINITIONS["match"],
     "match_loose": f"a trajectory point within {LOOSE_KM:g} km and ±{LOOSE_HOURS:g} h of a detection, any height: the loose match absorbs the path error",
     "residence_hours": "hours the parcel spent over each region along the path, from the hourly points",
@@ -83,6 +97,7 @@ CAVEATS = [
     "Kinematic isobaric trajectory on ECMWF IFS 0.25° winds via Open-Meteo, hourly, no vertical motion or turbulence; "
     "position error of roughly 10–20 % of the distance travelled.",
     "A plausibility screen for where the air was (or goes), not an attribution of PM2.5: say 'transport pathway consistent with', never 'caused'.",
+    "The ensemble members show how sensitive the path is to the wind field; their spread is not a probability of where the air was.",
     "Replaced by the HYSPLIT ensemble on GFS 0.25° meteorology when that engine is installed; HYSPLIT output is used whenever it exists.",
 ]
 
@@ -132,6 +147,63 @@ class WindField:
             out.append(num / den)
         return out[0], out[1], out[2]
 
+    def sample_p(self, p_hpa: float, lat: float, lon: float, th: float) -> Optional[Tuple[float, float, float]]:
+        """(u, v, z) at any pressure between the fetched levels, linear in log-pressure; clamped beyond them."""
+        levels = sorted(self.u, reverse=True)                 # 1000 … 700: pressure falls with height
+        p = float(p_hpa)
+        if p >= levels[0]:
+            return self.sample(levels[0], lat, lon, th)
+        if p <= levels[-1]:
+            return self.sample(levels[-1], lat, lon, th)
+        for hi, lo in zip(levels, levels[1:]):
+            if lo <= p <= hi:
+                if p == hi:
+                    return self.sample(hi, lat, lon, th)
+                if p == lo:
+                    return self.sample(lo, lat, lon, th)
+                a = self.sample(hi, lat, lon, th)
+                b = self.sample(lo, lat, lon, th)
+                if a is None or b is None:
+                    return None
+                w = (math.log(hi) - math.log(p)) / (math.log(hi) - math.log(lo))
+                return tuple((1 - w) * x + w * y for x, y in zip(a, b))  # type: ignore[return-value]
+        return None
+
+
+class CompositeField:
+    """The fine corridor with the coarse field behind it: a parcel off the corridor (or on a thinned cell) keeps moving."""
+
+    def __init__(self, fine: WindField, coarse: WindField):
+        self.fine, self.coarse = fine, coarse
+        self.t0, self.n_hours = fine.t0, fine.n_hours
+        self._shift = (fine.t0 - coarse.t0).total_seconds() / 3600.0   # 0 when both were fetched for the same days
+
+    def hours_since_t0(self, t: datetime) -> float:
+        return self.fine.hours_since_t0(t)
+
+    def sample(self, level: int, lat: float, lon: float, th: float) -> Optional[Tuple[float, float, float]]:
+        s = self.fine.sample(level, lat, lon, th) if level in self.fine.u else None
+        return s if s is not None else self.coarse.sample(level, lat, lon, th + self._shift)
+
+    def sample_p(self, p_hpa: float, lat: float, lon: float, th: float) -> Optional[Tuple[float, float, float]]:
+        s = self.fine.sample_p(p_hpa, lat, lon, th)
+        return s if s is not None else self.coarse.sample_p(p_hpa, lat, lon, th + self._shift)
+
+
+def agl_for_p(p_hpa: float) -> float:
+    """Nominal height above the plains at a pressure, log-linear between the LEVEL_AGL_M anchors."""
+    levels = sorted(LEVEL_AGL_M, reverse=True)
+    p = float(p_hpa)
+    if p >= levels[0]:
+        return LEVEL_AGL_M[levels[0]]
+    if p <= levels[-1]:
+        return LEVEL_AGL_M[levels[-1]]
+    for hi, lo in zip(levels, levels[1:]):
+        if lo <= p <= hi:
+            w = (math.log(hi) - math.log(p)) / (math.log(hi) - math.log(lo))
+            return round((1 - w) * LEVEL_AGL_M[hi] + w * LEVEL_AGL_M[lo])
+    return LEVEL_AGL_M[levels[-1]]
+
 
 def _grid(lat0: float, lon0: float, step: float, half_lat: float, half_lon: float) -> List[Tuple[float, float]]:
     lats = np.arange(math.floor((lat0 - half_lat) / step) * step, lat0 + half_lat + step / 2, step)
@@ -173,7 +245,7 @@ def _hourly_vars(levels: Sequence[int]) -> List[str]:
 
 
 async def fetch_winds(http, points: Sequence[Tuple[float, float]], t_start: datetime, t_end: datetime,
-                      levels: Sequence[int] = LEVELS) -> WindField:
+                      levels: Sequence[int] = FETCH_LEVELS) -> WindField:
     """One Open-Meteo request for every point over [t_start, t_end] (UTC, whole days) → WindField."""
     pts = list(points)
     params = {"latitude": ",".join(f"{a:.3f}" for a, _ in pts), "longitude": ",".join(f"{b:.3f}" for _, b in pts),
@@ -230,34 +302,42 @@ def _step(lat: float, lon: float, u: float, v: float, dt_s: float) -> Tuple[floa
     return lat + v * dt_s / M_PER_DEG, lon + u * dt_s / (M_PER_DEG * math.cos(math.radians(lat)))
 
 
-def integrate(field: WindField, lat0: float, lon0: float, level: int, t_start: datetime, hours: int,
-              direction: str = "backward", dt_min: int = DT_MIN) -> pd.DataFrame:
-    """Hourly parcel positions on one level. Stops early when the parcel leaves the wind field."""
+def integrate(field, lat0: float, lon0: float, level: int, t_start: datetime, hours: int,
+              direction: str = "backward", dt_min: int = DT_MIN, p_hpa: Optional[float] = None) -> pd.DataFrame:
+    """Hourly parcel positions on one level (or at `p_hpa`, between the fetched levels). Stops early when the parcel leaves the field."""
     sign = -1.0 if direction == "backward" else 1.0
     dt_s = sign * dt_min * 60.0
     steps_per_hour = int(round(60 / dt_min))
     lat, lon = float(lat0), float(lon0)
+    p = float(level) if p_hpa is None else float(p_hpa)
+    agl = LEVEL_AGL_M[level] if p_hpa is None else agl_for_p(p)
+    if p_hpa is None or p == float(level):
+        def sample(la, lo, t):
+            return field.sample(level, la, lo, t)
+    else:
+        def sample(la, lo, t):
+            return field.sample_p(p, la, lo, t)
     th = field.hours_since_t0(t_start)
-    s0 = field.sample(level, lat, lon, th)
-    rows = [{"traj_id": level, "time": t_start, "age_h": 0.0, "lat": lat, "lon": lon, "height_agl": LEVEL_AGL_M[level],
+    s0 = sample(lat, lon, th)
+    rows = [{"traj_id": level, "time": t_start, "age_h": 0.0, "lat": lat, "lon": lon, "height_agl": agl,
              "z_msl": s0[2] if s0 else None, "speed_ms": math.hypot(s0[0], s0[1]) if s0 else None}]
     left = s0 is None
     for n in range(1, hours * steps_per_hour + 1):
         if left:
             break
-        s = field.sample(level, lat, lon, th)
+        s = sample(lat, lon, th)
         if s is None:
             left = True
             break
         p_lat, p_lon = _step(lat, lon, s[0], s[1], dt_s)
         th_next = th + sign * dt_min / 60.0
-        s2 = field.sample(level, p_lat, p_lon, th_next)
+        s2 = sample(p_lat, p_lon, th_next)
         if s2 is None:
             left = True
             break
         for _ in range(2):                                   # Petterssen corrector, twice
             lat_c, lon_c = _step(lat, lon, 0.5 * (s[0] + s2[0]), 0.5 * (s[1] + s2[1]), dt_s)
-            s3 = field.sample(level, lat_c, lon_c, th_next)
+            s3 = sample(lat_c, lon_c, th_next)
             if s3 is None:
                 left = True
                 break
@@ -268,11 +348,116 @@ def integrate(field: WindField, lat0: float, lon0: float, level: int, t_start: d
         if n % steps_per_hour == 0:
             age = sign * n / steps_per_hour
             rows.append({"traj_id": level, "time": t_start + timedelta(hours=age), "age_h": age, "lat": round(lat, 4), "lon": round(lon, 4),
-                         "height_agl": LEVEL_AGL_M[level], "z_msl": round(s2[2], 0) if s2 else None,
+                         "height_agl": agl, "z_msl": round(s2[2], 0) if s2 else None,
                          "speed_ms": round(math.hypot(s2[0], s2[1]), 1) if s2 else None})
     out = pd.DataFrame(rows)
     out.attrs["left_domain"] = left
+    out.attrs["p_hpa"] = p
     return out
+
+
+# ── the ensemble ─────────────────────────────────────────────────────────────
+
+def member_starts(level: int) -> List[Tuple[float, float, float]]:
+    """(dlat, dlon, p_hpa) of the members for one start level: the central one first, duplicates (clamped offsets) collapsed."""
+    p_max, p_min = max(FETCH_LEVELS), min(FETCH_LEVELS)
+    out: List[Tuple[float, float, float]] = []
+    for dp in (0.0, -ENSEMBLE_DP_HPA, ENSEMBLE_DP_HPA):
+        p = min(p_max, max(p_min, level + dp))
+        for dlat in (0.0, -ENSEMBLE_DX_DEG, ENSEMBLE_DX_DEG):
+            for dlon in (0.0, -ENSEMBLE_DX_DEG, ENSEMBLE_DX_DEG):
+                m = (dlat, dlon, float(p))
+                if m not in out:
+                    out.append(m)
+    return out
+
+
+def ensemble_paths(field, lat0: float, lon0: float, levels: Sequence[int], t_start: datetime, hours: int,
+                   direction: str) -> Dict[int, List[pd.DataFrame]]:
+    """Every member path per level, attributed to regions in one pass."""
+    members: Dict[int, List[pd.DataFrame]] = {}
+    for lv in levels:
+        members[lv] = []
+        for k, (dlat, dlon, p) in enumerate(member_starts(lv)):
+            m = integrate(field, lat0 + dlat, lon0 + dlon, lv, t_start, hours, direction, p_hpa=p)
+            m.attrs["member"] = k
+            m.attrs["start"] = (dlat, dlon, p)
+            members[lv].append(m)
+    frames = [m for ms in members.values() for m in ms if not m.empty]
+    if frames:
+        allpts = pd.concat(frames, ignore_index=True)
+        attr = fr.attribute_points(allpts["lat"].to_numpy(), allpts["lon"].to_numpy(), fr.load_region_index())
+        regions = np.array([_region_label(c, s) for c, s in zip(attr["country"], attr["province"])], dtype=object)
+        i = 0
+        for m in frames:
+            m["region"] = regions[i:i + len(m)]
+            i += len(m)
+    return members
+
+
+def ensemble_summary(members: Dict[int, List[pd.DataFrame]], central: Dict[int, pd.DataFrame], lat0: float, lon0: float,
+                     ages: Sequence[int] = ENSEMBLE_AGES) -> Dict[str, Any]:
+    """Member sector counts, the region each member is over, and the spread around the central path at each age."""
+    sectors_out: Dict[str, Any] = {}
+    regions_out: Dict[str, Any] = {}
+    spread_out: Dict[str, Any] = {}
+    for age in ages:
+        sec_age: Dict[str, Any] = {}
+        reg_age: Dict[str, Any] = {}
+        spr_age: Dict[str, Any] = {}
+        all_counts: Dict[str, int] = {}
+        for lv, ms in members.items():
+            lats, lons, regs = [], [], []
+            for m in ms:
+                row = m[np.isclose(m["age_h"].abs(), age)]
+                if row.empty:
+                    continue
+                lats.append(float(row["lat"].iloc[0]))
+                lons.append(float(row["lon"].iloc[0]))
+                regs.append(str(row["region"].iloc[0]) if "region" in row else "elsewhere")
+            if not lats:
+                sec_age[str(lv)] = {"n": 0, "modal": None, "agreement": None, "counts": {}}
+                reg_age[str(lv)] = {}
+                spr_age[str(lv)] = None
+                continue
+            secs = [fr.compass(float(b)) for b in fr.bearing_deg(lat0, lon0, lats, lons)]
+            counts: Dict[str, int] = {}
+            for s_ in secs:
+                counts[s_] = counts.get(s_, 0) + 1
+                all_counts[s_] = all_counts.get(s_, 0) + 1
+            modal = max(counts, key=counts.get)
+            sec_age[str(lv)] = {"n": len(secs), "modal": modal, "agreement": round(counts[modal] / len(secs), 2), "counts": counts}
+            rc: Dict[str, int] = {}
+            for r in regs:
+                rc[r] = rc.get(r, 0) + 1
+            reg_age[str(lv)] = dict(sorted(rc.items(), key=lambda kv: -kv[1]))
+            c = central.get(lv)
+            crow = c[np.isclose(c["age_h"].abs(), age)] if c is not None and not c.empty else None
+            if crow is not None and not crow.empty:
+                d = fr.haversine_km_vec(float(crow["lat"].iloc[0]), float(crow["lon"].iloc[0]), lats, lons)
+                spr_age[str(lv)] = round(float(np.mean(d)))
+            else:
+                spr_age[str(lv)] = None
+        if all_counts:
+            modal_all = max(all_counts, key=all_counts.get)
+            n_all = sum(all_counts.values())
+            sec_age["all"] = {"n": n_all, "modal": modal_all, "agreement": round(all_counts[modal_all] / n_all, 2), "counts": all_counts}
+        else:
+            sec_age["all"] = {"n": 0, "modal": None, "agreement": None, "counts": {}}
+        sectors_out[str(age)] = sec_age
+        regions_out[str(age)] = reg_age
+        spread_out[str(age)] = spr_age
+    return {
+        "n_members": {str(lv): len(ms) for lv, ms in members.items()},
+        "offsets": {"horizontal_deg": ENSEMBLE_DX_DEG, "vertical_hpa": ENSEMBLE_DP_HPA},
+        "left_domain": {str(lv): int(sum(1 for m in ms if m.attrs.get("left_domain"))) for lv, ms in members.items()},
+        "sectors": sectors_out, "regions_at": regions_out, "spread_km": spread_out,
+    }
+
+
+def _member_coords(members: Dict[int, List[pd.DataFrame]]) -> Dict[str, Any]:
+    return {str(lv): [[[round(float(a), 3), round(float(b), 3)] for a, b in zip(m["lat"].to_numpy(), m["lon"].to_numpy())] for m in ms]
+            for lv, ms in members.items()}
 
 
 # ── attribution, sectors, fires ───────────────────────────────────────────────
@@ -353,7 +538,6 @@ def fire_matches(paths: Dict[int, pd.DataFrame], det: pd.DataFrame) -> Dict[str,
     strict_lv: Dict[str, Any] = {}
     n_pts = n_f = 0
     frp = 0.0
-    districts: Dict[str, float] = {}
     for lv, p in paths.items():
         m = ft.match_fires(p, det)
         if m.empty:
@@ -477,14 +661,15 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
     timings: Dict[str, float] = {}
     clock = time.monotonic()
     # pass 1: coarse field, draft paths
+    fetch_levels = tuple(sorted(set(FETCH_LEVELS) | set(levels), reverse=True))
     coarse_pts = _thin(_grid(lat, lon, COARSE_DEG, COARSE_HALF_LAT, COARSE_HALF_LON), MAX_LOCATIONS)
-    coarse = await fetch_winds(http, coarse_pts, t_start - timedelta(hours=1), t_end + timedelta(hours=1), levels)
+    coarse = await fetch_winds(http, coarse_pts, t_start - timedelta(hours=1), t_end + timedelta(hours=1), fetch_levels)
     timings["winds_coarse_s"] = round(time.monotonic() - clock, 2)
     drafts = {lv: integrate(coarse, lat, lon, lv, at_utc, hours, direction) for lv in levels}
     # pass 2: fine corridor around the drafts
     fine_pts = _thin(_corridor(list(drafts.values()) + [pd.DataFrame({"lat": [lat], "lon": [lon]})], FINE_DEG, CORRIDOR_DEG), MAX_LOCATIONS)
     clock2 = time.monotonic()
-    fine = await fetch_winds(http, fine_pts, t_start - timedelta(hours=1), t_end + timedelta(hours=1), levels)
+    fine = await fetch_winds(http, fine_pts, t_start - timedelta(hours=1), t_end + timedelta(hours=1), fetch_levels)
     timings["winds_fine_s"] = round(time.monotonic() - clock2, 2)
     paths = {lv: integrate(fine, lat, lon, lv, at_utc, hours, direction) for lv in levels}
     for lv, p in paths.items():                             # a parcel that left the fine corridor keeps its draft beyond that point
@@ -496,6 +681,12 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
     clock3 = time.monotonic()
     attribute(paths)
     timings["attribution_s"] = round(time.monotonic() - clock3, 2)
+    # the ensemble: members on the fine corridor, the coarse field behind it
+    clock_e = time.monotonic()
+    members = ensemble_paths(CompositeField(fine, coarse), lat, lon, levels, at_utc, hours, direction)
+    ensemble = {**ensemble_summary(members, paths, lat, lon), "starts": {str(lv): [list(m.attrs["start"]) for m in ms] for lv, ms in members.items()},
+                "members": _member_coords(members)}
+    timings["ensemble_s"] = round(time.monotonic() - clock_e, 2)
     # fires along the path
     det = None
     passes: Dict[str, Any] = {}
@@ -529,6 +720,7 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
         "left_domain": {str(lv): bool(p.attrs.get("left_domain", False)) for lv, p in paths.items()},
         "residence_hours": {str(lv): residence_hours(p) for lv, p in paths.items()},
         "sectors": sectors(paths, lat, lon),
+        "ensemble": ensemble,
         "fires": {**fires, "window": {"start_utc": t_start.isoformat(), "end_utc": t_end.isoformat()}, "passes": passes},
         "definitions": DEFINITIONS, "caveats": CAVEATS,
     }
@@ -550,8 +742,12 @@ def copilot_view(doc: Dict[str, Any], every_h: int = 6) -> Dict[str, Any]:
     pts = {lv: [{"age_h": p["age_h"], "time_utc": p["time_utc"], "lat": round(p["lat"], 2), "lon": round(p["lon"], 2), "region": p["region"],
                  "district": p["district"]} for p in path if abs(p["age_h"]) % every_h == 0]
            for lv, path in doc["paths"].items()}
-    return {k: doc[k] for k in ("engine", "status", "direction", "hours", "levels_hpa", "origin", "at_utc", "at_pkt", "uses_forecast",
+    ens = doc.get("ensemble")
+    view = {k: doc[k] for k in ("engine", "status", "direction", "hours", "levels_hpa", "origin", "at_utc", "at_pkt", "uses_forecast",
                                 "wind_source", "left_domain", "residence_hours", "sectors", "caveats") if k in doc} | {
         "points_6h": pts, "fires": _fires_without_points(doc.get("fires")), "cached": doc.get("cached", False),
-        "definitions": {k: doc["definitions"][k] for k in ("engine", "levels", "error", "match_strict", "match_loose", "not_attribution",
-                                                           "forward_vs_backward")}}
+        "definitions": {k: doc["definitions"][k] for k in ("engine", "levels", "error", "ensemble", "match_strict", "match_loose",
+                                                           "not_attribution", "forward_vs_backward") if k in doc["definitions"]}}
+    if ens:                                                 # the model gets the member counts and spread, not 81 paths
+        view["ensemble"] = {k: v for k, v in ens.items() if k not in ("members", "starts")}
+    return view
