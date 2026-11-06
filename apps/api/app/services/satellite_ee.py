@@ -170,8 +170,12 @@ class EEClient:
             coll, band, _ = TROPOMI["no2"]
             proj = ee.Image(ee.ImageCollection(coll).first()).select(band).projection()
         else:
-            d0, d1 = self._window(day)
+            # the grid is the same every day: take any granule from the month up to ``day`` (the day itself may not be published)
+            d0 = str(day - timedelta(days=31))
+            d1 = str(day + timedelta(days=1))
             col = ee.ImageCollection(MAIAC_COLLECTION).filterDate(d0, d1).filterBounds(self.feature_collection().geometry())
+            if int(col.size().getInfo()) == 0:
+                raise RuntimeError(f"no MAIAC granules between {d0} and {d1}: cannot size the region grid")
             proj = ee.Image(col.first()).select("Optical_Depth_055").projection()
         img = ee.Image.constant(1).rename("one").setDefaultProjection(proj)
         fc = img.reduceRegions(collection=self.feature_collection(), reducer=ee.Reducer.count(), tileScale=TILE_SCALE)

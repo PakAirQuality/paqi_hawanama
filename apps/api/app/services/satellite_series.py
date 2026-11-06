@@ -288,7 +288,14 @@ class SatelliteSeriesTask:
             if not days_k:
                 continue
             if not n_possible.get(k):
-                n_possible[k] = self.ee.n_possible(k, days_k[-1])
+                try:
+                    n_possible[k] = self.ee.n_possible(k, days_k[-1])
+                except Exception as exc:  # noqa: BLE001  (one kind's grid sizing must not sink the other kind's days)
+                    logger.exception("%s: n_possible(%s) failed", TASK, k)
+                    failures.append({"kind": k, "day": "n_possible", "error": f"{type(exc).__name__}: {exc}"[:200]})
+                    c.failed += len(days_k)
+                    c.attempted += len(days_k)
+                    continue
             poss = n_possible[k]
             with ThreadPoolExecutor(self.workers) as ex:
                 results = list(ex.map(lambda d: (d, self._fetch_day(k, d)), days_k))

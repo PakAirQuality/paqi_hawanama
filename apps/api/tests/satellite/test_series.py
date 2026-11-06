@@ -52,10 +52,11 @@ class FakeBucket:
 class FakeEE:
     """Canned reductions: a value per region and product; some days unpublished; optional failures."""
 
-    def __init__(self, *, unpublished=(), fail_days=(), value=1e-4):
+    def __init__(self, *, unpublished=(), fail_days=(), value=1e-4, n_possible_fails=()):
         self.unpublished = set(unpublished)
         self.fail_days = set(fail_days)
         self.value = value
+        self.n_possible_fails = set(n_possible_fails)
         self.calls = []
         self.pings = 0
 
@@ -64,6 +65,8 @@ class FakeEE:
         return 1
 
     def n_possible(self, kind, day):
+        if kind in self.n_possible_fails:
+            raise RuntimeError(f"no {kind} granules: cannot size the region grid")
         return {r: (100 if kind == "tropomi" else 900) for r in REGION_IDS}
 
     def day_regions(self, kind, day, products=None):
@@ -206,6 +209,19 @@ async def test_failed_days_make_the_run_partial_and_are_retried(tmp_path):
     assert ee.calls.count(("tropomi", bad)) == 2                                   # retried once
     out2 = await task.run(kind="bogus")
     assert out2.status.value == "failed" and out2.error_class == "bad_kind"
+
+
+async def test_a_kind_whose_grid_cannot_be_sized_fails_alone_and_the_other_kind_is_still_written(tmp_path):
+    bucket = FakeBucket()
+    ee = FakeEE(n_possible_fails={"maiac"})
+    task, _ = _task(bucket, ee, tmp_path)
+    out = await task.run(days=3)
+    assert out.status.value == "partial" and out.error_class == "some_days_failed"
+    assert out.counts.completed == 3 and out.counts.failed == 3
+    assert out.details["failures"][0] == {"kind": "maiac", "day": "n_possible", "error": "RuntimeError: no maiac granules: cannot size the region grid"}
+    assert ss.series_path("no2") in bucket.objects and ss.series_path("aod550") not in bucket.objects
+    assert json.loads(bucket.objects[ss.MANIFEST_PATH])["products"]["no2"]["days"] == 3
+    assert [k for k, _ in ee.calls] == ["tropomi"] * 3                          # maiac days were never fetched
 
 
 # ── the reader ────────────────────────────────────────────────────────────────
