@@ -1,11 +1,12 @@
 "use client"
 
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { createPortal } from 'react-dom'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { AnimatePresence, m, useDragControls } from 'motion/react'
 import { useIsMobile } from '@/lib/useMediaQuery'
 import { haversineKm } from '@/lib/geo'
-import { ChevronLeft, ChevronRight, Calendar, LocateFixed, X, Flame as FlameIcon, Wind, Play, Pause, Loader2 } from 'lucide-react'
+import { Maximize2, ChevronDown, ChevronLeft, ChevronRight, Calendar, LocateFixed, X, Flame as FlameIcon, Wind, Play, Pause, Loader2 } from 'lucide-react'
 
 import { fetchTileDates, fetchStationDaily, fetchPredictionData, fetchRunReport, fetchStationDirectory } from '@/components/ops-pipeline'
 import { PredictionMap, type MapFeatureClick } from '@/components/ops-pipeline/PredictionMap'
@@ -19,6 +20,10 @@ import { LayersPanel } from '@/components/analyst-desk/LayersPanel'
 import { fetchAvailableDates, fetchCurrentStations, fetchFires, fetchForecast, fetchNowcast } from '@/components/analyst-desk/api'
 import { bandKey } from '@/lib/aqi'
 import { useDayPlayback, REPLAY_DAYS } from '@/components/ops-pipeline/useDayPlayback'
+import { ReplayScrubber } from '@/components/ops-pipeline/ReplayScrubber'
+import { TrackerLoader } from '@/components/ops-pipeline/TrackerLoader'
+import { VoiceBrief } from '@/components/ops-pipeline/VoiceBrief'
+import { voiceTarget } from '@/lib/voiceBrief'
 import { cityCentre } from '@/lib/chat/actions'
 import { firesShortLabel, firesStatus } from '@/lib/fires'
 import { availableHours, availableLeads, daysBetween, forecastReadings, hourStep, isForecastLead, isHourStep, latestReading, leadForDaysAhead, liveReadings, nowcastAgeMin, nowcastReadings, nowcastValidTime, parseViewParam, rampCount, sameStep, stepKey, targetDate, type ForecastLead, type FutureStep, type TimelineStep } from '@/lib/timeline'
@@ -37,6 +42,10 @@ const ALL_INDUSTRY = INDUSTRY_CATEGORIES.map(c => c.key as string)
 const SOURCE_LAYERS = [{ key: 'kilns', label: 'Brick Kilns', color: '#d97706' }, ...INDUSTRY_CATEGORIES]
 import { MapErrorBoundary, MapUnavailableNotice } from '@/components/MapErrorBoundary'
 import type { MapUnavailableReason } from '@/lib/webgl'
+
+const NO_HEAT_ROWS: never[] = []
+/** sessionStorage: this tab's visitor is outside Pakistan (the voice brief does not ask for the location again) */
+const OUTSIDE_KEY = 'paqi-outside-pk'
 
 export default function OpsPipelinePage() {
   const selection = useSelection()
@@ -120,19 +129,22 @@ export default function OpsPipelinePage() {
 
   // Map availability: a map failure stays inside the map area (nav, panels, reports keep working)
   const [mapUnavailable, setMapUnavailable] = useState<MapUnavailableReason | null>(null)
+  // The map has finished loading (it hands over flyTo then), or it is known it cannot load
+  const mapShown = flyTo !== null || mapUnavailable !== null
+  // The site header's slot for page controls (MainLayout renders it; found after mount)
+  const [headerSlot, setHeaderSlot] = useState<HTMLElement | null>(null)
+  // Bumped by the whole-country button: the map refits Pakistan
+  const [homeSignal, setHomeSignal] = useState(0)
+  useEffect(() => { setHeaderSlot(document.getElementById('header-actions')) }, [])
   const [mapKey, setMapKey] = useState(0)
   const retryMap = () => { setMapUnavailable(null); setMapKey(k => k + 1) }
 
   // Shareable URLs: ?date=YYYY-MM-DD or ?view=today|h3|h6|h12|1|2|3, &model=support_aware&layers=kilns,industry,fires
   const urlApplied = useRef(false)
-  // Whether the visitor arrived on a link to a particular day or view (read before the page rewrites the URL)
-  const linkedToDay = useRef(false)
   useEffect(() => {
     if (urlApplied.current || typeof window === 'undefined') return
     urlApplied.current = true
     const q = new URLSearchParams(window.location.search)
-    // view=today is the page's own default (it writes it into the address), so a reload still replays
-    linkedToDay.current = q.has('date') || (q.has('view') && q.get('view') !== 'today')
     const d = q.get('date')
     if (d && /^\d{4}-\d{2}-\d{2}$/.test(d)) { setSelectedPredDate(d); setFutureStep(null) }
     const view = parseViewParam(q.get('view'))
@@ -266,6 +278,8 @@ export default function OpsPipelinePage() {
   // Grid stats for the model the map is showing (area average over the model domain)
   const { data: predictionData } = useQuery({
     queryKey: ['ops-prediction-data', selectedPredDate, model],
+    // Keep the last day on the map while the next loads (null then only means the day has no estimate)
+    placeholderData: keepPreviousData,
     queryFn: () => fetchPredictionData(selectedPredDate!, model),
     enabled: !!selectedPredDate,
   })
@@ -339,6 +353,8 @@ export default function OpsPipelinePage() {
   const CROSS_BORDER_KM = 50
   const { data: firesAll } = useQuery({
     queryKey: ['ops-fires', fireDay],
+    // Keep the fires (and their plumes) on the map while the next day's load
+    placeholderData: keepPreviousData,
     queryFn: async () => {
       await Promise.all([loadPakBoundary(), loadFireRegions()])
       const data = await fetchFires(fireDay as string)
@@ -441,6 +457,15 @@ export default function OpsPipelinePage() {
   const [userLoc, setUserLoc] = useState<{ lng: number; lat: number } | null>(null)
   const [locNote, setLocNote] = useState<string | null>(null)
   const [locating, setLocating] = useState(false)
+  // The visitor was found to be outside Pakistan: remembered for this tab, so Listen does not ask again
+  const [locOutside, setLocOutside] = useState(false)
+  useEffect(() => {
+    try { if (sessionStorage.getItem(OUTSIDE_KEY)) setLocOutside(true) } catch { /* storage unavailable */ }
+  }, [])
+  const markOutside = (outside: boolean) => {
+    setLocOutside(outside)
+    try { if (outside) sessionStorage.setItem(OUTSIDE_KEY, '1'); else sessionStorage.removeItem(OUTSIDE_KEY) } catch { /* storage unavailable */ }
+  }
 
   const nearby = useMemo(() => {
     if (!userLoc) return null
@@ -455,19 +480,40 @@ export default function OpsPipelinePage() {
       : { station: null, distKm: null, radiusKm: NEARBY_RADIUS_KM }
   }, [userLoc, enrichedStations])
 
+  // The spoken brief is always about now: the live hourly reading at the nearest monitor, whatever day is in view
+  const voiceNearby = useMemo(() => voiceTarget({
+    location: userLoc,
+    outside: locOutside,
+    stations: liveData ? liveReadings(liveData.stations ?? []) : undefined,
+    liveFailed,
+    nowcast: nowcastData,
+    now: Date.now(),
+  }), [userLoc, locOutside, liveData, liveFailed, nowcastData])
+  // Bumped whenever a location request ends without a location, so a brief waiting on it gives up
+  const [locFails, setLocFails] = useState(0)
+
   const locate = () => {
-    if (!navigator.geolocation) { setLocNote('Location is not available in this browser.'); return }
+    if (!navigator.geolocation) { setLocNote('Location is not available in this browser.'); setLocFails(n => n + 1); return }
     setLocating(true)
     navigator.geolocation.getCurrentPosition(
       async (pos) => {
         setLocating(false)
         const { latitude: lat, longitude: lng } = pos.coords
-        await loadPakBoundary()
-        if (!isInsidePakistan(lng, lat)) { setLocNote('You appear to be outside Pakistan, so there is no air quality to show here.'); return }
-        await flyTo?.(lng, lat, 10.5) // let the fly-in finish before the card and puck appear
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) { setLocNote('Could not find your location.'); setLocFails(n => n + 1); return }
+        // If the boundary cannot be loaded the check is skipped, rather than turning everyone away
+        try { await loadPakBoundary() } catch { /* checked below */ }
+        if (isPakBoundaryLoaded() && !isInsidePakistan(lng, lat)) {
+          markOutside(true)
+          setLocNote('You appear to be outside Pakistan, so there is no air quality to show here.')
+          setLocFails(n => n + 1)
+          return
+        }
+        markOutside(false)
+        // Let the fly-in finish before the card and puck appear (a failed fly-in still sets the location)
+        try { await flyTo?.(lng, lat, 10.5) } catch { /* the map may be gone */ }
         setUserLoc({ lng, lat })
       },
-      (err) => { setLocating(false); setLocNote(err.code === 1 ? 'Location permission was declined.' : 'Could not find your location.') },
+      (err) => { setLocating(false); setLocFails(n => n + 1); setLocNote(err.code === 1 ? 'Location permission was declined.' : 'Could not find your location.') },
       { timeout: 10000, maximumAge: 5 * 60 * 1000 },
     )
   }
@@ -613,25 +659,35 @@ export default function OpsPipelinePage() {
     setSelectedPredDate(step)
   }
 
-  // Replay: the last finished days, one after another, then back to today
+  // Replay: the last finished days, one after another, then back to the day in view
+  const [replayDay, setReplayDay] = useState<string | null>(null)
   const playback = useDayPlayback({
     dates,
     model,
-    onFrame: d => { setFutureStep(null); setSelectedPredDate(d) },
-    onEnd: () => setFutureStep('now'),
+    // Only the estimate animates: the rest of the page (stations, summary card) stays on the day in view
+    onFrame: d => setReplayDay(d),
+    onEnd: () => setReplayDay(null),
   })
 
-  // The replay plays once when someone arrives, as soon as the map and the days are ready; not for a link to a
-  // particular day or view, and not when the system asks for reduced motion
-  const autoReplayed = useRef(false)
-  useEffect(() => {
-    if (autoReplayed.current || !flyTo || dates.length < 2) return
-    autoReplayed.current = true
-    if (linkedToDay.current) return
-    if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return
+  // While the replay runs, the map shows the PM2.5 estimate alone (no stations, fires, plumes, wind or sources)
+  const replaying = playback.active || playback.status === 'loading'
+
+  // Starting the replay: the whole country in view and every card out of the way, so the estimate fills the map
+  const startReplay = () => {
+    if (playback.status === 'idle') {
+      setRailTab(null)
+      setMapFocus(null)
+      setSummaryOpen(false)
+      setCloseDistrictSignal(n => n + 1)
+      flyTo?.(69.3459, 30.3, isMobile ? 4 : 4.6)
+    }
     void playback.play()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flyTo, dates.length])
+  }
+
+  const replayForMap = useMemo(
+    () => (playback.images ? { images: playback.images, clock: playback.clock } : null),
+    [playback.images, playback.clock],
+  )
 
   // Today and forecast days sit on the newest finished day's surface and model data
   useEffect(() => {
@@ -712,14 +768,7 @@ export default function OpsPipelinePage() {
   const chatDate = futureStep === null ? selectedPredDate : forecastIssue ?? selectedPredDate
 
   if (tileDatesLoading) {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-slate-50">
-        <div className="flex items-center gap-2.5 px-4 py-2.5 rounded-xl bg-slate-800/90 text-white text-sm font-medium shadow-lg">
-          <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-          Loading predictions...
-        </div>
-      </div>
-    )
+    return <TrackerLoader className="flex-1" />
   }
 
   if (dates.length === 0) {
@@ -760,12 +809,15 @@ export default function OpsPipelinePage() {
         onDragEnd={(_, info) => { if (info.offset.y > 90 || info.velocity.y > 600) setRailTab(null) }}
       >
         {isMobile && (
-          <div
-            className="flex shrink-0 cursor-grab touch-none justify-center py-2.5"
-            onPointerDown={e => sheetDrag.start(e)}
-            aria-hidden
-          >
-            <span className="h-1 w-10 rounded-full bg-slate-300" />
+          // A down arrow closes the sheet (any tab); dragging it down still works too
+          <div className="flex shrink-0 touch-none justify-center pt-1" onPointerDown={e => sheetDrag.start(e)}>
+            <button
+              onClick={() => setRailTab(null)}
+              aria-label="Close the panel"
+              className="flex h-9 w-14 items-center justify-center rounded-full text-slate-500 transition-[background-color,color,transform] duration-150 hover:bg-slate-900/[0.05] hover:text-slate-900 active:scale-90"
+            >
+              <ChevronDown size={22} strokeWidth={2} />
+            </button>
           </div>
         )}
         <div style={{ width: isMobile ? '100%' : 370, ...(isMobile ? { flex: '1 1 0', minHeight: 0 } : { height: '100%' }), display: 'flex', flexDirection: 'column' }}>
@@ -818,7 +870,7 @@ export default function OpsPipelinePage() {
             onTogglePopulation={() => setShowPopulation(v => !v)}
             sources={SOURCE_LAYERS.map(s => ({ ...s, on: s.key === 'kilns' ? showKilns : industryKeys.includes(s.key) }))}
             views={[
-              { key: 'plumes', label: 'Smoke plumes', description: 'Where smoke may drift from the fires on the latest winds (illustrative)', icon: Wind, on: showPlumes, onToggle: () => setShowPlumes(v => !v), activeColor: 'text-stone-600' },
+              { key: 'plumes', label: 'Smoke plumes', description: 'Where smoke may drift on the latest winds, coloured by the PM2.5 along the way (illustrative)', icon: Wind, on: showPlumes, onToggle: () => setShowPlumes(v => !v), activeColor: 'text-stone-600' },
               { key: 'smoke', label: 'Smoke outlook', description: 'Tomorrow: forecast wind × current fires, per city', icon: FlameIcon, on: showSmoke, onToggle: () => setShowSmoke(v => !v), activeColor: 'text-orange-600' },
             ]}
             onToggleSource={(key) => {
@@ -869,10 +921,10 @@ export default function OpsPipelinePage() {
             selectedDate={selectedPredDate}
             smoothed={true}
             model={model}
-            showKilns={showKilns}
-            showIndustry={showIndustry}
+            showKilns={showKilns && !replaying}
+            showIndustry={showIndustry && !replaying}
             industryKeys={industryKeys}
-            showFires={showFires}
+            showFires={showFires && !replaying}
             firesData={firesGeoJSON ?? null}
             stations={shownStations as StationReading[]}
             onMapUnavailable={setMapUnavailable}
@@ -880,17 +932,20 @@ export default function OpsPipelinePage() {
             onMapReady={(fn) => setFlyTo(() => fn)}
             onFeatureClick={openFromMap}
             panelOpen={!!railTab && !isMobile}
-            showStations={showStations}
+            homeSignal={homeSignal}
+            showStations={showStations && !replaying}
             showSurface={showSurface}
             mode={mode}
-            showSmoke={showSmoke}
-            showPlumes={showPlumes}
+            showSmoke={showSmoke && !replaying}
+            showPlumes={showPlumes && !replaying}
             outlookCities={outlookCities}
-            heatSources={heatSources?.rows ?? []}
+            heatSources={heatSources?.rows ?? NO_HEAT_ROWS}
             heatWindowDays={heatSources?.window_days ?? 30}
             estimateGrid={predictionData ?? null}
-            showWind={showWind}
-            showPopulation={showPopulation}
+            replay={replayForMap}
+            replayDay={playback.active ? replayDay : null}
+            showWind={showWind && !replaying}
+            showPopulation={showPopulation && !replaying}
             stationCaption={mode === 'day' ? undefined : readingLabel}
             onDistrictOpenChange={onDistrictOpenChange}
             closeDistrictSignal={closeDistrictSignal}
@@ -939,12 +994,53 @@ export default function OpsPipelinePage() {
           fireSeason={fireSeason}
         />
 
+        {/* Listen sits in the site header: the air quality near the visitor, read aloud (English or Urdu) */}
+        {headerSlot && createPortal(
+          <AnimatePresence>
+            {mapShown && (
+              <m.div
+                key="voice"
+                initial={{ opacity: 0, scale: 0.96 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.96 }}
+                transition={{ duration: 0.3, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
+              >
+                <VoiceBrief
+                  target={voiceNearby.target}
+                  availability={voiceNearby.availability}
+                  locationFailed={locFails}
+                  onRequestLocation={locate}
+                />
+              </m.div>
+            )}
+          </AnimatePresence>,
+          headerSlot,
+        )}
+
+        {/* Whole country: back to the national view, centred on Pakistan */}
+        <button
+          onClick={() => setHomeSignal(n => n + 1)}
+          disabled={!flyTo}
+          aria-label="Show all of Pakistan"
+          title="Show all of Pakistan"
+          className="absolute bottom-[152px] right-3 md:bottom-[124px] md:right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-[color,transform] duration-150 hover:text-slate-950 active:scale-95 disabled:opacity-60"
+          style={{
+            background: 'rgba(255,255,255,0.82)',
+            backdropFilter: 'blur(20px) saturate(180%)',
+            WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+            border: '1px solid rgba(15,23,42,0.08)',
+            boxShadow: '0 8px 32px rgba(15,23,42,0.14)',
+          }}
+        >
+          <Maximize2 size={18} />
+        </button>
+
         {/* Find me */}
         <button
           onClick={locate}
           disabled={locating}
           aria-label="Show air quality where I am"
-          className="absolute bottom-[104px] right-3 md:bottom-[76px] md:right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-[color,transform] duration-150 hover:text-slate-950 active:scale-95 disabled:opacity-60"
+          className="absolute bottom-[96px] right-3 md:bottom-[68px] md:right-4 z-10 flex h-11 w-11 items-center justify-center rounded-full text-slate-800 transition-[color,transform] duration-150 hover:text-slate-950 active:scale-95 disabled:opacity-60"
           style={{
             background: 'rgba(255,255,255,0.82)',
             backdropFilter: 'blur(20px) saturate(180%)',
@@ -964,7 +1060,7 @@ export default function OpsPipelinePage() {
               exit={{ opacity: 0, x: 8 }}
               transition={{ duration: 0.2 }}
               role="status"
-              className="absolute bottom-[104px] right-16 md:bottom-[80px] md:right-[68px] z-10 max-w-[260px] rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-lg"
+              className="absolute bottom-[96px] right-16 md:bottom-[72px] md:right-[68px] z-10 max-w-[260px] rounded-xl bg-slate-900 px-3 py-2 text-xs text-white shadow-lg"
             >
               {locNote}
             </m.div>
@@ -972,9 +1068,14 @@ export default function OpsPipelinePage() {
         </AnimatePresence>
 
         {/* Timeline: one glass bar at the bottom of the map. Step buttons and the date never shrink;
-            the slider takes the spare width and the Today / hours / days chips scroll when space runs out. */}
-        <div
-          className="absolute bottom-12 left-3 right-3 md:bottom-4 md:left-4 md:right-4 z-20 flex items-center gap-1 rounded-full p-1 lg:gap-2"
+            the slider takes the spare width and the Today / hours / days chips scroll when space runs out.
+            It rises in once the map has loaded (or once it is known the map cannot load). */}
+        <m.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={mapShown ? { opacity: 1, y: 0 } : { opacity: 0, y: 16 }}
+          transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+          aria-hidden={!mapShown}
+          className={`absolute bottom-10 left-3 right-3 md:bottom-2 md:left-4 md:right-4 z-20 flex items-center gap-1 rounded-full p-1 lg:gap-2 ${mapShown ? '' : 'pointer-events-none'}`}
           style={{
             background: 'rgba(255,255,255,0.86)',
             backdropFilter: 'blur(20px) saturate(180%)',
@@ -985,88 +1086,107 @@ export default function OpsPipelinePage() {
           role="group"
           aria-label="Date"
         >
+          <AnimatePresence mode="wait" initial={false}>
+          {playback.active ? (
+            <m.div key="replay" className="flex min-w-0 flex-1 items-center" initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 4 }} transition={{ duration: 0.2 }}>
+              <ReplayScrubber
+                frames={playback.frames}
+                clock={playback.clock}
+                status={playback.status}
+                onPlay={() => void playback.play()}
+                onPause={playback.pause}
+                onSeek={playback.seek}
+                onClose={() => { playback.stop(); setReplayDay(null) }}
+              />
+            </m.div>
+          ) : (
+            <m.div key="timeline" className="flex min-w-0 flex-1 items-center gap-1 lg:gap-2" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2 }}>
           <div className="flex shrink-0 items-center">
-            <button
-              onClick={() => {
-                if (playback.status === 'playing') { playback.pause(); return }
-                void playback.play()
-              }}
-              disabled={playback.status === 'loading' || dates.length < 2}
-              aria-label={playback.status === 'playing' ? 'Pause the replay' : `Replay the last ${REPLAY_DAYS} days of the PM2.5 estimate`}
-              title={playback.status === 'playing' ? 'Pause' : `Replay the last ${REPLAY_DAYS} days`}
-              className={`mr-0.5 h-9 w-9 shrink-0 flex items-center justify-center rounded-full transition-[background-color,color,transform] duration-200 active:scale-90 disabled:opacity-40 ${playback.active ? 'bg-slate-900 text-white' : 'text-slate-800 hover:bg-slate-900/[0.06]'}`}
-            >
-              {playback.status === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" />
-                : playback.status === 'playing' ? <Pause className="h-4 w-4" fill="currentColor" />
-                : <Play className="h-4 w-4 translate-x-px" fill="currentColor" />}
-            </button>
-            <button
-              onClick={() => { playback.stop(); goToStep(steps[stepIndex - 1]) }}
-              disabled={stepIndex <= 0}
-              aria-label="Previous step"
-              className="h-9 w-9 shrink-0 flex items-center justify-center rounded-full text-slate-700 transition-[background-color,transform] duration-150 hover:bg-slate-900/[0.06] active:scale-90 disabled:opacity-30 disabled:hover:bg-transparent disabled:active:scale-100"
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-
-            <DatePicker
-              dates={dates}
-              value={selectedPredDate}
-              onChange={(d) => { playback.stop(); goToStep(d) }}
-              label={timelineLabel}
+              <button
+                onClick={() => {
+                  if (playback.status === 'playing') { playback.pause(); return }
+                  if (playback.status === 'loading') { playback.stop(); return }
+                  startReplay()
+                }}
+                disabled={dates.length < 2}
+                aria-label={playback.status === 'playing' ? 'Pause the replay' : playback.status === 'loading' ? 'Cancel the replay' : `Replay the last ${REPLAY_DAYS} days of the PM2.5 estimate`}
+                title={playback.status === 'playing' ? 'Pause' : `Replay the last ${REPLAY_DAYS} days`}
+                className={`mr-0.5 h-9 w-9 shrink-0 flex items-center justify-center rounded-full transition-[background-color,color,transform] duration-200 active:scale-90 disabled:opacity-40 ${playback.active ? 'bg-slate-900 text-white' : 'text-slate-800 hover:bg-slate-900/[0.06]'}`}
+              >
+                {playback.status === 'loading' ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : playback.status === 'playing' ? <Pause className="h-4 w-4" fill="currentColor" />
+                  : <Play className="h-4 w-4 translate-x-px" fill="currentColor" />}
+              </button>
+              <button
+                onClick={() => { playback.stop(); goToStep(steps[stepIndex - 1]) }}
+                disabled={stepIndex <= 0}
+                aria-label="Previous step"
+                className="h-9 w-9 shrink-0 flex items-center justify-center rounded-full text-slate-700 transition-[background-color,transform] duration-150 hover:bg-slate-900/[0.06] active:scale-90 disabled:opacity-30 disabled:hover:bg-transparent disabled:active:scale-100"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+  
+              <DatePicker
+                dates={dates}
+                value={selectedPredDate}
+                onChange={(d) => { playback.stop(); goToStep(d) }}
+                label={timelineLabel}
+              />
+  
+              <button
+                onClick={() => { playback.stop(); goToStep(steps[stepIndex + 1]) }}
+                disabled={stepIndex >= steps.length - 1}
+                aria-label="Next step"
+                className="h-9 w-9 shrink-0 flex items-center justify-center rounded-full text-slate-700 transition-[background-color,transform] duration-150 hover:bg-slate-900/[0.06] active:scale-90 disabled:opacity-30 disabled:hover:bg-transparent disabled:active:scale-100"
+              >
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+  
+            {/* Past days: a scrubber over the finished days with a satellite surface */}
+            <div className="relative mx-2 flex h-6 min-w-[96px] flex-1 items-center max-lg:hidden">
+              <div className="absolute left-0 right-0 h-1 rounded-full bg-slate-300/70" />
+              <div
+                className="absolute left-0 h-1 rounded-full bg-slate-800 transition-[width] duration-300 ease-out"
+                style={{ width: futureStep !== null ? '100%' : dates.length > 1 ? `${(Math.max(currentIndex, 0) / (dates.length - 1)) * 100}%` : '0%' }}
+              />
+              <input
+                type="range"
+                aria-label="Select a past day"
+                aria-valuetext={formatDisplayDate(selectedPredDate)}
+                min={0}
+                max={dates.length - 1}
+                value={currentIndex >= 0 ? currentIndex : 0}
+                onChange={(e) => {
+                  const idx = parseInt(e.target.value, 10)
+                  goToStep(dates[idx])
+                }}
+                className="relative z-10 w-full h-1 appearance-none cursor-pointer bg-transparent
+                  [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4
+                  [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
+                  [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab
+                  [&::-webkit-slider-thumb]:ring-1 [&::-webkit-slider-thumb]:ring-slate-900/15
+                  [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full
+                  [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:shadow-md"
+              />
+            </div>
+  
+            {/* Today, the next hours (nowcast) and the forecast days; the dark marker slides between them */}
+            <TimelineChips
+              steps={['now', ...hourSteps, ...leads] as FutureStep[]}
+              active={futureStep}
+              onPick={(st) => { playback.stop(); goToStep(st) }}
+              label={step => step === 'now' ? 'Today'
+                : isHourStep(step) ? `+${step.h}h`
+                : (() => { const d = targetDate(forecasts, step); return d ? formatDateOnly(d, { weekday: 'short' }) : `+${daysAheadOf(step)}d` })()}
+              title={step => step === 'now' ? 'Latest readings'
+                : isHourStep(step) ? `Nowcast for ${(() => { const v = nowcastValidTime(nowcastData, step.h); return v ? formatPkt(v) : `${step.h} hours ahead` })()}`
+                : `Forecast for ${longDay(targetDate(forecasts, step))}`}
             />
-
-            <button
-              onClick={() => { playback.stop(); goToStep(steps[stepIndex + 1]) }}
-              disabled={stepIndex >= steps.length - 1}
-              aria-label="Next step"
-              className="h-9 w-9 shrink-0 flex items-center justify-center rounded-full text-slate-700 transition-[background-color,transform] duration-150 hover:bg-slate-900/[0.06] active:scale-90 disabled:opacity-30 disabled:hover:bg-transparent disabled:active:scale-100"
-            >
-              <ChevronRight className="w-4 h-4" />
-            </button>
-          </div>
-
-          {/* Past days: a scrubber over the finished days with a satellite surface */}
-          <div className="relative mx-2 flex h-6 min-w-[96px] flex-1 items-center max-lg:hidden">
-            <div className="absolute left-0 right-0 h-1 rounded-full bg-slate-300/70" />
-            <div
-              className="absolute left-0 h-1 rounded-full bg-slate-800 transition-[width] duration-300 ease-out"
-              style={{ width: futureStep !== null ? '100%' : dates.length > 1 ? `${(Math.max(currentIndex, 0) / (dates.length - 1)) * 100}%` : '0%' }}
-            />
-            <input
-              type="range"
-              aria-label="Select a past day"
-              aria-valuetext={formatDisplayDate(selectedPredDate)}
-              min={0}
-              max={dates.length - 1}
-              value={currentIndex >= 0 ? currentIndex : 0}
-              onChange={(e) => {
-                const idx = parseInt(e.target.value, 10)
-                goToStep(dates[idx])
-              }}
-              className="relative z-10 w-full h-1 appearance-none cursor-pointer bg-transparent
-                [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:h-4
-                [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white
-                [&::-webkit-slider-thumb]:shadow-md [&::-webkit-slider-thumb]:cursor-grab
-                [&::-webkit-slider-thumb]:ring-1 [&::-webkit-slider-thumb]:ring-slate-900/15
-                [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:rounded-full
-                [&::-moz-range-thumb]:bg-white [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:shadow-md"
-            />
-          </div>
-
-          {/* Today, the next hours (nowcast) and the forecast days; the dark marker slides between them */}
-          <TimelineChips
-            steps={['now', ...hourSteps, ...leads] as FutureStep[]}
-            active={futureStep}
-            onPick={(st) => { playback.stop(); goToStep(st) }}
-            label={step => step === 'now' ? 'Today'
-              : isHourStep(step) ? `+${step.h}h`
-              : (() => { const d = targetDate(forecasts, step); return d ? formatDateOnly(d, { weekday: 'short' }) : `+${daysAheadOf(step)}d` })()}
-            title={step => step === 'now' ? 'Latest readings'
-              : isHourStep(step) ? `Nowcast for ${(() => { const v = nowcastValidTime(nowcastData, step.h); return v ? formatPkt(v) : `${step.h} hours ahead` })()}`
-              : `Forecast for ${longDay(targetDate(forecasts, step))}`}
-          />
-        </div>
+            </m.div>
+          )}
+          </AnimatePresence>
+        </m.div>
       </div>
 
     </div>

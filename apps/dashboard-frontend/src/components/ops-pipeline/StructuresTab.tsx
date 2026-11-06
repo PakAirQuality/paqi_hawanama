@@ -6,7 +6,7 @@ import { StationHourlyChart, useStationHourly } from '@/components/shared/Statio
 import { formatDateOnly, hourLabel, relativeAge } from '@/lib/time'
 import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, ChevronLeft, ChevronDown, ChevronsLeft, Search, MapPin } from 'lucide-react'
+import { ChevronRight, ChevronLeft, ChevronsLeft, Search, MapPin } from 'lucide-react'
 import { useIsMobile } from '@/lib/useMediaQuery'
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
 import { stationForecastDays, type StationForecastDay } from '@/lib/timeline'
@@ -35,8 +35,8 @@ const CATEGORY_ICONS: Record<string, React.ReactNode> = {
     </svg>
   ),
   steel_sites: (
-    <svg className="w-[18px] h-[18px]" viewBox="0 -960 960 960" fill="currentColor">
-      <path d="M40-120v-80h880v80H40Zm120-120v-280l200-200 200 200v280H160Zm80-80h80v-120h-80v120Zm0-200h240L400-600l-80 80h-80Zm320 280v-440l200-200 200 200v440H560Zm80-80h80v-120h-80v120Zm0-200h240L800-600l-80 80h-80Z" />
+    <svg className="w-[18px] h-[18px]" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M4 4h16v3.5h-6v9h6V20H4v-3.5h6v-9H4z" />
     </svg>
   ),
   sugar_mills: (
@@ -474,6 +474,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
             </button>
           )}
         </div>
+        <KilnSource compact />
       </div>
     )
   }
@@ -523,6 +524,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
               </div>
             </div>
           </div>
+          <div className="px-4 pb-6"><KilnSource /></div>
         </div>
       </div>
     )
@@ -569,7 +571,7 @@ export function StructuresTab({ stations, kilns, industryCategories, selectedDat
       ),
       steel_sites: (
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/>
+          <path d="M4 4h16v3.5h-6v9h6V20H4v-3.5h6v-9H4z"/>
         </svg>
       ),
       sugar_mills: (
@@ -872,18 +874,8 @@ function StationDetailView({ station, selectedDate, caption, forecast, nowcast, 
 
   return (
     <div className="flex flex-col h-full bg-white">
-      {/* Phones: the sheet closes downwards. Desktop: the panel collapses back into the left rail. */}
-      {isMobile && (
-        <button
-          onClick={onBack}
-          aria-label="Close station panel"
-          className="flex w-full items-center justify-center py-2 text-slate-500 hover:text-slate-900 transition-colors"
-        >
-          <ChevronDown size={22} strokeWidth={2} />
-        </button>
-      )}
-
-      <div className={`flex-1 overflow-y-auto scrollbar-hide px-4 pb-6 ${isMobile ? '' : 'pt-4'}`}>
+      {/* Phones: the sheet's own down arrow closes it. Desktop: the panel collapses back into the left rail. */}
+      <div className={`flex-1 overflow-y-auto scrollbar-hide px-4 pb-6 ${isMobile ? 'pt-1' : 'pt-4'}`}>
         {/* Identity */}
         <div className="flex items-start gap-2">
           <h2 className="min-w-0 flex-1 text-[20px] font-semibold text-slate-900 leading-snug tracking-tight">{station.name}</h2>
@@ -1001,5 +993,30 @@ function DetailRow({ label, value }: { label: string; value: string }) {
       <dt className="text-slate-600">{label}</dt>
       <dd className="text-right font-medium text-slate-900">{value}</dd>
     </div>
+  )
+}
+
+/** The brick-kiln inventory's source (Scientific Data 2025, CC BY 4.0), cited wherever its kilns are listed. */
+const KILN_PAPER_URL = 'https://www.nature.com/articles/s41597-025-05148-9'
+function KilnSource({ compact = false }: { compact?: boolean }) {
+  if (compact) {
+    return (
+      <div className="shrink-0 border-t border-slate-900/[0.06] px-4 py-2 text-[11px] leading-snug text-slate-500">
+        Source:{' '}
+        <a href={KILN_PAPER_URL} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-700 underline-offset-2 hover:underline">
+          Hamdani et al. (2025), Scientific Data
+        </a>
+        , CC BY 4.0
+      </div>
+    )
+  }
+  return (
+    <p className="text-[11px] leading-relaxed text-slate-500">
+      Kiln locations: Hamdani, M. S. A., Zakir, K., Kushwaha, N., Fatima, S. E. and Sheikh, H. A. (2025).{' '}
+      <a href={KILN_PAPER_URL} target="_blank" rel="noopener noreferrer" className="font-medium text-slate-700 underline-offset-2 hover:underline">
+        Brick Kiln Dataset for Pakistan&apos;s IGP Region Using AI
+      </a>
+      . Scientific Data 12, 830. doi:10.1038/s41597-025-05148-9. Licensed CC BY 4.0.
+    </p>
   )
 }

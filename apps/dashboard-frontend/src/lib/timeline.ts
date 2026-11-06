@@ -115,11 +115,12 @@ export function stationForecastDays(forecasts: ForecastEntry[], today: string, n
 
 // ── Hourly nowcast ──
 
-const leadValue = (s: NowcastStation, h: NowcastLead) => s.leads.find(l => l.lead_hours === h) ?? null
+// A malformed station (no leads list) has no values rather than throwing
+const leadValue = (s: NowcastStation, h: NowcastLead) => (Array.isArray(s?.leads) ? s.leads.find(l => l?.lead_hours === h) : undefined) ?? null
 
 /** When the nowcast's values for `h` hours ahead are for (ISO UTC), or null when the cycle lacks that lead. */
 export function nowcastValidTime(nowcast: NowcastResponse | null | undefined, h: NowcastLead): string | null {
-  if (!nowcast) return null
+  if (!nowcast || !Array.isArray(nowcast.stations)) return null
   for (const s of nowcast.stations) {
     const v = leadValue(s, h)
     if (v) return v.valid_time
@@ -129,7 +130,7 @@ export function nowcastValidTime(nowcast: NowcastResponse | null | undefined, h:
 
 /** Nowcast leads still ahead of `nowIso` with at least one station value. A stalled job then shows nothing. */
 export function availableHours(nowcast: NowcastResponse | null | undefined, nowIso: string): NowcastLead[] {
-  if (!nowcast) return []
+  if (!nowcast || !Array.isArray(nowcast.stations)) return []
   const now = Date.parse(nowIso)
   const out: NowcastLead[] = []
   for (const h of NOWCAST_LEADS) {
@@ -176,7 +177,7 @@ export function stationNowcastPoints(
   nowcast: NowcastResponse | null | undefined,
   station: { station_id?: string | null; name: string; city: string },
 ): StationNowcastPoint[] {
-  if (!nowcast) return []
+  if (!nowcast || !Array.isArray(nowcast.stations)) return []
   const id = station.station_id?.trim()
   const byId = id ? nowcast.stations.find(s => s.station_id?.trim() === id || s.member_station_ids?.some(m => m.trim() === id)) : undefined
   const entry = byId ?? nowcast.stations.find(s => s.station_name === station.name && s.city === station.city)

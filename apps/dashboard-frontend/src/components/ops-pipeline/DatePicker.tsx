@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, m } from 'motion/react'
-import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface DatePickerProps {
   /** Dates that can be chosen, as YYYY-MM-DD */
@@ -69,7 +69,6 @@ export function DatePicker({ dates, value, onChange, label }: DatePickerProps) {
         aria-label={`Date, ${label}. Change date`}
         className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] font-semibold tabular-nums text-slate-900 transition-[background-color,transform] duration-150 hover:bg-slate-900/[0.06] active:scale-[0.97] ${open ? 'bg-slate-900/[0.06]' : ''}`}
       >
-        <CalendarDays size={14} className="shrink-0 text-slate-500" aria-hidden />
         {/* The new label slides in over the old one */}
         <span className="relative inline-grid overflow-hidden">
           <AnimatePresence mode="popLayout" initial={false}>

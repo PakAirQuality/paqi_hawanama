@@ -6,17 +6,20 @@ import { INVENTORY_NOTE, loadEmissionSources, loadKilnsGeoJSON } from '@/lib/sta
 import { formatDateOnly, formatPkt } from '@/lib/time'
 import { bandKey, normalizeBand, bandColor, cardTextColor, classifyPm25, pm25ToAqi } from '@/lib/aqi'
 import { esc } from '@/lib/html'
-import { CITY_RANGE, SURFACE_RANGE, rangeTicks } from '@/lib/turbo'
+import { SURFACE_RANGE, rangeTicks } from '@/lib/turbo'
 import { paletteGradient } from '@/lib/mapviz/colormap'
 import type { PredictionData } from './types'
+import { predictionRaster, sampleRaster, type GridImage } from '@/lib/mapviz/gridImage'
+import type { ReplayClock } from './useDayPlayback'
 import { AqiCard, GaugeIcon } from '@/components/shared/AqiCard'
 import { AnimatePresence, m } from 'motion/react'
-import { loadCountryPolygons, useBasemapTuning, useCitySurfaces, useEstimateSurface, useFireAnimation, useHeatSources, useOutlookCone, useSmokeOutlook, useSmokePlumes, OUTLOOK_BAND_COLOR, OUTLOOK_BAND_LABEL, type HeatSource, type OutlookCityPoint } from './mapViz'
+import { loadCountryPolygons, useBasemapTuning, useCitySurfaces, useEstimateReplay, useEstimateSurface, useFireAnimation, useHeatSources, useOutlookCone, useSmokeOutlook, useSmokePlumes, OUTLOOK_BAND_COLOR, OUTLOOK_BAND_LABEL, type HeatSource, type OutlookCityPoint } from './mapViz'
 import { useQuery } from '@tanstack/react-query'
 import { fetchCityOutlook, type OutlookBand } from '@/components/fires/api'
 import { WindParticleRenderer, type WindMetadata } from '@/components/analyst-desk/WindParticleLayer'
 import { loadWindField } from '@/lib/mapviz/wind'
-import { ChevronDown, Loader2, X } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
+import { TrackerLoader } from './TrackerLoader'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { API_BASE } from './api'
@@ -114,6 +117,12 @@ interface PredictionMapProps {
   heatWindowDays?: number
   /** The estimate grid for the day and model in view; the map paints it */
   estimateGrid?: PredictionData | null
+  /** The replay: every day's estimate image and the playhead; the map blends between days as it moves */
+  replay?: { images: GridImage[]; clock: ReplayClock } | null
+  /** The replay's nearest day, for the map key's date while it plays */
+  replayDay?: string | null
+  /** Bumped to fly back to the whole country, fitted into the space the cards leave */
+  homeSignal?: number
 }
 
 export type MapFeatureClick =
@@ -146,28 +155,16 @@ function makeCircleImage(color: string): { data: ImageData; options: { pixelRati
   return { data: ctx.getImageData(0, 0, S, S), options: { pixelRatio: 2 } }
 }
 
-/** Marker icons by data quality: filled (live), ring (estimated from neighbours), diamond (model only), stale (a fainter disc, no edge). */
-function makeMarkerImage(color: string, shape: 'fill' | 'ring' | 'diamond' | 'stale'): { data: ImageData; options: { pixelRatio: number } } {
+/** Marker icons: a disc in the band's colour, fainter (no edge) when the latest reading is old. */
+function makeMarkerImage(color: string, shape: 'fill' | 'stale'): { data: ImageData; options: { pixelRatio: number } } {
   if (shape === 'fill') return makeCircleImage(color)
   const S = 72, r = 27
   const canvas = document.createElement('canvas')
   canvas.width = S; canvas.height = S
   const ctx = canvas.getContext('2d')!
-  ctx.shadowColor = 'rgba(15,23,42,0.28)'; ctx.shadowBlur = 4; ctx.shadowOffsetY = 1.5
   const cx = S / 2, cy = S / 2 - 1
-  if (shape === 'diamond') {
-    ctx.beginPath(); ctx.moveTo(cx, cy - r - 3); ctx.lineTo(cx + r + 3, cy); ctx.lineTo(cx, cy + r + 3); ctx.lineTo(cx - r - 3, cy); ctx.closePath()
-    ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.shadowColor = 'transparent'
-    ctx.lineWidth = 6; ctx.strokeStyle = color; ctx.stroke()
-  } else if (shape === 'ring') {
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = '#ffffff'; ctx.fill(); ctx.shadowColor = 'transparent'
-    ctx.beginPath(); ctx.arc(cx, cy, r - 3, 0, Math.PI * 2); ctx.lineWidth = 6; ctx.strokeStyle = color; ctx.stroke()
-  } else {
-    ctx.globalAlpha = 0.35
-    ctx.shadowColor = 'transparent'
-    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill()
-    ctx.globalAlpha = 1
-  }
+  ctx.globalAlpha = 0.35
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill()
   return { data: ctx.getImageData(0, 0, S, S), options: { pixelRatio: 2 } }
 }
 
@@ -219,7 +216,7 @@ const PAKISTAN_BOUNDS: [[number, number], [number, number]] = [[60.8, 23.5], [77
 const SUMMARY_CARD_PX = 380 // the floating card's width plus its margin
 const PANEL_SETTLE_MS = 350 // the side panel's spring has finished by then
 
-export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, industryKeys, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick, userLocation, panelOpen = false, showStations = true, showSurface = true, showWind = false, showPopulation = false, stationCaption, onDistrictOpenChange, closeDistrictSignal, leftSlot, hideLegend = false, mode = 'day', showSmoke = true, showPlumes = true, outlookCities = NO_OUTLOOK, heatSources = NO_HEAT, heatWindowDays = 30, estimateGrid = null }: PredictionMapProps) {
+export function PredictionMap({ selectedDate, smoothed = false, model = 'backbone', showKilns = true, showIndustry = false, industryKeys, showFires = false, firesData = null, stations: stationsProp, onMapUnavailable, onMapReady, onFeatureClick, userLocation, panelOpen = false, showStations = true, showSurface = true, showWind = false, showPopulation = false, stationCaption, onDistrictOpenChange, closeDistrictSignal, leftSlot, hideLegend = false, mode = 'day', showSmoke = true, showPlumes = true, outlookCities = NO_OUTLOOK, heatSources = NO_HEAT, heatWindowDays = 30, estimateGrid = null, replay = null, replayDay = null, homeSignal = 0 }: PredictionMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const mapRef = useRef<mapboxgl.Map | null>(null)
   const [mapLoaded, setMapLoaded] = useState(false)
@@ -233,7 +230,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   const [selectedDistrict, setSelectedDistrict] = useState<SelectedDistrict | null>(null)
   const clearDistrictRef = useRef<(() => void) | null>(null)
   // Zoomed into a city with its own 1 km layer, which uses a narrower colour range
-  const [inCityDetail, setInCityDetail] = useState(false)
   const surfaceRef = useRef({ selectedDate, model, smoothed })
   surfaceRef.current = { selectedDate, model, smoothed }
   // The satellite estimate: the day in view, or the newest finished day under today's readings.
@@ -307,6 +303,15 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
     return () => clearTimeout(timer)
   }, [panelOpen, mapLoaded])
 
+  // Back to the national view: all of Pakistan, centred in the space beside the summary card and above the timeline
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapLoaded || !homeSignal) return
+    const width = map.getContainer().clientWidth
+    const right = width >= 768 ? Math.min(SUMMARY_CARD_PX, width * 0.45) : 24
+    map.fitBounds(PAKISTAN_BOUNDS, { padding: { top: 32, bottom: 96, left: width >= 768 ? 32 : 24, right }, duration: 900 })
+  }, [homeSignal]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Initialize map once
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return
@@ -361,13 +366,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
     // Someone moving the map keeps their view; only drags, scrolls and pinches carry originalEvent
     map.on('movestart', (e) => { if (e.originalEvent) viewChosenRef.current = true })
-    map.on('moveend', () => {
-      const { lng, lat } = map.getCenter()
-      setInCityDetail(map.getZoom() >= 9.5 && URBAN_CITIES.some(({ bounds: [w, so, e, n] }) => lng >= w && lng <= e && lat >= so && lat <= n))
-    })
 
-    // Expose flyTo callback to parent
-    onMapReady?.((lng: number, lat: number, zoom?: number) => new Promise<void>((resolve) => {
+    // Hand the page its flyTo once the map has loaded (the replay's autoplay and the locate prompt wait for it)
+    const exposeFlyTo = () => onMapReady?.((lng: number, lat: number, zoom?: number) => new Promise<void>((resolve) => {
       viewChosenRef.current = true
       const done = () => { clearTimeout(timer); resolve() }
       const timer = setTimeout(() => { map.off('moveend', done); resolve() }, 4000) // already there: no move event
@@ -526,7 +527,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
         const INDUSTRY_ICONS: Record<string, (color: string) => string> = {
           power_plants: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`,
           cement_plants: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20h20"/><path d="M5 20V8l4-4v16"/><path d="M9 20V4l5 4v12"/><path d="M14 20V8l5 4v8"/></svg>`,
-          steel_sites: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v8"/><path d="m4.93 10.93 1.41 1.41"/><path d="M2 18h2"/><path d="M20 18h2"/><path d="m19.07 10.93-1.41 1.41"/><path d="M22 22H2"/><path d="m8 6 4-4 4 4"/><path d="M16 18a4 4 0 0 0-8 0"/></svg>`,
+          // A steel I-beam (girder)
+          steel_sites: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v3.5h-6v9h6V20H4v-3.5h6v-9H4z"/></svg>`,
           sugar_mills: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 20h10"/><path d="M10 20c5.5-2.5.8-6.4 3-10"/><path d="M9.5 9.4c1.1.8 1.8 2.2 2.3 3.7-2 .4-3.5.4-4.8-.3-1.2-.6-2.3-1.9-3-4.2 2.8-.5 4.4 0 5.5.8z"/><path d="M14.1 6a7 7 0 0 0-1.1 4c1.9-.1 3.3-.6 4.3-1.4 1-1 1.6-2.3 1.7-4.6-2.7.1-4 1-4.9 2z"/></svg>`,
           mines_quarries: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20l10-10"/><path d="M16 8l-2-2"/><path d="M22 2l-6 6"/><path d="M6 18L2 22"/><path d="M18 10l4-4"/><path d="m14 4 6 6"/><circle cx="12" cy="12" r="2"/></svg>`,
           industrial_sites: (c) => `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="${c}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 20a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8l-7 5V8l-7 5V4a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2Z"/></svg>`,
@@ -893,10 +895,12 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       })
 
       setMapLoaded(true)
+      exposeFlyTo()
       } catch (err) {
         // A failed layer must not leave the spinner up forever or take the page down.
         console.warn('[map] layer setup failed', err)
         setMapLoaded(true)
+        exposeFlyTo()
         onMapUnavailableRef.current?.('layers-failed')
       }
     })
@@ -942,12 +946,13 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
           pm25: stn.pm25,
           color: bandColor(band),
           band: normalizeBand(band),
-          // White figures on red, purple and brown discs; ring and diamond markers have a white fill
-          text: stn.basis === 'neighbours' || stn.basis === 'prior' ? '#0f172a' : cardTextColor(band),
+          // White figures on red, purple and brown discs
+          text: cardTextColor(band),
           // forecast readings: 'model' | 'neighbours' | 'prior'; live readings have none
           basis: stn.basis ?? 'model',
-          // Marker shape: live (filled), estimated from neighbours (ring), model only (diamond), stale (fainter)
-          shape: stn.basis === 'neighbours' ? 'ring' : stn.basis === 'prior' ? 'diamond' : stn.stale ? 'stale' : 'fill',
+          // Every station is a disc in its band's colour; one whose latest reading is old is fainter
+          // (estimated values are told apart in the hover card, not by the marker)
+          shape: stn.stale ? 'stale' : 'fill',
         },
       })
     })
@@ -963,7 +968,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
     map.addSource('stations', { type: 'geojson', data })
     for (const k of ['good', 'moderate', 'unhealthy_sensitive', 'unhealthy', 'very_unhealthy', 'hazardous']) {
-      for (const shape of ['fill', 'ring', 'diamond', 'stale'] as const) {
+      for (const shape of ['fill', 'stale'] as const) {
         const id = `station-${shape}-${k}`
         if (map.hasImage(id)) continue
         const { data: img, options } = makeMarkerImage(bandColor(k), shape)
@@ -1097,7 +1102,24 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   // ── Redesign layers (mapViz) ──
   const liveMap = mapLoaded ? mapRef.current : null
   useBasemapTuning(liveMap, mapLoaded)
-  useEstimateSurface(liveMap, mapLoaded, { grid: estimateGrid, visible: satelliteOn })
+  // Replay hand-off: the normal estimate rests only once the replay's first pictures are in (never a blank map),
+  // and the replay's layers go only once the normal estimate is back on screen (never a blank or doubled frame)
+  const [replayReady, setReplayReady] = useState(false)
+  const [handoffDone, setHandoffDone] = useState(true)
+  useEffect(() => { if (replay) { setReplayReady(false); setHandoffDone(false) } }, [replay])
+  useEffect(() => { if (!replay && !replayReady) setHandoffDone(true) }, [replay, replayReady])
+  // Past province level the estimate shows its real cells (~10 km squares) instead of the smooth blend
+  const CELL_ZOOM = 7
+  const [cellView, setCellView] = useState(false)
+  useEffect(() => {
+    if (!liveMap) return
+    const check = () => { const c = liveMap.getZoom() > CELL_ZOOM; setCellView(v => (v === c ? v : c)) }
+    check()
+    liveMap.on('zoomend', check)
+    return () => { liveMap.off('zoomend', check) }
+  }, [liveMap])
+  useEstimateSurface(liveMap, mapLoaded, { grid: estimateGrid, visible: satelliteOn, suspended: !!replay && replayReady, onResumed: () => setHandoffDone(true), cells: cellView })
+  useEstimateReplay(liveMap, mapLoaded, { images: replay?.images ?? null, clock: replay?.clock ?? null, visible: satelliteOn, release: handoffDone, onReady: () => setReplayReady(true) })
   useCitySurfaces(liveMap, mapLoaded, { cities: URBAN_CITIES, date: selectedDate, visible: satelliteOn })
   // Smoke outlook: a city opens its card, and its upwind cone is drawn for the lead in view
   const [outlookCity, setOutlookCity] = useState<string | null>(null)
@@ -1128,16 +1150,37 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
   }, [outlookPoint, leadData])
   useOutlookCone(liveMap, mapLoaded, showSmoke ? cone : null)
   useHeatSources(liveMap, mapLoaded, { rows: heatSources, enabled: showFires, windowDays: heatWindowDays })
-  useSmokePlumes(liveMap, mapLoaded, { fires: firesData?.features ?? NO_PLUME_FIRES, enabled: showPlumes })
+  // The PM2.5 at a point for the plume colours: the day's satellite estimate, else the nearest station within 60 km
+  const pm25At = useMemo(() => {
+    const raster = predictionRaster(estimateGrid)
+    const pts = stations.flatMap(s => {
+      const la = s.lat ?? s.latitude, lo = s.lon ?? s.longitude
+      return la != null && lo != null && s.pm25 != null ? [{ la, lo, v: s.pm25 }] : []
+    })
+    return (lon: number, lat: number): number | null => {
+      const est = raster ? sampleRaster(raster, lon, lat) : null
+      if (est != null) return est
+      let best: number | null = null, bestD = 60
+      for (const p of pts) {
+        const d = Math.hypot((p.lo - lon) * 111.32 * Math.cos((lat * Math.PI) / 180), (p.la - lat) * 110.57)
+        if (d < bestD) { bestD = d; best = p.v }
+      }
+      return best
+    }
+  }, [estimateGrid, stations])
+  useSmokePlumes(liveMap, mapLoaded, { fires: firesData?.features ?? NO_PLUME_FIRES, enabled: showPlumes, pm25At })
   useFireAnimation(liveMap, mapLoaded, { enabled: showFires, data: firesData })
 
   // Population density
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapLoaded) return
-    if (map.getLayer('population-layer')) map.removeLayer('population-layer')
-    if (map.getSource('population')) map.removeSource('population')
-    if (!showPopulation) return
+    if (!showPopulation) {
+      if (map.getLayer('population-layer')) map.setLayoutProperty('population-layer', 'visibility', 'none')
+      return
+    }
+    // Population does not change with the day in view: build the layer once and keep it
+    if (map.getLayer('population-layer')) { map.setLayoutProperty('population-layer', 'visibility', 'visible'); return }
     map.addSource('population', {
       type: 'raster',
       tiles: [`${API_BASE}/api/v1/ops/pipeline/tiles/${selectedDate}/{z}/{x}/{y}.png?model=population`],
@@ -1153,7 +1196,8 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
       slot: 'middle',
       paint: { 'raster-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.5, 10, 0.6, 14, 0.5] },
     })
-  }, [showPopulation, selectedDate, mapLoaded])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPopulation, mapLoaded])
 
   // Wind: the texture is fetched the first time it is turned on
   useEffect(() => {
@@ -1207,7 +1251,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
 
       {/* Left-hand map cards in one column: they stack and shrink, never overlap.
           Bottom padding keeps clear of the timeline. */}
-      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex w-[332px] max-w-full flex-col items-start gap-2 p-3 pb-[104px] md:p-4 md:pb-[76px]">
+      <div className="pointer-events-none absolute inset-y-0 left-0 z-10 flex w-[332px] max-w-full flex-col items-start gap-2 p-3 pb-[96px] md:p-4 md:pb-[68px]">
         {leftSlot && <div className="pointer-events-auto shrink-0">{leftSlot}</div>}
 
         {/* What the PM2.5 surface colours mean */}
@@ -1224,7 +1268,7 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
               {satelliteOn && (
                 <>
                   <div className="flex items-baseline justify-between gap-2 text-[11px] font-medium text-slate-800">
-                    <span className="truncate">PM2.5 estimate, {formatDateOnly(selectedDate, { month: 'short', day: 'numeric' })}</span>
+                    <span className="truncate">PM2.5 estimate, {formatDateOnly(replayDay ?? selectedDate, { month: 'short', day: 'numeric' })}</span>
                     <span className="shrink-0 text-slate-600">µg/m³</span>
                   </div>
                   <div
@@ -1238,18 +1282,6 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
                       <span key={t}>{i === 0 ? `≤${t}` : i === SURFACE_TICKS.length - 1 ? `${t}+` : t}</span>
                     ))}
                   </div>
-                  <AnimatePresence initial={false}>
-                    {inCityDetail && (
-                      <m.p
-                        initial={{ opacity: 0, height: 0 }}
-                        animate={{ opacity: 1, height: 'auto' }}
-                        exit={{ opacity: 0, height: 0 }}
-                        className="overflow-hidden pt-1 text-[10px] leading-snug text-slate-600"
-                      >
-                        City detail layer: same colours for {CITY_RANGE.min} to {CITY_RANGE.max} µg/m³
-                      </m.p>
-                    )}
-                  </AnimatePresence>
                 </>
               )}
             </m.div>
@@ -1405,9 +1437,9 @@ export function PredictionMap({ selectedDate, smoothed = false, model = 'backbon
             key="loading"
             exit={{ opacity: 0 }}
             transition={{ duration: 0.35 }}
-            className="absolute inset-0 flex items-center justify-center bg-slate-100"
+            className="absolute inset-0 z-20"
           >
-            <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+            <TrackerLoader className="h-full w-full" />
           </m.div>
         )}
       </AnimatePresence>

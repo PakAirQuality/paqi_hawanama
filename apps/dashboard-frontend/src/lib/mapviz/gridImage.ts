@@ -31,7 +31,7 @@ export const mercY = (lat: number) => Math.log(Math.tan(Math.PI / 4 + (lat * D2R
 const invMercY = (y: number) => (2 * Math.atan(Math.exp(y)) - Math.PI / 2) / D2R
 
 /** Draws the grid; `clip` (lon/lat polygons) trims it to an outline such as the country border. */
-export function renderGridImage(g: GridRaster, range: { min: number; max: number }, opts: { scale?: number; maxWidth?: number; clip?: number[][][][] } = {}): GridImage | null {
+export function renderGridImage(g: GridRaster, range: { min: number; max: number }, opts: { scale?: number; maxWidth?: number; clip?: number[][][][]; nearest?: boolean } = {}): GridImage | null {
   if (typeof document === 'undefined' || g.rows < 2 || g.cols < 2) return null
   const lut = paletteLut()
   const W = Math.min(opts.maxWidth ?? 1400, Math.round(g.cols * (opts.scale ?? 5)))
@@ -51,7 +51,12 @@ export function renderGridImage(g: GridRaster, range: { min: number; max: number
       const fc = g.points ? ((lon - g.west) / (g.east - g.west)) * (g.cols - 1) : ((lon - g.west) / (g.east - g.west)) * g.cols - 0.5
       const c0 = Math.floor(fc), tx = fc - c0
       let wSum = 0, vSum = 0
-      for (let dr = 0; dr < 2; dr++) {
+      if (opts.nearest) {
+        // Square cells: every pixel takes its own cell's value, no blending
+        const r = Math.round(fr), c = Math.round(fc)
+        const val = r >= 0 && r < g.rows && c >= 0 && c < g.cols ? v[r * g.cols + c] : null
+        if (val != null && !Number.isNaN(val)) { wSum = 1; vSum = val }
+      } else for (let dr = 0; dr < 2; dr++) {
         const r = r0 + dr
         if (r < 0 || r >= g.rows) continue
         const wy = dr ? ty : 1 - ty
@@ -124,4 +129,43 @@ export function predictionRaster(d: { grid?: { shape?: number[]; bounds?: { west
     values = out
   }
   return { values, rows, cols, west: b.west, south: b.south, east: b.east, north: b.north, points: true }
+}
+
+/** Painted estimate images by date and model, shared by the map and the replay, so a day is painted once. */
+const imageCache = new Map<string, GridImage>()
+const IMAGE_CACHE_MAX = 40
+
+/** Cache key for a prediction response: its date and model (null without a date). */
+export function estimateKey(d: { date?: string; model?: string } | null | undefined): string | null {
+  return d?.date ? `${d.date}:${d.model ?? 'backbone'}` : null
+}
+
+/** The cached image for `key`, painting it with `make` the first time. */
+export function cachedGridImage(key: string | null, make: () => GridImage | null): GridImage | null {
+  if (!key) return make()
+  const hit = imageCache.get(key)
+  if (hit) { imageCache.delete(key); imageCache.set(key, hit); return hit }
+  const img = make()
+  if (img) {
+    imageCache.set(key, img)
+    if (imageCache.size > IMAGE_CACHE_MAX) imageCache.delete(imageCache.keys().next().value as string)
+  }
+  return img
+}
+
+/** The grid's value at a point (bilinear over the cells that have one); null outside the grid or where it is empty. */
+export function sampleRaster(g: GridRaster, lon: number, lat: number): number | null {
+  const fc = g.points ? ((lon - g.west) / (g.east - g.west)) * (g.cols - 1) : ((lon - g.west) / (g.east - g.west)) * g.cols - 0.5
+  const fr = g.points ? ((lat - g.south) / (g.north - g.south)) * (g.rows - 1) : ((lat - g.south) / (g.north - g.south)) * g.rows - 0.5
+  if (!(fc >= 0 && fr >= 0 && fc <= g.cols - 1 && fr <= g.rows - 1)) return null
+  const c0 = Math.floor(fc), r0 = Math.floor(fr), tx = fc - c0, ty = fr - r0
+  let w = 0, v = 0
+  for (let dr = 0; dr < 2; dr++) for (let dc = 0; dc < 2; dc++) {
+    const r = Math.min(g.rows - 1, r0 + dr), c = Math.min(g.cols - 1, c0 + dc)
+    const val = g.values[r * g.cols + c]
+    if (val == null || Number.isNaN(val)) continue
+    const k = (dr ? ty : 1 - ty) * (dc ? tx : 1 - tx)
+    w += k; v += k * val
+  }
+  return w > 0.05 ? v / w : null
 }

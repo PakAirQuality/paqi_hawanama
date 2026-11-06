@@ -75,6 +75,14 @@ class Settings(BaseSettings):
     # LLM/AI Services
     GEMINI_API_KEY: Optional[str] = None
 
+    # Spoken "air near you" brief (POST /voice/brief, Gemini text-to-speech)
+    VOICE_TTS_MODEL: str = "gemini-2.5-flash-preview-tts"
+    VOICE_TTS_VOICE: str = "Kore"
+    VOICE_RATE_LIMIT_PER_MINUTE: int = 6       # per IP per instance
+    VOICE_DAILY_SYNTH_LIMIT: int = 1500        # paid syntheses per instance per UTC day (cache hits are free)
+    VOICE_CACHE_SIZE: int = 64                 # recordings kept (about 0.5 MB each)
+    VOICE_CACHE_TTL_S: int = 3600              # a reading is re-read at most hourly
+
     # Rate limiting
     RATE_LIMIT_PER_MINUTE: int = 60            # partner API (/public/*), per key or IP
     PUBLIC_RATE_LIMIT_PER_MINUTE: int = 120    # JSON read routes used by the sites, per IP per instance
