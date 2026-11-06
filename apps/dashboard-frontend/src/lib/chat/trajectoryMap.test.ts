@@ -46,3 +46,23 @@ describe('paths', () => {
     expect(outlinePath(undefined, proj)).toBe('')
   })
 })
+
+describe('document helpers', () => {
+  it('reads the member paths, the bounds of everything and the ensemble sentence', async () => {
+    const { DOC } = await import('./trajectoryFixture')
+    const { allPoints, boundsOf, ensembleLine, levelOrder, memberPaths } = await import('./trajectoryMap')
+    const members = memberPaths(DOC)
+    expect(Object.keys(members).sort()).toEqual(['1000', '850', '925'])
+    expect(levelOrder(members)).toEqual(['1000', '925', '850'])
+    expect(members['925']).toHaveLength(2)
+    expect(members['925'][0][0]).toEqual({ lon: 74.36, lat: 31.77 })
+    const [[w, s], [e, n]] = boundsOf(allPoints(DOC))
+    expect(w).toBeCloseTo(74.36 - 4.6, 2); expect(e).toBeCloseTo(74.36, 2)
+    expect(s).toBeCloseTo(31.52 - 1.2 - 0.25, 2); expect(n).toBeCloseTo(31.52 + 1.8 + 0.25, 2)
+    expect(boundsOf([{ lon: 74, lat: 31 }])).toEqual([[73.25, 30.25], [74.75, 31.75]])
+    expect(ensembleLine(DOC)).toBe('At 24 h, 2 of 2 members (~700 m) were over Pakistan Punjab · spread 31 km.')
+    expect(ensembleLine(DOC, '1000')).toBe('At 24 h, 1 of 2 members (~100 m) were over Pakistan Punjab, 1 over Indian Punjab · spread 44 km.')
+    expect(ensembleLine({ ...DOC, direction: 'forward' }, '850')).toMatch(/^At 24 h, \d of 2 members \(~\d+ m\) will be over/)   // no 850 regions in the fixture: the first level with any
+    expect(ensembleLine({ ...DOC, ensemble: undefined })).toBe('')
+  })
+})

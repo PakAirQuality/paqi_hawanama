@@ -1178,6 +1178,11 @@ async def aq_trajectory(
     (1000, 925, 850 hPa ≈ 100, 700 and 1,400 m above the plains), 72 h, with the hours spent over
     Pakistan Punjab, Indian Punjab and Haryana, the compass sector at 24/48/72 h and its agreement
     across levels, and the fire detections met along the path (strict 10 km/±1 h and loose 25 km/±3 h).
+    Each level also carries a 27-member ensemble (start point shifted by ±0.25° and ±25 hPa, as
+    HYSPLIT's hyts_ens does): `ensemble.sectors` counts the members per compass sector at 24/48/72 h,
+    `ensemble.regions_at` says how many members were over each region at those hours, and
+    `ensemble.spread_km` is the members' mean distance from the central path, the empirical error
+    band. The spread is sensitivity to the wind field, not a probability.
     A HYSPLIT run is used instead whenever one exists for the place and hour. Covers arrivals in the
     last 88 days and forecast winds 15 days ahead. It is a plausibility screen with a position error
     of roughly 10–20 % of the distance travelled: say "transport pathway consistent with", never

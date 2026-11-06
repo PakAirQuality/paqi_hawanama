@@ -421,6 +421,30 @@ export interface TrajectorySector {
   distance_km: Record<string, number>
 }
 
+export interface TrajectoryEnsembleSector {
+  n: number
+  modal: string | null
+  agreement: number | null
+  counts: Record<string, number>
+}
+
+/** The 27 members per level (18 at 1000 hPa): start point shifted by ±0.25° and ±25 hPa, as HYSPLIT's hyts_ens does. */
+export interface TrajectoryEnsemble {
+  n_members: Record<string, number>
+  offsets: { horizontal_deg: number; vertical_hpa: number }
+  /** per level, per member, hourly [lat, lon] */
+  members: Record<string, [number, number][][]>
+  /** per level, per member, [dlat, dlon, p_hpa] */
+  starts?: Record<string, [number, number, number][]>
+  /** age ("24" | "48" | "72") → level (or "all") → member sector counts */
+  sectors: Record<string, Record<string, TrajectoryEnsembleSector>>
+  /** age → level → region → number of members over it at that hour */
+  regions_at: Record<string, Record<string, Record<string, number>>>
+  /** age → level → mean distance of the members from the central path, km */
+  spread_km: Record<string, Record<string, number | null>>
+  left_domain: Record<string, number>
+}
+
 export interface TrajectoryDoc {
   engine: string
   status: string
@@ -436,6 +460,8 @@ export interface TrajectoryDoc {
   left_domain: Record<string, boolean>
   residence_hours: Record<string, Record<string, number>>
   sectors: Record<string, TrajectorySector>
+  /** absent on documents from before the ensemble, and on HYSPLIT output */
+  ensemble?: TrajectoryEnsemble
   fires: {
     strict?: { n_points: number; n_fires: number; frp_mw: number }
     loose?: { n_fires: number; frp_mw: number; points?: TrajectoryFirePoint[]; top_districts?: { district: string; n_fires: number; frp_mw: number }[] }
