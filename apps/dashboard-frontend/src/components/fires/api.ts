@@ -365,3 +365,75 @@ export interface CityOutlookResponse {
 }
 
 export const fetchCityOutlook = (city: string) => getJson<CityOutlookResponse>(`/outlook?city=${encodeURIComponent(city)}`)
+
+// ── on-demand trajectory (drawn inside the copilot chat) ─────────────────────
+
+export interface TrajectoryPoint {
+  age_h: number
+  time_utc: string
+  lat: number
+  lon: number
+  height_agl_m: number
+  z_msl_m: number | null
+  speed_ms: number | null
+  region: string | null
+  district: string | null
+}
+
+export interface TrajectoryFirePoint {
+  lat: number
+  lon: number
+  frp: number
+  district: string | null
+  country: string
+  source_class: string | null
+}
+
+export interface TrajectorySector {
+  n: number
+  modal: string | null
+  agreement: number | null
+  by_level: Record<string, string>
+  distance_km: Record<string, number>
+}
+
+export interface TrajectoryDoc {
+  engine: string
+  status: string
+  direction: 'backward' | 'forward'
+  hours: number
+  levels_hpa: number[]
+  origin: { lat: number; lon: number; label: string | null }
+  at_utc: string
+  at_pkt: string
+  uses_forecast: boolean
+  wind_source: string
+  paths: Record<string, TrajectoryPoint[]>
+  left_domain: Record<string, boolean>
+  residence_hours: Record<string, Record<string, number>>
+  sectors: Record<string, TrajectorySector>
+  fires: {
+    strict?: { n_points: number; n_fires: number; frp_mw: number }
+    loose?: { n_fires: number; frp_mw: number; points?: TrajectoryFirePoint[]; top_districts?: { district: string; n_fires: number; frp_mw: number }[] }
+    note?: string
+  }
+  caveats: string[]
+  cached?: boolean
+}
+
+export interface TrajectoryRequest {
+  lat: number
+  lon: number
+  at: string
+  direction: 'backward' | 'forward'
+  hours: number
+  label?: string
+}
+
+export const trajectoryQueryKey = (r: TrajectoryRequest) => ['fires', 'trajectory', r.lat, r.lon, r.at, r.direction, r.hours] as const
+
+export const fetchTrajectory = (r: TrajectoryRequest) =>
+  getJson<TrajectoryDoc>(
+    `/trajectory?lat=${r.lat}&lon=${r.lon}&at=${encodeURIComponent(r.at)}&direction=${r.direction}&hours=${r.hours}` +
+      (r.label ? `&label=${encodeURIComponent(r.label)}` : ''),
+  )

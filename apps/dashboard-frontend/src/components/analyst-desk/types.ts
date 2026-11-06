@@ -161,7 +161,7 @@ export interface StationMention {
 // ── Copilot types ─────────────────────────────────────────────────────
 
 export interface CopilotAction {
-  type: 'zoom_to_city' | 'zoom_to_station' | 'set_horizon' | 'filter_network' | 'show_station_trend'
+  type: 'zoom_to_city' | 'zoom_to_station' | 'set_horizon' | 'filter_network' | 'show_station_trend' | 'show_trajectory'
   city?: string
   sensor_id?: number
   station_id?: string
@@ -171,6 +171,12 @@ export interface CopilotAction {
   horizon?: number
   network?: string | null  // null = show all / clear filter
   hours?: number
+  // show_trajectory: the server emits it when the copilot computed a trajectory; the chat draws it
+  lon?: number
+  at?: string
+  direction?: 'backward' | 'forward'
+  label?: string
+  engine?: string
 }
 
 export type ChatMessageStatus = 'ok' | 'stopped' | 'limit' | 'busy' | 'unavailable' | 'error'

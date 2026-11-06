@@ -148,6 +148,8 @@ def test_fires_along_the_path_are_matched_strictly_and_loosely():
     assert f["loose"]["n_fires"] == 2 and f["loose"]["frp_mw"] == 55.0                               # on-path plus the 20 km one
     assert f["loose"]["source_classes"] == {"crop": 1, "other": 1} and f["loose"]["by_country"]["Pakistan"]["n_fires"] == 2
     assert [d["district"] for d in f["loose"]["top_districts"]] == ["Sheikhupura", "Gujranwala"]
+    assert [p["district"] for p in f["loose"]["points"]] == ["Sheikhupura", "Gujranwala"] and f["loose"]["points"][0]["frp"] == 40.0
+    assert "points" not in fk.copilot_view(doc)["fires"]["loose"] and fk.copilot_view(doc)["fires"]["loose"]["n_fires"] == 2
 
 
 def test_cache_memo_and_bucket_skip_the_wind_requests():

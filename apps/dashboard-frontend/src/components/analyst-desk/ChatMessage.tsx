@@ -6,6 +6,7 @@ import { actionLabel } from '@/lib/chat/actions'
 import { splitFollowUps } from '@/lib/chat/followUps'
 import { useTypewriter } from '@/lib/chat/useTypewriter'
 import { MarkdownContent } from './MarkdownContent'
+import { TrajectoryMiniMap } from './TrajectoryMiniMap'
 import type { ChatMessage as ChatMessageType, CopilotAction } from './types'
 
 interface ChatMessageProps {
@@ -70,7 +71,9 @@ function AssistantMessage({ message, knownCities, onCityClick, canRunAction, onA
   const writing = typing || !!message.streaming
   useEffect(() => { onRevealChange?.(message.id, writing) }, [message.id, writing, onRevealChange])
 
-  const actions = (message.actions ?? []).filter(a => canRunAction?.(a))
+  // The trajectory action is drawn inside the message, never offered as a chip
+  const trajectory = (message.actions ?? []).find(a => a.type === 'show_trajectory')
+  const actions = (message.actions ?? []).filter(a => a.type !== 'show_trajectory' && canRunAction?.(a))
 
   return (
     <div className="mb-4">
@@ -81,6 +84,8 @@ function AssistantMessage({ message, knownCities, onCityClick, canRunAction, onA
           </div>
         )}
         {message.streaming && !text && <Waiting />}
+
+        {trajectory && !writing && <TrajectoryMiniMap action={trajectory} />}
 
         {message.notice && !typing && (
           <p role="alert" className={`text-slate-600 ${text ? 'mt-2 border-t border-slate-200 pt-2' : ''}`}>

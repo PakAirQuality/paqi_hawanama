@@ -9,6 +9,16 @@ describe('parseAction', () => {
     expect(parseAction({ type: 'filter_network', network: 'PAQI' })).toEqual({ type: 'filter_network', network: 'PAQI' })
     expect(parseAction({ type: 'filter_network', network: null })).toEqual({ type: 'filter_network', network: null })
     expect(parseAction({ type: 'show_station_trend', station_id: 'abc', hours: 48 })).toEqual({ type: 'show_station_trend', station_id: 'abc', hours: 48 })
+    expect(parseAction({ type: 'show_trajectory', lat: 31.52, lon: 74.36, at: '2026-11-05T23:00:00', hours: 72, direction: 'backward', label: 'Lahore', engine: 'kinematic_ecmwf_ifs025', extra: 1 }))
+      .toEqual({ type: 'show_trajectory', lat: 31.52, lon: 74.36, at: '2026-11-05T23:00:00', hours: 72, direction: 'backward', label: 'Lahore', engine: 'kinematic_ecmwf_ifs025' })
+  })
+
+  it('rejects a trajectory outside the box, without a time, or with an odd direction', () => {
+    expect(parseAction({ type: 'show_trajectory', lat: 51.5, lon: 0.1, at: '2026-11-05T23:00:00', hours: 72, direction: 'backward' })).toBeNull()
+    expect(parseAction({ type: 'show_trajectory', lat: 31.5, lon: 74.4, hours: 72, direction: 'backward' })).toBeNull()
+    expect(parseAction({ type: 'show_trajectory', lat: 31.5, lon: 74.4, at: 'yesterday', hours: 72, direction: 'backward' })).toBeNull()
+    expect(parseAction({ type: 'show_trajectory', lat: 31.5, lon: 74.4, at: '2026-11-05T23:00:00', hours: 500, direction: 'backward' })).toBeNull()
+    expect(parseAction({ type: 'show_trajectory', lat: 31.5, lon: 74.4, at: '2026-11-05T23:00:00', hours: 72, direction: 'sideways' })).toBeNull()
   })
 
   it('drops fields it does not know', () => {
