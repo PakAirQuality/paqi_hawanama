@@ -94,7 +94,7 @@ function Caption({ doc, open = false }: { doc: TrajectoryDoc; open?: boolean }) 
         <p className="mt-1">
           {members && sectorLine ? `${sectorLine} ` : ''}{hoursLine(doc)}{' '}
           {hasMembers && <>The thin lines are the {doc.ensemble?.n_members ? Object.values(doc.ensemble.n_members).reduce((a, b) => a + b, 0) : ''} ensemble members: the start point shifted by ±{doc.ensemble?.offsets.horizontal_deg}° and ±{doc.ensemble?.offsets.vertical_hpa} hPa; their spread shows sensitivity to the winds, not a probability.{' '}</>}
-          {doc.engine.startsWith('hysplit') ? 'HYSPLIT on GFS 0.25°' : 'Kinematic trajectory on ECMWF IFS 0.25° winds'}; position error roughly 10–20 % of the distance travelled. A plausibility screen, not an attribution.
+          {doc.engine.startsWith('hysplit') ? 'HYSPLIT on GFS 0.25°' : 'Kinematic trajectory on ECMWF IFS 0.25° winds'}. A plausibility screen, not an attribution.
         </p>
       </details>
     </div>

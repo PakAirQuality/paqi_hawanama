@@ -4,7 +4,7 @@
 // monochrome) basemap so boundaries, water and place names show at the zoom of a small figure.
 // Two modes: `preview` is the small picture in the chat (not interactive, no controls, no popups;
 // a click on it opens the expanded view), the default is the full map in the expanded view (pan,
-// zoom, +/−, hover popups). Mapbox GL needs WebGL, so the shell (TrajectoryMiniMap) only mounts
+// zoom with the wheel, +/−, hover popups). Mapbox GL needs WebGL, so the shell (TrajectoryMiniMap) only mounts
 // this when the browser can draw it and the figure is on screen; otherwise it shows the SVG.
 
 import { useEffect, useRef, useState } from 'react'
@@ -64,7 +64,7 @@ export function TrajectoryMapGL({ doc, visible, className, preview = false, titl
         minZoom: 3,
         maxZoom: 12,
         interactive: !preview,
-        cooperativeGestures: !preview,   // wheel scrolling the chat must not zoom the expanded map
+        cooperativeGestures: false,      // the expanded view locks page scroll, so the wheel zooms directly; the preview is not interactive at all
         attributionControl: false,
       })
     } catch (err) {

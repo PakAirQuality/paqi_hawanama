@@ -46,7 +46,8 @@ describe('TrajectoryMiniMap', () => {
     const details = container.querySelector('details') as HTMLDetailsElement
     expect(details.open).toBe(false)
     expect(details.textContent).toContain('How to read this map')
-    expect(details.textContent).toContain('Kinematic trajectory on ECMWF IFS 0.25° winds')
+    expect(details.textContent).toContain('Kinematic trajectory on ECMWF IFS 0.25° winds. A plausibility screen')
+    expect(details.textContent).not.toContain('position error')
     expect(details.textContent).toContain('33 h Pakistan Punjab, 39 h other Pakistan')
     const caption = details.parentElement as HTMLElement
     expect(caption.querySelector('p')?.textContent).toBe('At 24 h, 2 of 2 members (~700 m) were over Pakistan Punjab · spread 31 km.')
