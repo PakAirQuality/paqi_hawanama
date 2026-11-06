@@ -128,6 +128,14 @@ class Settings(BaseSettings):
     IQAIR_QUOTA_MAX_WAIT_S: float = 180.0            # give up waiting for a shared-quota slot after this
     IQAIR_BACKFILL_HOURS: int = 48
     IQAIR_COUNTRIES: Optional[str] = None            # comma-separated; see app.core.south_asia
+    # Rows re-tagged to these provider codes are still the same IQAir devices: discovery keeps the
+    # tag and updates the row instead of reporting an identity conflict (DatabaseService.upsert_station).
+    IQAIR_PROVIDER_FAMILY: str = "airvisual,airvisual-paqi,airvisual-urban-unit,other"
+    # Station liveness in the union manifest (discovery runs twice a day). A station missing from
+    # IQAir's listing for DORMANT consecutive discoveries is polled once a day instead of hourly;
+    # after INACTIVE misses it is marked inactive (manifest + stations.active) until listed again.
+    MANIFEST_DORMANT_AFTER_MISSES: int = 6           # ≈ 3 days
+    MANIFEST_INACTIVE_AFTER_MISSES: int = 28         # ≈ 14 days
     # Provider: Punjab EPA (separate credential and endpoint; never routed through IQAir)
     PUNJAB_EPA_API_KEY: Optional[str] = None
     PUNJAB_EPA_API_BASE: str = "https://aqi.punjab.gov.pk/api"

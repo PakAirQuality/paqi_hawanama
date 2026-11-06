@@ -76,13 +76,16 @@ async def _geo(db, sess, tag):
     return country_id, state_id, city_id
 
 
-def _info(tag, country_id, state_id, city_id, name="Alpha", lat=31.5, lon=74.3, sid=None, meta=None):
-    return {
+def _info(tag, country_id, state_id, city_id, name="Alpha", lat=31.5, lon=74.3, sid=None, meta=None, listed_names=None):
+    info = {
         "provider_code": f"prov-{tag}", "country_id": country_id, "state_id": state_id, "city_id": city_id,
         "country": f"Testland-{tag}", "state": "Punjab", "city": "Lahore", "name": name, "lat": lat, "lon": lon,
         "source_station_id": sid or f"iqair_{tag}_{name.lower()}", "metadata_json": meta or {"iqair_city": "Lahore"},
         "active": True, "last_seen_at": datetime.now(timezone.utc), "run_id": "run-t",
     }
+    if listed_names is not None:
+        info["listed_names"] = list(listed_names)
+    return info
 
 
 async def _meta(sf, station_id):
@@ -188,3 +191,120 @@ async def test_discovery_batch_survives_one_bad_station(sf, tmp_path, monkeypatc
 
 async def _nosleep(_):
     return None
+
+
+# ---------------------------------------------------------------- provider family, renames, liveness (Nov 2026)
+
+async def _row(sf, station_id):
+    async with sf() as s:
+        return (await s.execute(text("SELECT station_id, name, source_station_id, provider_id, active FROM stations WHERE station_id=:id"),
+                                {"id": station_id})).fetchone()
+
+
+async def test_sub_provider_tag_is_kept_not_a_conflict(sf, monkeypatch):
+    from app.core.config import settings
+    from app.ingestion.db import DatabaseService
+    db, tag = DatabaseService(), uuid.uuid4().hex[:8]
+    monkeypatch.setattr(settings, "IQAIR_PROVIDER_FAMILY", f"prov-{tag},prov-{tag}-paqi")
+    async with sf() as s:
+        c, st, ci = await _geo(db, s, tag)
+        r1 = await db.upsert_station(s, _info(tag, c, st, ci))
+        paqi = await db.get_or_create_provider(s, f"prov-{tag}-paqi")        # a curator re-tags the row
+        await s.execute(text("UPDATE stations SET provider_id=:p, active=false, last_seen_at=NULL WHERE station_id=:id"),
+                        {"p": paqi, "id": r1["station_id"]})
+        await s.commit()
+    async with sf() as s:
+        r2 = await db.upsert_station(s, _info(tag, c, st, ci))                 # same name, coords, native id
+        await s.commit()
+    assert r2["identity_event"] == "provider_tag_kept" and r2["station_id"] == r1["station_id"] and r2["updated"]
+    row = await _row(sf, r1["station_id"])
+    assert row.provider_id == paqi and row.active is True
+    async with sf() as s:
+        r3 = await db.upsert_station(s, _info(tag, c, st, ci, lat=31.5002))    # coordinates corrected later
+        await s.commit()
+        n = (await s.execute(text("SELECT count(*) FROM stations WHERE source_station_id=:sid"), {"sid": f"iqair_{tag}_alpha"})).scalar()
+    assert r3["identity_event"] == "rename_or_move" and r3["station_id"] == r1["station_id"] and n == 1
+    assert (await _row(sf, r1["station_id"])).provider_id == paqi
+
+
+async def test_identity_conflict_still_reported_for_a_different_native_id_in_family(sf, monkeypatch):
+    from app.core.config import settings
+    from app.ingestion.db import DatabaseService
+    db, tag = DatabaseService(), uuid.uuid4().hex[:8]
+    monkeypatch.setattr(settings, "IQAIR_PROVIDER_FAMILY", f"prov-{tag},prov-{tag}-paqi")
+    async with sf() as s:
+        c, st, ci = await _geo(db, s, tag)
+        r1 = await db.upsert_station(s, _info(tag, c, st, ci, sid="native-A"))
+        paqi = await db.get_or_create_provider(s, f"prov-{tag}-paqi")
+        await s.execute(text("UPDATE stations SET provider_id=:p WHERE station_id=:id"), {"p": paqi, "id": r1["station_id"]})
+        r2 = await db.upsert_station(s, _info(tag, c, st, ci, sid="native-B"))
+        await s.commit()
+    assert r2["identity_event"] == "identity_conflict" and r2["station_id"] is None
+
+
+async def test_rename_merges_into_legacy_row_when_old_name_vanished(sf, monkeypatch):
+    from app.core.config import settings
+    from app.ingestion.db import DatabaseService
+    db, tag = DatabaseService(), uuid.uuid4().hex[:8]
+    monkeypatch.setattr(settings, "IQAIR_PROVIDER_FAMILY", f"prov-{tag}")
+    async with sf() as s:
+        c, st, ci = await _geo(db, s, tag)
+        r1 = await db.upsert_station(s, _info(tag, c, st, ci, name="Patulia G.P. (Patulia)", listed_names=["Patulia G.P. (Patulia)"]))
+        await s.commit()
+    async with sf() as s:
+        r2 = await db.upsert_station(s, _info(tag, c, st, ci, name="Patulia G.P. (Ruiya)", listed_names=["Patulia G.P. (Ruiya)", "Other"]))
+        await s.commit()
+        n = (await s.execute(text("SELECT count(*) FROM stations WHERE city_id=:c"), {"c": ci})).scalar()
+    assert r2["identity_event"] == "rename_merged" and r2["station_id"] == r1["station_id"] and not r2["created"]
+    assert r2["from_name"] == "Patulia G.P. (Patulia)"
+    assert n == 1
+    row = await _row(sf, r1["station_id"])
+    assert row.name == "Patulia G.P. (Ruiya)" and row.source_station_id == f"iqair_{tag}_patulia g.p. (ruiya)"
+    md = await _meta(sf, r1["station_id"])
+    assert md["identity"]["history"][-1]["event"] == "rename"
+    assert {n["native_id"] for n in md["identity"]["native_ids"]} == {f"iqair_{tag}_patulia g.p. (patulia)", f"iqair_{tag}_patulia g.p. (ruiya)"}
+    # the hourly fetch keeps the legacy id: a third discovery with the new name is a plain update
+    async with sf() as s:
+        r3 = await db.upsert_station(s, _info(tag, c, st, ci, name="Patulia G.P. (Ruiya)", listed_names=["Patulia G.P. (Ruiya)"]))
+        await s.commit()
+    assert r3["station_id"] == r1["station_id"] and r3["identity_event"] == "rename_or_move"
+
+
+async def test_rename_candidate_when_both_names_are_still_listed(sf, monkeypatch):
+    from app.core.config import settings
+    from app.ingestion.db import DatabaseService
+    db, tag = DatabaseService(), uuid.uuid4().hex[:8]
+    monkeypatch.setattr(settings, "IQAIR_PROVIDER_FAMILY", f"prov-{tag}")
+    async with sf() as s:
+        c, st, ci = await _geo(db, s, tag)
+        r1 = await db.upsert_station(s, _info(tag, c, st, ci, name="Old Name", listed_names=["Old Name", "New Name"]))
+        r2 = await db.upsert_station(s, _info(tag, c, st, ci, name="New Name", listed_names=["Old Name", "New Name"]))
+        await s.commit()
+    assert r2["created"] and r2["identity_event"] == "rename_candidate"
+    assert r2["rename_candidates"][0]["station_id"] == r1["station_id"]
+
+
+async def test_set_stations_active_touches_family_rows_only(sf, monkeypatch):
+    from app.core.config import settings
+    from app.ingestion.db import DatabaseService
+    db, tag = DatabaseService(), uuid.uuid4().hex[:8]
+    monkeypatch.setattr(settings, "IQAIR_PROVIDER_FAMILY", f"prov-{tag}")
+    async with sf() as s:
+        c, st, ci = await _geo(db, s, tag)
+        r1 = await db.upsert_station(s, _info(tag, c, st, ci, name="A"))
+        r2 = await db.upsert_station(s, _info(tag, c, st, ci, name="B", lat=31.6))
+        other = await db.get_or_create_provider(s, f"punjab-{tag}")
+        r3 = await db.upsert_station(s, {**_info(tag, c, st, ci, name="C", lat=31.7), "provider_code": f"punjab-{tag}"})
+        await s.commit()
+    async with sf() as s:
+        changed = await db.set_stations_active(s, [f"iqair_{tag}_a", f"iqair_{tag}_c", "nope"], False)
+        again = await db.set_stations_active(s, [f"iqair_{tag}_a"], False)
+        await s.commit()
+    assert changed == [r1["station_id"]] and again == []
+    assert (await _row(sf, r1["station_id"])).active is False
+    assert (await _row(sf, r2["station_id"])).active is True
+    assert (await _row(sf, r3["station_id"])).active is True          # not in the family: untouched
+    async with sf() as s:
+        r1b = await db.upsert_station(s, _info(tag, c, st, ci, name="A"))  # rediscovered → active again
+        await s.commit()
+    assert r1b["station_id"] == r1["station_id"] and (await _row(sf, r1["station_id"])).active is True

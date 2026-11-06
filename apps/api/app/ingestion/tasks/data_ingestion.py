@@ -17,7 +17,7 @@ from app.services.ingestion.iqair_service import (
 )
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.extract import ExtractStats, normalize_envelope
-from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
+from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs, _as_bool
 from app.ingestion.raw_archive import RawPayloadArchiver
 from app.ingestion.reconcile import ReconcilePolicy, ReconcileResult
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
@@ -314,16 +314,24 @@ class DataIngestionTask:
             outcome.manifest_source = "db"
         outcome.manifest_rows = len(rows)
 
-        # Filter to active <countries,provider> and dedupe (station_name, city, state, country)
+        # Filter to active <countries,provider> and dedupe (station_name, city, state, country).
+        # Liveness (written by discovery): inactive rows are never polled; dormant rows — missing from
+        # IQAir's listing for a few days — are polled once a day (the 00 UTC run) instead of hourly.
         country_set = {x.lower() for x in self._countries}
+        poll_dormant = self._poll_dormant_now()
         seen = set()
         stations: List[Dict[str, Any]] = []
+        inactive_skipped = dormant_skipped = 0
         for r in rows:
             if r.get("provider_code") != self._provider_code:
                 continue
             if (r.get("country") or "").lower() not in country_set:
                 continue
-            if r.get("active") is False:
+            if not _as_bool(r.get("active"), True):
+                inactive_skipped += 1
+                continue
+            if _as_bool(r.get("dormant"), False) and not poll_dormant:
+                dormant_skipped += 1
                 continue
             tup = (r.get("iqair_station_name") or r.get("name"), r.get("city"), r.get("state"), r.get("country"))
             if None in tup:
@@ -332,6 +340,8 @@ class DataIngestionTask:
                 continue
             seen.add(tup)
             stations.append(r)
+        outcome.details["liveness"] = {"inactive_skipped": inactive_skipped, "dormant_skipped": dormant_skipped,
+                                       "dormant_polled": poll_dormant}
 
         c.expected = len(stations)
         if not stations:
@@ -344,6 +354,12 @@ class DataIngestionTask:
         results = await asyncio.gather(*[self._fetch_one(st) for st in stations], return_exceptions=True)
 
         buf: List[Dict[str, Any]] = []
+        failures_by_country: Dict[str, Dict[str, int]] = {}
+
+        def _count_failure(country: str, error_class: str) -> None:
+            d = failures_by_country.setdefault(country or "?", {})
+            d[error_class] = d.get(error_class, 0) + 1
+
         for i, res in enumerate(results):
             st = stations[i]
             meta = {
@@ -358,6 +374,7 @@ class DataIngestionTask:
             c.attempted += 1
             if isinstance(res, BaseException):
                 c.failed += 1
+                _count_failure(meta["country"], type(res).__name__)
                 recorder.add_failure(EntityFailure("station", key, type(res).__name__, str(res)[:500], details=meta))
             elif isinstance(res, list):
                 if res:
@@ -366,10 +383,14 @@ class DataIngestionTask:
                     c.completed += 1
                 else:
                     c.failed += 1
+                    _count_failure(meta["country"], "no_points_in_response")
                     recorder.add_failure(EntityFailure("station", key, "no_points_in_response", "", details=meta))
             else:
                 c.failed += 1
+                _count_failure(meta["country"], "unexpected_result_type")
                 recorder.add_failure(EntityFailure("station", key, "unexpected_result_type", type(res).__name__, details=meta))
+        if failures_by_country:
+            outcome.details["failures_by_country"] = failures_by_country
 
         # Write whatever was fetched, even if the run is about to be marked failed.
         if buf:
@@ -389,6 +410,11 @@ class DataIngestionTask:
             outcome.fail("provider_auth", "IQAir rejected the credential (401/403); remaining stations were skipped")
 
     # --------------------------- fetch + write helpers -----------------------
+
+    @staticmethod
+    def _poll_dormant_now(now: Optional[datetime] = None) -> bool:
+        """Dormant stations get one chance a day: the run in the 00 UTC hour."""
+        return (now or datetime.now(timezone.utc)).hour == 0
 
     async def _fetch_one(self, s: Dict[str, Any]) -> Optional[List[Dict[str, Any]]]:
         """

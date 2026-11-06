@@ -24,7 +24,7 @@ from collections import defaultdict
 from app.services.ingestion.iqair_service import IQAirClient, Unauthorized
 from app.ingestion.db import DatabaseService, AsyncSessionLocal
 from app.ingestion.extract import ExtractStats, normalize_envelope
-from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs
+from app.ingestion.manifests import ManifestRef, sync_latest_from_gcs, _as_bool
 from app.ingestion.raw_archive import RawPayloadArchiver
 from app.ingestion.reconcile import ReconcilePolicy, ReconcileResult
 from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
@@ -188,7 +188,8 @@ class CityIngestionTask:
 
         groups = defaultdict(list)  # (country,state,city) -> [(lat,lon), ...]
         for r in srows:
-            if r.get("active") is False:
+            # liveness written by discovery: inactive or dormant stations do not keep a city alive
+            if not _as_bool(r.get("active"), True) or _as_bool(r.get("dormant"), False):
                 continue
             country, state, city = r.get("country"), r.get("state"), r.get("city")
             if not (country and state and city):
@@ -329,7 +330,7 @@ class CityIngestionTask:
         for r in rows:
             if (r.get("country") or "").lower() not in country_set:
                 continue
-            if r.get("active") is False:
+            if not _as_bool(r.get("active"), True):
                 continue
             tup = (r.get("city"), r.get("state"), r.get("country"))
             if None in tup:

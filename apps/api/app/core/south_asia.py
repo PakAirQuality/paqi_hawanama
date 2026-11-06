@@ -81,6 +81,36 @@ STATE_ALIAS_MAP: Dict[str, Dict[str, List[str]]] = {
 }
 
 
+# ---------------------------------------------------------------------------
+# States that IQAir's own API cannot resolve: /states lists them, but /cities
+# answers HTTP 400 state_not_found for the listed name and for every alternative
+# spelling tried (probe date in the value). Discovery still issues the one cheap
+# /cities call per run so a provider-side fix is picked up automatically, but a
+# miss here is reported as `states_unsupported`, not as a skipped entity, so it
+# does not mark every discovery run `partial`.
+# ---------------------------------------------------------------------------
+UNRESOLVABLE_STATES: Dict[str, Dict[str, str]] = {
+    "India": {
+        "Dadra and Nagar Haveli": "2026-11-06",
+        "Daman and Diu": "2026-11-06",
+        "Lakshadweep": "2026-11-06",
+    },
+    "Bangladesh": {
+        "Barisal": "2026-11-06",
+        "Rangpur Division": "2026-11-06",
+        "Sylhet": "2026-11-06",
+    },
+    "Pakistan": {
+        "FATA": "2026-11-06",   # merged into Khyber Pakhtunkhwa in 2018; no /cities support
+    },
+}
+
+
+def is_unresolvable_state(country: str, state: str) -> bool:
+    """True when IQAir is known to list this state but to reject it on /cities."""
+    return bool(state) and state in UNRESOLVABLE_STATES.get(country, {})
+
+
 def get_state_aliases(country: str, state: str) -> List[str]:
     """Return [state, alias1, alias2, ...] for the given country+state.
 

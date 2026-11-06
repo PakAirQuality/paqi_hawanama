@@ -172,6 +172,10 @@ class FakeDatabaseService:
         return {"station_id": self.generate_station_id(info["country"], info["state"], info["city"], info["name"], info["lat"], info["lon"]),
                 "created": True, "updated": False}
 
+    async def set_stations_active(self, session, source_ids, active, provider_codes=None):
+        self.active_calls = getattr(self, "active_calls", []) + [(list(source_ids), active)]
+        return [f"st-{s}" for s in source_ids]
+
 
 class FakeSession:
     """Minimal async session: records executed statements, never talks to a DB."""

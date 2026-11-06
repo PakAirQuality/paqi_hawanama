@@ -74,13 +74,26 @@ split into a second row. These keys are written by `app/ingestion/identity.py`:
 | Key | Written by | Content |
 |-----|-----------|---------|
 | `identity.native_ids[]` | discovery | `{provider, native_id, since, confidence, evidence}` — one per platform that reports this device |
-| `identity.history[]` | discovery | `{at, run_id, event: "rename_or_move", from: {name,lat,lon}, to: {...}, computed_station_id}` (last 50) |
+| `identity.history[]` | discovery | `{at, run_id, event, from, to, computed_station_id}` (last 50). Events: `rename_or_move` (same native id, new name/coordinates: `from/to` = `{name,lat,lon}`); `rename` (new native id at the exact site of a station whose old name IQAir no longer lists for the city: `from/to` = `{name, source_station_id}`; the legacy row keeps its readings, the new computed id is never created). |
 | `identity.aliases[]` | **humans / review tooling only** | `{station_id, provider, relation: "same_device" \| "same_site", confidence, evidence, reviewed: true, reviewed_by, reviewed_at}` — links rows that are the same physical device on another platform (e.g. an IQAir and an OpenAQ copy). Two rows joined by a reviewed `same_device` alias count once for coverage and are **not** independent calibration pairs. |
 | `identity.alias_candidates[]` | OpenAQ discovery | machine-proposed matches with evidence (`distance_m`, `name_similarity`, provider hints), `reviewed: false`; never used for anything until promoted to `aliases` by a person |
 | `hardware` | humans / attested sources | `{manufacturer, model, confidence: "attested" \| "inferred" \| "unknown", evidence}`. Exports print `unknown` unless confidence is attested/inferred with a model. |
 | `export` | one-off SQL (`db_schema/oneoff/`) | `{openaq: bool, network: "PAQI", since, set_by}` — explicit export membership; replaces filtering on `providers.display_name`. |
 | `ingest_mode` | OpenAQ discovery | `"shadow"` while a station is ingested but not shown or exported |
 | `origin` | OpenAQ discovery | `"external"` or `"hawanama_loop"` (our own data seen via OpenAQ; never ingested) |
+
+Rows re-tagged to a curated sub-provider (`airvisual-paqi`, `airvisual-urban-unit`, `other`; the set is
+`IQAIR_PROVIDER_FAMILY`) are still updated by discovery when the native id matches: name, coordinates,
+`last_seen_at`, `active` and the discovery-owned keys are refreshed, the provider tag and `station_id`
+are kept (`identity_event: provider_tag_kept` in the run summary; before Nov 2026 these were reported as
+`identity_conflict` and left frozen). A different native id owning the same computed id is still a
+conflict and is never merged.
+
+`stations.active` for IQAir-family rows follows the station manifest's liveness: a station that IQAir
+stops listing is `dormant` after `MANIFEST_DORMANT_AFTER_MISSES` discoveries (polled once a day) and
+`active = false` after `MANIFEST_INACTIVE_AFTER_MISSES` (not polled, hidden from `active = true`
+queries); the next discovery that lists it again sets `active = true`. Rows are never deleted.
+`punjab`, `icimod` and `bam` rows are never touched by this rule.
 
 Discovery only ever rewrites the keys it owns (`iqair_*`, `location_type`, `data_source`,
 `last_updated_utc`, `discovery_method`) plus `identity.native_ids`/`identity.history`; everything

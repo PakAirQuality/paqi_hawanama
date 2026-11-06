@@ -26,6 +26,13 @@ mostly **not** in this repository, deliberately.
   of contributors and because redistributing provider station data is outside the provider's
   API terms. The pipeline regenerates them at runtime from the provider API into the
   configured storage bucket.
+  The station manifest is a union of every station discovery has ever listed, with liveness:
+  `miss_count` (consecutive discoveries in which IQAir listed the city or state but not the
+  station), `dormant` (polled once a day) and `active` (`false` = not polled and
+  `stations.active = false` until rediscovered). Seven provider-side unresolvable states
+  (`app/core/south_asia.py:UNRESOLVABLE_STATES`) are reported as `states_unsupported`, not as
+  failures. Stations that IQAir lists but refuses on `/station` are visible in
+  `ops.v_station_fetch_health` (migration 006) with the verdict `provider_refuses_listed_station`.
 - **Partner monitor host lists** (`external_data/`): names of the institutions hosting AirGradient
   and Urban Unit monitors. No coordinates, but not needed to run the code, so kept out.
 - **Ground observations.** The PAQI ground-station PM2.5 archive is not public; see the

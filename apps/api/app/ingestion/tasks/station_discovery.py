@@ -24,7 +24,7 @@ from app.ingestion.leases import LeaseManager, holder_id, lease_key_for
 from app.ingestion.quota import PostgresQuota, QuotaUnavailable
 from app.ingestion.runs import EntityFailure, RunOutcome, RunRecorder, new_run_id
 from app.core.config import settings as _default_settings
-from app.core.south_asia import get_iqair_countries, get_state_aliases
+from app.core.south_asia import get_iqair_countries, get_state_aliases, is_unresolvable_state
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +43,20 @@ def _slug(*parts):
 
 def _scope_key(country: str, state: str, city: str) -> str:
     return f"{country.lower()}|{state.lower()}|{city.lower()}"
+
+
+def _truthy(v, default: bool) -> bool:
+    """Manifest booleans round-trip through parquet as numpy.bool_/NaN; treat missing as `default`."""
+    if v is None:
+        return default
+    try:
+        if v != v:   # NaN
+            return default
+    except Exception:
+        pass
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "t", "yes")
+    return bool(v)
 
 
 class _Skipped(Exception):
@@ -126,6 +140,9 @@ class StationDiscoveryTask:
                 recorder.add_failure(EntityFailure("country", cf["country"], cf.get("reason", "failed"), cf.get("message", ""), details=cf))
             for fs in summary["stations_failed"]:
                 recorder.add_failure(EntityFailure("station", fs["source_station_id"], fs.get("reason", "failed"), fs.get("message", ""), details=fs))
+            if summary.get("deactivation_error"):
+                recorder.add_failure(EntityFailure("manifest", "stations.active", "deactivation_failed",
+                                                   summary["deactivation_error"]))
             for ev in summary["identity_events"]:
                 if ev["event"] == "identity_conflict":
                     recorder.add_failure(EntityFailure("station", ev["source_station_id"], "identity_conflict",
@@ -138,7 +155,8 @@ class StationDiscoveryTask:
             elif summary["stations_discovered"] == 0:
                 outcome.fail("no_stations_discovered", "discovery completed but found zero stations")
             elif (summary["states_skipped"] or summary["cities_skipped"] or summary["countries_failed"]
-                  or summary["stations_failed"] or summary["identity_counts"]["identity_conflict"]):
+                  or summary["stations_failed"] or summary["identity_counts"]["identity_conflict"]
+                  or summary.get("deactivation_error")):
                 outcome.partial_reason = "entities_skipped"
         except _Skipped:
             pass
@@ -167,10 +185,16 @@ class StationDiscoveryTask:
             total_cities_processed = 0
             total_states_processed = 0
             skipped_states: List[Dict[str, Any]] = []
+            unsupported_states: List[Dict[str, Any]] = []   # IQAir lists them but rejects /cities (known)
             skipped_cities: List[Dict[str, Any]] = []
             failed_countries: List[Dict[str, Any]] = []
             identity_events: List[Dict[str, Any]] = []
             failed_stations: List[Dict[str, Any]] = []
+
+            # Liveness evidence for the union manifest: which (country, state) we read from
+            # IQAir this run, and which cities IQAir listed (and we could read stations for).
+            states_fetched: set = set()
+            cities_listed: set = set()
 
             # Collect rows for manifest
             manifest_rows: List[Dict[str, Any]] = []
@@ -218,8 +242,16 @@ class StationDiscoveryTask:
                                 continue
 
                         if not cities:
-                            logger.warning("No cities processed for state=%s (tried=%s)", state, ", ".join(attempt_errors) or "none")
-                            skipped_states.append({"state": state, "country": country, "reason": "aliases_exhausted"})
+                            if is_unresolvable_state(country, state):
+                                # Known provider-side gap (see south_asia.UNRESOLVABLE_STATES): one cheap call per
+                                # run keeps watching for a fix, but it is not our failure and not a skip.
+                                logger.info("State %s (%s) still unresolvable on IQAir /cities (tried=%s)",
+                                            state, country, ", ".join(attempt_errors) or "none")
+                                unsupported_states.append({"state": state, "country": country,
+                                                           "reason": "provider_state_not_found"})
+                            else:
+                                logger.warning("No cities processed for state=%s (tried=%s)", state, ", ".join(attempt_errors) or "none")
+                                skipped_states.append({"state": state, "country": country, "reason": "aliases_exhausted"})
                             continue
 
                         if used_state_label and used_state_label != state:
@@ -227,6 +259,7 @@ class StationDiscoveryTask:
                             state = used_state_label
 
                         logger.info("Found %d cities in %s", len(cities), state)
+                        states_fetched.add((country.lower(), state.lower()))
 
                         for city_data in cities:
                             city = city_data["city"]
@@ -246,6 +279,8 @@ class StationDiscoveryTask:
 
                                 # Fetch stations
                                 stations = await self.iqair_client.get_stations(city, state, country)
+                                # IQAir answered for this city: stations it did not list are genuinely absent.
+                                cities_listed.add(_scope_key(country, state, city))
                                 if not stations:
                                     logger.info("No stations found in %s, %s", city, state)
                                     continue
@@ -256,6 +291,8 @@ class StationDiscoveryTask:
 
                                 seen_source_ids = set()
                                 seen_names = set()
+                                listed_names = sorted({(sd.get("station") or "").strip() for sd in stations
+                                                       if sd.get("station")})
                                 batch_size = 20
                                 station_infos: List[Dict[str, Any]] = []
 
@@ -298,6 +335,9 @@ class StationDiscoveryTask:
                                         'active': True,
                                         'last_seen_at': datetime.now(timezone.utc),
                                         'run_id': progress_id,
+                                        # names IQAir lists for this city right now: lets upsert_station
+                                        # recognise a rename (old name gone, same site) and keep the legacy row
+                                        'listed_names': listed_names,
                                     }
                                     station_infos.append(station_info)
 
@@ -335,7 +375,8 @@ class StationDiscoveryTask:
                                                             "name": info["name"], "city": city, "state": state, "country": country,
                                                             **{k: v for k, v in result.items()
                                                                if k in ("computed_station_id", "conflicting_station_id",
-                                                                        "conflicting_source_station_id", "rename_candidates")},
+                                                                        "conflicting_source_station_id", "rename_candidates",
+                                                                        "provider_code_kept", "from_source_station_id", "from_name")},
                                                         })
 
                                                     if result.get('created'):
@@ -395,6 +436,7 @@ class StationDiscoveryTask:
                 'stations_updated': total_stations_updated,
                 'completion_time_utc': completion_time,
                 'states_skipped': skipped_states,
+                'states_unsupported': unsupported_states,
                 'cities_skipped': skipped_cities,
                 'stations_failed': failed_stations,
                 'identity_events': identity_events[:500],
@@ -402,13 +444,18 @@ class StationDiscoveryTask:
                     'rename_or_move': sum(1 for e in identity_events if e['event'] == 'rename_or_move'),
                     'identity_conflict': sum(1 for e in identity_events if e['event'] == 'identity_conflict'),
                     'rename_candidate': sum(1 for e in identity_events if e['event'] == 'rename_candidate'),
+                    'rename_merged': sum(1 for e in identity_events if e['event'] == 'rename_merged'),
+                    'provider_tag_kept': sum(1 for e in identity_events if e['event'] == 'provider_tag_kept'),
                 },
             }
             logger.info("Final summary: %s", json.dumps(final_summary))
 
             # --- Write union manifest & summary artifacts (station + derived city) ---
-            cities_successfully_fetched = {_scope_key(r['country'], r['state'], r['city']) for r in manifest_rows}
-            self._write_union_manifest_and_summary(progress_id, manifest_rows, final_summary, cities_successfully_fetched)
+            union_rows = self._write_union_manifest_and_summary(progress_id, manifest_rows, final_summary,
+                                                                cities_listed, states_fetched)
+            await self._mirror_liveness_to_db(union_rows, final_summary)
+            # Rewrite the summary with the liveness figures (first write happened before they were known).
+            self._write_summary(progress_id, final_summary)
             # ------------------------------------------------------------------
 
             return final_summary
@@ -436,15 +483,52 @@ class StationDiscoveryTask:
         except Exception as exc:  # noqa: BLE001 — a check, never a reason to fail discovery
             logger.debug("Province check skipped for %s: %s", city, exc)
 
-    def _write_union_manifest_and_summary(self, run_id: str, rows: List[Dict[str, Any]], summary: Dict[str, Any], cities_successfully_fetched: set) -> None:
+    async def _mirror_liveness_to_db(self, union_rows: List[Dict[str, Any]], summary: Dict[str, Any]) -> None:
+        """
+        stations.active follows the manifest: rows past the inactive threshold are
+        switched off (IQAir-family providers only); rediscovered rows were already
+        switched on by upsert_station. Idempotent, so every run converges.
+        """
+        inactive_ids = [r.get("source_station_id") for r in union_rows
+                        if r.get("source_station_id") and not _truthy(r.get("active"), True)]
+        summary["manifest_total"] = len(union_rows)
+        summary["manifest_inactive"] = len(inactive_ids)
+        summary["manifest_dormant"] = sum(1 for r in union_rows if _truthy(r.get("dormant"), False))
+        summary["stations_deactivated"] = 0
+        if not inactive_ids:
+            return
+        try:
+            async with AsyncSessionLocal() as session:
+                changed = await self.db_service.set_stations_active(session, inactive_ids, False)
+                await session.commit()
+            summary["stations_deactivated"] = len(changed)
+            if changed:
+                logger.info("Deactivated %d stations absent from IQAir for >= %s discoveries",
+                            len(changed), self.settings.MANIFEST_INACTIVE_AFTER_MISSES)
+        except Exception as exc:
+            logger.error("Could not mirror manifest liveness into stations.active: %s", exc)
+            summary["deactivation_error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+
+    def _write_summary(self, run_id: str, summary: Dict[str, Any]) -> None:
+        run_dir = self.manifest_root / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        summary_path = run_dir / "summary.json"
+        tmp_summary = run_dir / "summary.json.tmp"
+        with open(tmp_summary, "w", encoding="utf-8") as f:
+            f.write(json.dumps({**summary, "run_id": run_id}, indent=2))
+        os.replace(tmp_summary, summary_path)
+
+    def _write_union_manifest_and_summary(self, run_id: str, rows: List[Dict[str, Any]], summary: Dict[str, Any],
+                                          cities_listed: set, states_fetched: Optional[set] = None) -> List[Dict[str, Any]]:
         """
         Writes union manifest using manifest_utils.finalize_union_manifest:
           - artifacts/station_manifests/<run_id>/stations.(parquet|jsonl)
           - artifacts/station_manifests/<run_id>/summary.json
           - artifacts/station_manifests/latest.(parquet|jsonl)  (atomic union pointer)
-          - artifacts/city_manifests/<run_id>/cities.(parquet|jsonl)  (derived)
+          - artifacts/city_manifests/<run_id>/cities.(parquet|jsonl)  (derived, live rows only)
           - artifacts/city_manifests/latest.(parquet|jsonl)          (atomic pointer)
-        Uses union logic that preserves historical stations and tracks liveness.
+        Union logic keeps every station ever seen and ages the ones IQAir stopped
+        listing (dormant → daily poll, inactive → not polled). Returns the union rows.
         """
         self.manifest_root.mkdir(parents=True, exist_ok=True)
         run_dir = self.manifest_root / run_id
@@ -458,17 +542,25 @@ class StationDiscoveryTask:
 
         # ---- Station manifest (union logic) ----
         station_gcs_prefix = "manifests/station_manifests"
+        cfg = getattr(self, "settings", None)   # thresholds default from global settings when unset
+        dormant_after = int(cfg.MANIFEST_DORMANT_AFTER_MISSES) if cfg is not None else None
+        inactive_after = int(cfg.MANIFEST_INACTIVE_AFTER_MISSES) if cfg is not None else None
         try:
             final_union_rows = finalize_union_manifest(
                 path_root=self.manifest_root,
                 run_dir=run_dir,
                 fmt=self.manifest_format,
                 discovered_rows=rows,
-                cities_successfully_fetched=cities_successfully_fetched,
-                gcs_prefix=station_gcs_prefix
+                gcs_prefix=station_gcs_prefix,
+                cities_listed=cities_listed,
+                states_fetched=states_fetched,
+                dormant_after=dormant_after,
+                inactive_after=inactive_after,
             )
-            logger.info("📦 Wrote union station manifest: %d total stations (%d discovered this run)",
-                       len(final_union_rows), len(rows))
+            logger.info("📦 Wrote union station manifest: %d total stations (%d discovered this run, %d dormant, %d inactive)",
+                        len(final_union_rows), len(rows),
+                        sum(1 for r in final_union_rows if _truthy(r.get("dormant"), False)),
+                        sum(1 for r in final_union_rows if not _truthy(r.get("active"), True)))
         except ManifestUnavailable:
             raise  # the fallback below would upload only this run's rows over the full manifest
         except Exception as e:
@@ -496,17 +588,15 @@ class StationDiscoveryTask:
             logger.warning("Failed writing derived city manifest: %s", e)
 
         # ---- Discovery summary (run-scoped) ----
-        summary_path = run_dir / "summary.json"
-        tmp_summary = run_dir / "summary.json.tmp"
-        with open(tmp_summary, "w", encoding="utf-8") as f:
-            f.write(json.dumps({**summary, "run_id": run_id}, indent=2))
-        os.replace(tmp_summary, summary_path)
-        logger.info("🧾 Wrote discovery summary: %s", summary_path)
+        self._write_summary(run_id, summary)
+        logger.info("🧾 Wrote discovery summary: %s", run_dir / "summary.json")
+        return final_union_rows
 
     def _write_city_manifest_from_station_rows(self, run_id: str, station_rows: List[Dict[str, Any]], gcs_prefix: str = "") -> None:
         """
-        Derive a city manifest from station rows of the same discovery run.
-        Writes:
+        Derive a city manifest from the live station rows (active and not dormant) of
+        the union manifest, so the hourly city job does not keep asking IQAir for
+        cities it no longer lists. Writes:
           - artifacts/city_manifests/<run_id>/cities.(parquet|jsonl)
           - artifacts/city_manifests/latest.(parquet|jsonl) (atomic pointer)
         """
@@ -520,7 +610,7 @@ class StationDiscoveryTask:
         # group stations by (country, state, city) and compute a simple centroid
         groups: Dict[Tuple[str, str, str], List[Tuple[Optional[float], Optional[float]]]] = defaultdict(list)
         for r in station_rows:
-            if not r.get("active"):
+            if not _truthy(r.get("active"), True) or _truthy(r.get("dormant"), False):
                 continue
             country, state, city = r.get("country"), r.get("state"), r.get("city")
             lat, lon = r.get("lat"), r.get("lon")

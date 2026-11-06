@@ -10,6 +10,7 @@ The application does **not** apply them. Apply by hand, in order, after review:
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_schema/migrations/001_ops_ingestion.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_schema/migrations/002_ops_provenance.sql
 psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_schema/migrations/003_openaq_streams.sql
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db_schema/migrations/006_ops_station_fetch_health.sql # view: hourly fetch health per station
 ```
 
 Each file is idempotent (`IF NOT EXISTS`) and wrapped in one transaction. If the
