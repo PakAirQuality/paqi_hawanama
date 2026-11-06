@@ -76,9 +76,14 @@ async def security_headers(request, call_next):
     return response
 
 # Set up CORS
+# Firebase Hosting preview channels of the dashboard site (hawanama-2--<channel>.web.app) may call
+# the API like the live site does, so a preview can exercise the copilot before a live deploy.
+PREVIEW_ORIGIN_REGEX = r"https://hawanama-2--[a-z0-9-]+\.web\.app"
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.ALLOWED_HOSTS,
+    allow_origin_regex=PREVIEW_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
