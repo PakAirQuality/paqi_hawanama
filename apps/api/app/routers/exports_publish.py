@@ -746,6 +746,7 @@ def upload_daily_partition_to_gcs(
 
         # Write lightweight stations.json for fast API serving (same data as training labels)
         try:
+            pd, _ = _require_pandas()
             df = daily_table.to_pandas()
             pm25_col = "pm25_ugm3_mean" if "pm25_ugm3_mean" in df.columns else None
             lat_col = next((c for c in ["latitude", "lat"] if c in df.columns), None)
