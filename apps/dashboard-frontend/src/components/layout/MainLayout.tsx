@@ -75,8 +75,12 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
             </a>
           </nav>
 
-          <div className="ml-auto hidden md:flex items-center gap-4 shrink-0 text-[13px]">
-            <FreshnessBadge />
+          <div className="ml-auto flex items-center gap-3 shrink-0">
+            {/* Page-specific header controls (the Tracker's Listen button) are portalled in here */}
+            <div id="header-actions" className="flex items-center empty:hidden" />
+            <div className="hidden md:flex items-center gap-4 text-[13px]">
+              <FreshnessBadge />
+            </div>
           </div>
         </div>
       </header>

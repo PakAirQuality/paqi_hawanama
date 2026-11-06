@@ -25,7 +25,7 @@ configure_logging(
         settings.POSTGRES_PASSWORD,
     ),
 )
-from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest, reports, forecast_runs, nowcast, fires
+from app.routers import health, meta, nearest, current, history, dashboard, cities, exports, exports_publish, tasks, bot, punjab_epa, openaq_network, nasa_database, internal_stations, public, ops_pipeline, ops_downscaler, data_sources, analyst_desk, copilot, analytics, bam_ingest, reports, forecast_runs, nowcast, fires, voice
 
 # True only on the dedicated ingestion Cloud Run service (hawanama-ingest).
 # Public read API does not expose POST /tasks/* — schedulers call ingest directly.
@@ -123,6 +123,8 @@ else:
     app.include_router(internal_stations.router, prefix=f"{settings.API_V1_STR}/internal/stations", tags=["internal-stations"], dependencies=json_limit)
     app.include_router(reports.router, prefix=f"{settings.API_V1_STR}/reports", tags=["reports"], dependencies=json_limit)
     app.include_router(public.router, prefix=f"{settings.API_V1_STR}", tags=["public"])
+    # The spoken brief makes paid Gemini calls on a cache miss: a tighter per-IP limit than JSON reads
+    app.include_router(voice.router, prefix=f"{settings.API_V1_STR}", tags=["voice"], dependencies=[Depends(make_rate_limit(settings.VOICE_RATE_LIMIT_PER_MINUTE, "voice"))])
     # Read routes below are public (the dashboard is a public read-only site); the few action
     # routes left in these routers keep their own verify_tasks_token dependency.
     app.include_router(ops_pipeline.router, prefix=f"{settings.API_V1_STR}/ops/pipeline", tags=["ops-pipeline"], dependencies=tile_limit)

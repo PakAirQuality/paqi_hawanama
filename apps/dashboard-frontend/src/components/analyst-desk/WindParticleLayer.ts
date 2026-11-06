@@ -134,8 +134,10 @@ export class WindParticleRenderer {
     this.vGrid = v
 
     // Allocate for max particles; activeParticles controls how many we use
-    this.particles = new Float32Array(this.maxParticles * 4)
-    this.speeds = new Float32Array(this.maxParticles)
+    // Room for the most particles any zoom asks for (the overview count can be the larger one)
+    const capacity = Math.max(this.maxParticles, this.baseParticles)
+    this.particles = new Float32Array(capacity * 4)
+    this.speeds = new Float32Array(capacity)
     this._updateVisibleBounds()
     this._updateActiveParticles()
     this._resetAllParticles()
@@ -192,7 +194,7 @@ export class WindParticleRenderer {
   }
 
   private _resetAllParticles() {
-    for (let i = 0; i < this.maxParticles; i++) {
+    for (let i = 0; i < this.particles.length / 4; i++) {
       const [x, y] = this._randomVisiblePos()
       this.particles[i * 4] = x
       this.particles[i * 4 + 1] = y

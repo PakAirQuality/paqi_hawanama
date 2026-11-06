@@ -11,10 +11,18 @@ const nextConfig: NextConfig = {
   ...(isDev ? {
     compress: false, // gzip would hold a streamed chat answer back until it had finished
     async rewrites() {
-      return [{
-        source: "/api/:path*",
-        destination: "https://hawanama-152782825429.asia-south1.run.app/api/:path*",
-      }];
+      return [
+        // VOICE_DEV_API (e.g. http://localhost:8001 in .env.local) sends the spoken brief to a local API,
+        // for trying it before it is deployed; everything else still goes to Cloud Run
+        ...(process.env.VOICE_DEV_API ? [{
+          source: "/api/v1/voice/:path*",
+          destination: `${process.env.VOICE_DEV_API}/api/v1/voice/:path*`,
+        }] : []),
+        {
+          source: "/api/:path*",
+          destination: "https://hawanama-152782825429.asia-south1.run.app/api/:path*",
+        },
+      ];
     },
   } : {}),
 };

@@ -8,20 +8,22 @@
  *  - useSmokeOutlook       tomorrow's smoke outlook band per city, with the 850 hPa wind (fire report §9)
  *  - useOutlookCone        a city's upwind cone for one outlook lead
  *  - useHeatSources        persistent heat sources as a larger glowing flame, a flag for investigation (fire report §8.4)
- *  - useSmokePlumes        illustrative smoke plumes downwind of fire clusters, on the latest winds
+ *  - useSmokePlumes        illustrative smoke plumes: thin lines downwind of fire groups, on the latest winds
  *  - useFireAnimation      active fires as flame icons that pop up, over a flickering glow
- *  - useEstimateSurface    the satellite PM2.5 estimate, painted from its grid in the air-quality colour map
+ *  - useEstimateSurface    the satellite PM2.5 estimate in the air-quality colour map: smooth far out, square cells zoomed in
  *  - useCitySurfaces       the 1 km city layers, same colours
+ *  - useEstimateReplay     the replay's continuous day-to-day blend of the estimate
  */
 
 import { useEffect, useRef, useState } from 'react'
 import mapboxgl from 'mapbox-gl'
 import { MAJOR_CITIES } from '@/lib/mapviz/cities'
-import { predictionRaster, renderGridImage } from '@/lib/mapviz/gridImage'
+import { cachedGridImage, estimateKey, predictionRaster, renderGridImage, type GridImage } from '@/lib/mapviz/gridImage'
 import { CITY_RANGE, SURFACE_RANGE } from '@/lib/turbo'
 
 const API_BASE_VIZ = process.env.NEXT_PUBLIC_API_URL ?? ''
 import { esc } from '@/lib/html'
+import { bandColor, bandKey } from '@/lib/aqi'
 import { driftPath, loadWindField, type WindField } from '@/lib/mapviz/wind'
 
 type Map = mapboxgl.Map
@@ -329,30 +331,62 @@ export function useHeatSources(map: Map | null, loaded: boolean, opts: { rows: H
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Smoke plumes: from each cluster of fires, a soft plume that widens, greys and fades downwind over about
-// 18 hours of travel on the latest surface winds. Illustrative only: where smoke may drift, not a dispersion
-// model (the fire report has no plume model in its operational path).
+// Smoke plumes: from each group of fires, a thin smooth line downwind over about 18 hours of travel on the
+// latest surface winds, deep orange at the fire fading to pale yellow, with a small dot where it starts.
+// Drawn like trajectory bundles. Illustrative only: where smoke may drift, not a dispersion model (the fire
+// report has no plume model in its operational path).
 // ─────────────────────────────────────────────────────────────────────────────
 const PLUME_HOURS = 18
-const PLUME_STEP_KM = 3
+const PLUME_CELL_DEG = 0.1
+const PLUME_MAX_LINES = 220
 
-/** Fires grouped on a 0.25° grid; groups of at least `min` become plume sources. */
+/** Fires grouped on a PLUME_CELL_DEG grid; groups of at least `min` become plume sources, strongest first. */
 function fireClusters(fires: { geometry: { coordinates: number[] }; properties?: { frp?: number | string | null } | null }[], min = 2) {
   const cells = new Map<string, { x: number; y: number; n: number }>()
   for (const f of fires) {
     const [lon, lat] = f.geometry.coordinates
     if (!Number.isFinite(lon) || !Number.isFinite(lat)) continue
-    const key = `${Math.floor(lon / 0.25)},${Math.floor(lat / 0.25)}`
+    const key = `${Math.floor(lon / PLUME_CELL_DEG)},${Math.floor(lat / PLUME_CELL_DEG)}`
     const c = cells.get(key) ?? { x: 0, y: 0, n: 0 }
     c.x += lon; c.y += lat; c.n += 1
     cells.set(key, c)
   }
-  return [...cells.values()].filter(c => c.n >= min).map(c => ({ lon: c.x / c.n, lat: c.y / c.n, count: c.n }))
+  return [...cells.values()].filter(c => c.n >= min).sort((a, b) => b.n - a.n).slice(0, PLUME_MAX_LINES)
+    .map(c => ({ lon: c.x / c.n, lat: c.y / c.n, count: c.n }))
 }
 
-export function useSmokePlumes(map: Map | null, loaded: boolean, opts: { fires: { geometry: { coordinates: number[] }; properties?: { frp?: number | string | null } | null }[]; enabled: boolean }) {
-  const { fires, enabled } = opts
+/** Chaikin corner cutting: turns the hourly drift points into a smooth curve. */
+function smoothPath(pts: [number, number][], rounds = 3): [number, number][] {
+  let p = pts
+  for (let r = 0; r < rounds && p.length > 2; r++) {
+    const out: [number, number][] = [p[0]]
+    for (let i = 0; i < p.length - 1; i++) {
+      const [x0, y0] = p[i], [x1, y1] = p[i + 1]
+      out.push([0.75 * x0 + 0.25 * x1, 0.75 * y0 + 0.25 * y1], [0.25 * x0 + 0.75 * x1, 0.25 * y0 + 0.75 * y1])
+    }
+    out.push(p[p.length - 1])
+    p = out
+  }
+  return p
+}
+
+// Plumes fade out between these zooms: they read at country and province scale, not over a city
+const PLUME_FADE_ZOOM: [number, number] = [7, 8]
+// Marching dashes (Mapbox's line-dash animation): each step moves the dashes a little further along the line
+const DASH_STEPS: number[][] = [
+  [0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0],
+  [0, 0.5, 3, 3.5], [0, 1, 3, 3], [0, 1.5, 3, 2.5], [0, 2, 3, 2], [0, 2.5, 3, 1.5], [0, 3, 3, 1], [0, 3.5, 3, 0.5],
+]
+
+/**
+ * `pm25At` gives the PM2.5 at a point (the satellite estimate, else the nearest station); each plume is coloured
+ * by the AQI band of the PM2.5 along its path: the air the smoke is moving into, not a measure of what the fires
+ * themselves add (fire power is never a PM2.5 contribution).
+ */
+export function useSmokePlumes(map: Map | null, loaded: boolean, opts: { fires: { geometry: { coordinates: number[] }; properties?: { frp?: number | string | null } | null }[]; enabled: boolean; pm25At?: (lon: number, lat: number) => number | null }) {
+  const { fires, enabled, pm25At } = opts
   const [field, setField] = useState<WindField | null>(null)
+  const grown = useRef(false)
   useEffect(() => {
     if (!enabled || field) return
     let alive = true
@@ -362,56 +396,90 @@ export function useSmokePlumes(map: Map | null, loaded: boolean, opts: { fires: 
 
   useEffect(() => {
     if (!map || !loaded) return
-    if (!map.getSource('hawa-plumes')) {
-      map.addSource('hawa-plumes', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
-      // Circle radius in km on the ground: pixels per km double with each zoom level (about 30°N)
-      const kmToPx = 512 / (40075 * 0.87)
+    if (!map.getSource('hawa-plume-lines')) {
+      map.addSource('hawa-plume-lines', { type: 'geojson', data: { type: 'FeatureCollection', features: [] }, lineMetrics: true })
+      map.addSource('hawa-plume-src', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      const [z0, z1] = PLUME_FADE_ZOOM
+      const width = (k: number): mapboxgl.Expression => ['interpolate', ['linear'], ['zoom'],
+        4, ['interpolate', ['linear'], ['get', 'count'], 2, 0.7 * k, 20, 1.1 * k, 60, 1.5 * k],
+        z1, ['interpolate', ['linear'], ['get', 'count'], 2, 1 * k, 20, 1.6 * k, 60, 2.2 * k]]
+      // A faint full-length line, then flowing dashes in the same colour on top
       map.addLayer({
-        id: 'hawa-plumes', type: 'circle', source: 'hawa-plumes', slot: 'top',
+        id: 'hawa-plume-lines', type: 'line', source: 'hawa-plume-lines', slot: 'top', maxzoom: z1 + 0.01,
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
         paint: {
-          'circle-radius': ['interpolate', ['exponential', 2], ['zoom'], 0, ['*', ['get', 'rkm'], kmToPx], 16, ['*', ['get', 'rkm'], kmToPx * 65536]],
-          'circle-color': ['interpolate', ['linear'], ['get', 'p'], 0, '#c2410c', 0.15, '#57534e', 0.6, '#44403c', 1, '#78716c'],
-          'circle-opacity': ['get', 'o'],
-          'circle-blur': 1,
-          'circle-pitch-alignment': 'map',
+          'line-color': ['get', 'color'],
+          'line-width': width(1),
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.32, z0, 0.3, z1, 0],
+          'line-trim-offset': [0, 0],
+        },
+      } as mapboxgl.AnyLayer)
+      map.addLayer({
+        id: 'hawa-plume-flow', type: 'line', source: 'hawa-plume-lines', slot: 'top', maxzoom: z1 + 0.01,
+        layout: { 'line-cap': 'butt', 'line-join': 'round' },
+        paint: {
+          'line-color': ['get', 'color'],
+          'line-width': width(1.15),
+          'line-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.95, z0, 0.9, z1, 0],
+          'line-dasharray': DASH_STEPS[0],
+        },
+      } as mapboxgl.AnyLayer)
+      map.addLayer({
+        id: 'hawa-plume-src', type: 'circle', source: 'hawa-plume-src', slot: 'top', maxzoom: z1 + 0.01,
+        paint: {
+          'circle-radius': ['interpolate', ['linear'], ['zoom'], 4, 2, z1, 3.5],
+          'circle-color': '#f4a28c',
+          'circle-opacity': ['interpolate', ['linear'], ['zoom'], 4, 0.75, z0, 0.7, z1, 0],
         },
       } as mapboxgl.AnyLayer)
     }
-    map.setLayoutProperty('hawa-plumes', 'visibility', enabled ? 'visible' : 'none')
+    const ids = ['hawa-plume-lines', 'hawa-plume-flow', 'hawa-plume-src']
+    for (const id of ids) map.setLayoutProperty(id, 'visibility', enabled ? 'visible' : 'none')
     if (!enabled) return
-    const feats: GeoJSON.Feature[] = []
+    const lines: GeoJSON.Feature[] = []
+    const sources: GeoJSON.Feature[] = []
     if (field) {
       for (const c of fireClusters(fires)) {
         const path = driftPath(field, c.lon, c.lat, PLUME_HOURS)
-        if (path.length < 3) continue
-        // Walk the path in even steps; the plume widens and fades with distance
-        const seg: number[] = [0]
-        const km = (a: number[], b: number[]) => Math.hypot((b[0] - a[0]) * 111.32 * Math.cos((a[1] * Math.PI) / 180), (b[1] - a[1]) * 110.57)
-        for (let i = 1; i < path.length; i++) seg.push(seg[i - 1] + km(path[i - 1], path[i]))
-        const total = seg[seg.length - 1]
-        if (total < PLUME_STEP_KM * 2) continue
-        const strength = Math.min(1, c.count / 30)
-        let i = 1
-        for (let d = 0; d <= total; d += PLUME_STEP_KM) {
-          while (i < seg.length - 1 && seg[i] < d) i++
-          const t = Math.max(0, Math.min(1, (d - seg[i - 1]) / (seg[i] - seg[i - 1] || 1)))
-          const lon = path[i - 1][0] + (path[i][0] - path[i - 1][0]) * t
-          const lat = path[i - 1][1] + (path[i][1] - path[i - 1][1]) * t
-          const p = d / total
-          feats.push({
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: [lon, lat] },
-            properties: {
-              p,
-              rkm: (3 + 22 * p) * (0.75 + 0.25 * strength),
-              o: 0.6 * (0.6 + 0.4 * strength) * Math.pow(1 - p, 0.9) * Math.min(1, 0.5 + p * 8),
-            },
-          })
-        }
+        if (path.length < 4) continue
+        // The PM2.5 along the path (skipping the source itself), for the line's AQI colour
+        const vals = path.slice(1).map(([x, y]) => pm25At?.(x, y) ?? null).filter((v): v is number => v != null)
+        const pm = vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : null
+        lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: smoothPath(path) }, properties: { count: c.count, color: pm != null ? bandColor(bandKey(pm)) : '#94a3b8' } })
+        sources.push({ type: 'Feature', geometry: { type: 'Point', coordinates: [c.lon, c.lat] }, properties: {} })
       }
     }
-    ;(map.getSource('hawa-plumes') as mapboxgl.GeoJSONSource).setData({ type: 'FeatureCollection', features: feats })
-  }, [map, loaded, fires, field, enabled])
+    ;(map.getSource('hawa-plume-lines') as mapboxgl.GeoJSONSource).setData({ type: 'FeatureCollection', features: lines })
+    ;(map.getSource('hawa-plume-src') as mapboxgl.GeoJSONSource).setData({ type: 'FeatureCollection', features: sources })
+
+    // The lines draw outward from their fires the first time they appear; later updates swap in place
+    if (!lines.length || grown.current || prefersReducedMotion()) return
+    grown.current = true
+    let raf = 0
+    const t0 = performance.now()
+    const grow = (now: number) => {
+      // The first frame's timestamp can fall just before t0, so the progress is kept at or above 0
+      const t = Math.max(0, Math.min(1, (now - t0) / 1600))
+      const shown = 1 - Math.pow(1 - t, 3)
+      if (map.getLayer('hawa-plume-lines')) map.setPaintProperty('hawa-plume-lines', 'line-trim-offset', shown >= 1 ? [0, 0] : [shown, 1])
+      if (t < 1) raf = requestAnimationFrame(grow)
+    }
+    raf = requestAnimationFrame(grow)
+    return () => cancelAnimationFrame(raf)
+  }, [map, loaded, fires, field, enabled, pm25At])
+
+  // The dashes flow downwind, about 20 steps a second, while the plumes are on and the tab is visible
+  useEffect(() => {
+    if (!map || !loaded || !enabled || prefersReducedMotion()) return
+    let step = 0
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'hidden' || !map.getLayer('hawa-plume-flow')) return
+      if (map.getZoom() > PLUME_FADE_ZOOM[1]) return // nothing to animate once the lines are gone
+      step = (step + 1) % DASH_STEPS.length
+      map.setPaintProperty('hawa-plume-flow', 'line-dasharray', DASH_STEPS[step])
+    }, 55)
+    return () => clearInterval(timer)
+  }, [map, loaded, enabled])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -526,23 +594,25 @@ export function useFireAnimation(map: Map | null, loaded: boolean, opts: { enabl
     map.setLayoutProperty('fires-icon', 'visibility', 'visible')
     const glows = ['fires-glow', 'fires-glow-1', 'fires-glow-2']
 
-    if (prefersReducedMotion()) { map.setLayoutProperty('fires-icon', 'icon-size', flameSize(1)); return }
+    // Sizes are data-driven, so they are set once (changing them every frame reloads the fire data);
+    // the flames fade in with a single constant opacity instead
+    map.setLayoutProperty('fires-icon', 'icon-size', flameSize(1))
+    for (const id of glows) map.setPaintProperty(id, 'circle-radius', byFrp(GLOW_RADIUS, 1))
+    if (prefersReducedMotion()) { map.setPaintProperty('fires-icon', 'icon-opacity', 1); return }
 
+    map.setPaintProperty('fires-icon', 'icon-opacity', 0)
     let raf = 0
     let last = 0
-    let popping = true
+    let fading = true
     const t0 = performance.now()
     const tick = (now: number) => {
       raf = requestAnimationFrame(tick)
       if (!map.getLayer('fires-icon') || document.visibilityState === 'hidden') return
-      const el = (now - t0) / 1000
-      // Flames pop up with a little overshoot over the first 0.6 s (sizes are set only during the pop)
-      if (popping) {
-        const t = Math.min(1, el / 0.6)
-        const k = t >= 1 ? 1 : 1 + 2.2 * Math.pow(t - 1, 3) + 1.2 * Math.pow(t - 1, 2)
-        map.setLayoutProperty('fires-icon', 'icon-size', flameSize(Math.max(0.01, k)))
-        for (const id of glows) map.setPaintProperty(id, 'circle-radius', byFrp(GLOW_RADIUS, Math.max(0, k)))
-        if (t >= 1) popping = false
+      const el = Math.max(0, now - t0) / 1000
+      if (fading) {
+        const t = Math.min(1, el / 0.45)
+        map.setPaintProperty('fires-icon', 'icon-opacity', 1 - Math.pow(1 - t, 2))
+        if (t >= 1) fading = false
       }
       // Glow flicker at about 12 updates a second
       if (now - last < 80) return
@@ -583,32 +653,78 @@ export function loadCountryPolygons(): Promise<number[][][][]> {
   return countryPolys
 }
 
+/** Calls `done` once an image source has finished loading its picture (or after a safety timeout). */
+function whenSourceLoaded(map: Map, id: string, done: () => void): () => void {
+  let finished = false
+  const finish = () => { if (finished) return; finished = true; map.off('sourcedata', onData); clearTimeout(timer); done() }
+  const onData = (e: { sourceId?: string }) => { if (e.sourceId === id && map.isSourceLoaded(id)) finish() }
+  map.on('sourcedata', onData)
+  const timer = setTimeout(finish, 1500)
+  return () => { finished = true; map.off('sourcedata', onData); clearTimeout(timer) }
+}
+
+/** Opacity by zoom with every stop's value worked out from the base opacity. */
+const opacityStops = (k: (o: number) => number): mapboxgl.Expression =>
+  ['interpolate', ['linear'], ['zoom'], ...NATIONAL_OPACITY.flatMap(([z, o]) => [z, Math.max(0, Math.min(1, k(o)))])]
+
 /**
- * The national estimate: two image layers in turn, so a new day fades in over the old one.
- * `grid` is the prediction endpoint's response for the day and model in view.
+ * The national estimate: two image layers in turn, so a new day fades in over the old one. Each day's picture is
+ * painted once (cached by date and model). A fade starts only after the new picture has loaded. While the replay
+ * plays this layer rests; when it resumes, the picture loads hidden and appears at full strength in one step
+ * (the replay shows the same day until then), and `onResumed` tells the map it can hide the replay.
  */
-export function useEstimateSurface(map: Map | null, loaded: boolean, opts: { grid: Parameters<typeof predictionRaster>[0]; visible: boolean }) {
-  const { grid, visible } = opts
+export function useEstimateSurface(map: Map | null, loaded: boolean, opts: { grid: Parameters<typeof predictionRaster>[0]; visible: boolean; suspended?: boolean; onResumed?: () => void; cells?: boolean }) {
+  const { grid, visible, suspended = false, cells = false } = opts
   const shown = useRef<0 | 1 | null>(null)
   const raf = useRef(0)
-  // Each layer's current strength (0 to 1), so a new day blends from where the last fade had reached
-  const level = useRef<[number, number]>([0, 0])
   const visibleRef = useRef(visible)
   visibleRef.current = visible
+  const onResumed = useRef(opts.onResumed)
+  onResumed.current = opts.onResumed
+  // Each layer's current strength (0 to 1), so a new day blends from where the last fade had reached
+  const level = useRef<[number, number]>([0, 0])
+  const wasSuspended = useRef(false)
 
   useEffect(() => {
     if (!map || !loaded) return
+    const ids = ['hawa-estimate-0', 'hawa-estimate-1'] as const
+    const setLevel = (k: 0 | 1, v: number) => { level.current[k] = v; if (map.getLayer(ids[k])) map.setPaintProperty(ids[k], 'raster-opacity', scaledOpacity(NATIONAL_OPACITY, v)) }
+    // While the replay plays, its own layers show the estimate; this one rests
+    if (suspended) {
+      wasSuspended.current = true
+      cancelAnimationFrame(raf.current)
+      for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none')
+      level.current = [0, 0]
+      return
+    }
     const raster = predictionRaster(grid)
-    if (!raster) return
+    // No estimate for this day (the request failed or the day has none): fade out rather than keep the last day
+    if (!raster) {
+      if (grid === null && shown.current !== null) {
+        cancelAnimationFrame(raf.current)
+        const from: [number, number] = [level.current[0], level.current[1]]
+        const t0 = performance.now()
+        const step = (now: number) => {
+          const t = Math.max(0, Math.min(1, (now - t0) / 400))
+          setLevel(0, from[0] * (1 - t)); setLevel(1, from[1] * (1 - t))
+          if (t < 1) raf.current = requestAnimationFrame(step)
+        }
+        raf.current = requestAnimationFrame(step)
+      }
+      return
+    }
     let cancelled = false
+    let stopWaiting: (() => void) | null = null
     loadCountryPolygons().then(clip => {
       if (cancelled) return
-      const image = renderGridImage(raster, SURFACE_RANGE, { scale: 5, clip })
+      // Smooth (blended between cells) at country zoom; square cells, the grid's real ~10 km resolution, zoomed in
+      const key = estimateKey(grid as { date?: string; model?: string } | null)
+      const image = cachedGridImage(key && (cells ? `${key}:cells` : key), () => renderGridImage(raster, SURFACE_RANGE, { scale: 5, clip, nearest: cells }))
       if (!image || cancelled) return
       // The fainter of the two layers takes the new day, so nothing on screen jumps
       const next: 0 | 1 = level.current[0] <= level.current[1] ? 0 : 1
       const other: 0 | 1 = next === 0 ? 1 : 0
-      const id = `hawa-estimate-${next}`
+      const id = ids[next], otherId = ids[other]
       const src = map.getSource(id) as mapboxgl.ImageSource | undefined
       if (src) src.updateImage(image)
       else {
@@ -616,39 +732,129 @@ export function useEstimateSurface(map: Map | null, loaded: boolean, opts: { gri
         map.addLayer({
           id, type: 'raster', source: id, slot: 'middle',
           layout: { visibility: 'none' },
-          paint: { 'raster-opacity': scaledOpacity(NATIONAL_OPACITY, 0), 'raster-resampling': 'linear', 'raster-fade-duration': 0 },
+          paint: { 'raster-opacity': 0, 'raster-resampling': 'linear', 'raster-fade-duration': 0 },
         } as mapboxgl.AnyLayer)
       }
       shown.current = next
+      // Square cells keep crisp edges however far you zoom; the smooth picture is smoothed further by the GPU
+      map.setPaintProperty(id, 'raster-resampling', cells ? 'nearest' : 'linear')
+      const resuming = wasSuspended.current
+      wasSuspended.current = false
+      setLevel(next, 0)
       map.setLayoutProperty(id, 'visibility', visibleRef.current ? 'visible' : 'none')
-      // Crossfade over 800 ms, eased at both ends: the new day in, the other layer out, each from its current strength
-      cancelAnimationFrame(raf.current)
-      const t0 = performance.now()
-      const otherId = `hawa-estimate-${other}`
-      const fromNext = level.current[next], fromOther = level.current[other]
-      const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
-      const step = (now: number) => {
-        const t = Math.min(1, (now - t0) / 800)
-        const k = ease(t)
-        level.current[next] = fromNext + (1 - fromNext) * k
-        level.current[other] = fromOther * (1 - k)
-        if (map.getLayer(id)) map.setPaintProperty(id, 'raster-opacity', scaledOpacity(NATIONAL_OPACITY, level.current[next]))
-        if (map.getLayer(otherId)) map.setPaintProperty(otherId, 'raster-opacity', scaledOpacity(NATIONAL_OPACITY, level.current[other]))
-        if (t < 1) raf.current = requestAnimationFrame(step)
-        else if (map.getLayer(otherId)) map.setLayoutProperty(otherId, 'visibility', 'none')
-      }
-      raf.current = requestAnimationFrame(step)
+      stopWaiting = whenSourceLoaded(map, id, () => {
+        if (cancelled) return
+        cancelAnimationFrame(raf.current)
+        if (resuming) {
+          // Back from the replay: the same day appears at full strength at once, and the replay can go
+          setLevel(next, 1); setLevel(other, 0)
+          if (map.getLayer(otherId)) map.setLayoutProperty(otherId, 'visibility', 'none')
+          onResumed.current?.()
+          return
+        }
+        // Crossfade over 800 ms, eased at both ends: the new day in, the other layer out, each from its current strength
+        const t0 = performance.now()
+        const fromNext = level.current[next], fromOther = level.current[other]
+        const ease = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2)
+        const step = (now: number) => {
+          const t = Math.max(0, Math.min(1, (now - t0) / 800))
+          const k = ease(t)
+          setLevel(next, fromNext + (1 - fromNext) * k)
+          setLevel(other, fromOther * (1 - k))
+          if (t < 1) raf.current = requestAnimationFrame(step)
+          else if (map.getLayer(otherId)) map.setLayoutProperty(otherId, 'visibility', 'none')
+        }
+        raf.current = requestAnimationFrame(step)
+      })
     })
-    return () => { cancelled = true }
-  }, [map, loaded, grid])
+    return () => { cancelled = true; stopWaiting?.() }
+  }, [map, loaded, grid, suspended, cells])
 
   useEffect(() => {
-    if (!map || !loaded || shown.current === null) return
+    if (!map || !loaded || shown.current === null || suspended) return
     const id = `hawa-estimate-${shown.current}`
     if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', visible ? 'visible' : 'none')
-  }, [map, loaded, visible, grid])
+  }, [map, loaded, visible, grid, suspended])
 
   useEffect(() => () => cancelAnimationFrame(raf.current), [])
+}
+
+/**
+ * The replay's estimate: day i and day i+1 blended in proportion to the playhead (t = i + f), at constant total
+ * strength. Day i+1 sits on top at opacity alpha*f and day i beneath at alpha*(1-f)/(1-alpha*f), so the two add up
+ * to exactly alpha*(1-f) of day i and alpha*f of day i+1 with no dip or flash part-way. Each day always goes on
+ * layer (day % 2), so a layer only takes a new picture when it is fully transparent.
+ *
+ * `onReady` fires once the first two days' pictures have loaded (the map keeps the normal estimate up until then,
+ * so the replay never starts on a blank map). When the replay ends its layers stay as they are until `release`,
+ * which the map sets once the normal estimate is back on screen, so the hand-back is seamless.
+ */
+export function useEstimateReplay(map: Map | null, loaded: boolean, opts: { images: GridImage[] | null; clock: { get(): number; subscribe(fn: () => void): () => void } | null; visible: boolean; release: boolean; onReady?: () => void }) {
+  const { images, clock, visible, release } = opts
+  const assigned = useRef<[number, number]>([-1, -1])
+  const top = useRef<0 | 1 | null>(null)
+  const onReady = useRef(opts.onReady)
+  onReady.current = opts.onReady
+
+  useEffect(() => {
+    if (!map || !loaded) return
+    const ids = ['hawa-replay-0', 'hawa-replay-1'] as const
+    const hide = () => {
+      for (const id of ids) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', 'none')
+      assigned.current = [-1, -1]
+      top.current = null
+    }
+    if (!visible) { hide(); return }
+    if (!images?.length || !clock) {
+      // Ended: keep the last day on screen until the normal estimate has taken over
+      if (release) hide()
+      return
+    }
+
+    const src = (k: number) => map.getSource(ids[k]) as mapboxgl.ImageSource
+    for (const [k, id] of ids.entries()) {
+      const first = images[Math.min(k, images.length - 1)]
+      if (!map.getSource(id)) {
+        map.addSource(id, { type: 'image', ...first })
+        map.addLayer({
+          id, type: 'raster', source: id, slot: 'middle',
+          paint: { 'raster-opacity': 0, 'raster-resampling': 'linear', 'raster-fade-duration': 0 },
+        } as mapboxgl.AnyLayer)
+      } else {
+        map.setPaintProperty(id, 'raster-opacity', 0)
+        src(k).updateImage(first)
+      }
+      map.setLayoutProperty(id, 'visibility', 'visible')
+      assigned.current[k] = Math.min(k, images.length - 1)
+    }
+    top.current = null
+
+    const apply = () => {
+      const n = images.length
+      const t = Math.max(0, Math.min(n - 1, clock.get()))
+      const i = Math.min(n - 1, Math.floor(t))
+      const f = i >= n - 1 ? 0 : t - i
+      const lo = (i % 2) as 0 | 1, hi = (1 - lo) as 0 | 1
+      if (assigned.current[lo] !== i) { src(lo).updateImage(images[i]); assigned.current[lo] = i }
+      if (i + 1 < n && assigned.current[hi] !== i + 1) { src(hi).updateImage(images[i + 1]); assigned.current[hi] = i + 1 }
+      // Day i+1 goes on top of day i
+      if (top.current !== hi) { map.moveLayer(ids[lo], ids[hi]); top.current = hi }
+      map.setPaintProperty(ids[lo], 'raster-opacity', opacityStops(o => (o * (1 - f)) / (1 - o * f)))
+      map.setPaintProperty(ids[hi], 'raster-opacity', opacityStops(o => o * f))
+    }
+
+    // Start blending only once both first pictures are in
+    let unsub: (() => void) | null = null
+    let pending = 2
+    const ready = () => {
+      if (--pending > 0) return
+      apply()
+      onReady.current?.()
+      unsub = clock.subscribe(apply)
+    }
+    const stops = ids.map(id => whenSourceLoaded(map, id, ready))
+    return () => { stops.forEach(s => s()); unsub?.() }
+  }, [map, loaded, images, clock, visible, release])
 }
 
 /** The 1 km city layers (zoom 9 and in), painted with the same colours over their own range. */
@@ -692,8 +898,7 @@ export function useCitySurfaces(map: Map | null, loaded: boolean, opts: { cities
           .catch(() => {})
       }
     }
-    // A new date: hide the old city layers until their new grids arrive
-    for (const c of cities) if (map.getLayer(`hawa-city-${c.key}`)) map.setLayoutProperty(`hawa-city-${c.key}`, 'visibility', 'none')
+    // A new date: each city layer keeps its picture until the new grid arrives and replaces it in place
     load()
     map.on('moveend', load)
     return () => { cancelled = true; map.off('moveend', load) }
