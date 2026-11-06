@@ -70,6 +70,14 @@ BASE_FROM = """
     LEFT JOIN states st ON st.id = s.state_id
 """
 VALID_PM25 = "r.pm25 IS NOT NULL AND (r.qc_state IS NULL OR r.qc_state <> 'INVALID')"
+POLLUTANT_COLUMNS = ("pm25", "pm10", "no2", "so2", "o3", "co")
+POLLUTANT_LABELS = {"pm25": "PM2.5", "pm10": "PM10", "no2": "NO2", "so2": "SO2", "o3": "O3", "co": "CO"}
+
+
+def valid_sql(pollutant: str) -> str:
+    """The VALID_PM25 rule for any readings column (non-null, qc not INVALID)."""
+    assert pollutant in POLLUTANT_COLUMNS, pollutant
+    return f"r.{pollutant} IS NOT NULL AND (r.qc_state IS NULL OR r.qc_state <> 'INVALID')"
 REPORTING_EXISTS = f"""
       EXISTS (SELECT 1 FROM readings r
               WHERE r.scope_type = 'station' AND r.scope_key = s.station_id
@@ -558,14 +566,21 @@ def _count_buckets(start: date, end: date, bucket: str) -> int:
 
 
 async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: str = "", end: str = "",
-                       bucket: str = "day", same_calendar_date: bool = False) -> Dict[str, Any]:
-    """Reporting-station PM2.5 statistics per bucket over Pakistan days.
+                       bucket: str = "day", same_calendar_date: bool = False, pollutant: str = "pm25") -> Dict[str, Any]:
+    """Reporting-station statistics of one pollutant per bucket over Pakistan days.
 
     entity: station | city | province | national. same_calendar_date=True with start
-    'MM-DD' (or a full date) returns one row per year for that calendar day.
+    'MM-DD' (or a full date) returns one row per year for that calendar day. pollutant is a
+    readings column (pm25 default; pm10, no2, so2, o3, co read the raw readings whatever the
+    range, since the hourly city aggregate carries PM2.5 only, and report the units the
+    providers attested).
     """
     from app.services.analytics import _resolve_station
 
+    pollutant = (pollutant or "pm25").lower().replace(".", "").replace("_", "")
+    if pollutant not in POLLUTANT_COLUMNS:
+        return {"message": f"pollutant must be one of {', '.join(POLLUTANT_COLUMNS)}."}
+    valid = valid_sql(pollutant)
     await _set_timeout(db)
     bucket = (bucket or "day").lower()
     if bucket not in ("day", "month", "year", "all"):
@@ -628,10 +643,10 @@ async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: 
         params["sid"] = st["station_id"]
         source_sql = f"""
             WITH hourly AS (
-                SELECT time_bucket('1 hour', r.ts_utc) AS h, AVG(r.pm25) AS v
+                SELECT time_bucket('1 hour', r.ts_utc) AS h, AVG(r.{pollutant}) AS v
                 FROM readings r
                 WHERE r.scope_type = 'station' AND r.scope_key = :sid
-                  AND {time_filter} AND {VALID_PM25}
+                  AND {time_filter} AND {valid}
                 GROUP BY 1),
             daily AS (
                 SELECT (h AT TIME ZONE 'Asia/Karachi')::date AS d, 'x' AS sk, AVG(v) AS v, COUNT(*) AS n_hours, 1 AS n_st
@@ -646,7 +661,7 @@ async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: 
         label = area.name
         params.update(area.params)
         where = REGISTERED_WHERE + (f" AND {area.where}" if area.where else "")
-        if span_days > LONG_RANGE_DAYS and kind != "radius" and not md:
+        if span_days > LONG_RANGE_DAYS and kind != "radius" and not md and pollutant == "pm25":
             # long ranges: the continuous aggregate (city-hourly means, station_count-weighted)
             if kind in ("national", "pakistan"):
                 city_where = ""
@@ -675,9 +690,9 @@ async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: 
                 members AS (
                     SELECT s.station_id {BASE_FROM} WHERE {where}),
                 hourly AS (
-                    SELECT r.scope_key AS sk, time_bucket('1 hour', r.ts_utc) AS h, AVG(r.pm25) AS v
+                    SELECT r.scope_key AS sk, time_bucket('1 hour', r.ts_utc) AS h, AVG(r.{pollutant}) AS v
                     FROM readings r JOIN members m ON m.station_id = r.scope_key
-                    WHERE r.scope_type = 'station' AND {time_filter} AND {VALID_PM25}
+                    WHERE r.scope_type = 'station' AND {time_filter} AND {valid}
                     GROUP BY 1, 2),
                 daily AS (
                     SELECT (h AT TIME ZONE 'Asia/Karachi')::date AS d, sk, AVG(v) AS v, COUNT(*) AS n_hours, 1 AS n_st
@@ -699,6 +714,24 @@ async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: 
     def _label(b: date) -> str:
         return {"day": b.isoformat(), "month": b.strftime("%Y-%m"), "year": str(b.year), "all": f"{d0}..{d1}"}[bucket]
 
+    unit = "µg/m³ PM2.5"
+    units_by_source: List[Dict[str, Any]] = []
+    if pollutant != "pm25":
+        # the providers' own units (NULL = not attested) and how many hourly rows each contributed
+        src_sql = f"""
+            {source_sql.split('hourly AS')[0]} units AS (
+                SELECT r.source AS source, r.units_{pollutant} AS unit, COUNT(*) AS n_rows
+                FROM readings r {'JOIN members m ON m.station_id = r.scope_key' if kind != 'station' else ''}
+                WHERE r.scope_type = 'station' {'AND r.scope_key = :sid' if kind == 'station' else ''}
+                  AND {time_filter} AND {valid}
+                GROUP BY 1, 2)
+            SELECT source, unit, n_rows FROM units ORDER BY n_rows DESC
+        """
+        units_by_source = [{"source": r.source, "unit": r.unit, "n_rows": int(r.n_rows)}
+                           for r in (await db.execute(text(src_sql), params)).fetchall()]
+        attested = sorted({u["unit"] for u in units_by_source if u["unit"]})
+        unit = (f"{', '.join(attested)} {POLLUTANT_LABELS[pollutant]} (as attested by the providers)" if attested
+                else f"{POLLUTANT_LABELS[pollutant]} as reported by the providers (unit not attested)")
     out_rows = [{"bucket": _label(r.b), "mean": _r(r.mean), "median": _r(r.median), "max": _r(r.max), "min": _r(r.min),
                  "n_station_days": int(r.n_station_days), "n_days": int(r.n_days),
                  **({"n_stations": int(r.n_sk)} if per_station else
@@ -712,8 +745,9 @@ async def period_stats(db: AsyncSession, *, entity: str, name: str = "", start: 
         "bucket": bucket, "same_calendar_date": bool(md),
         "range": {"start_pkt_day": d0.isoformat(), "end_pkt_day": d1.isoformat()},
         "window": _window_dict(w0, w1, f"Pakistan days {d0} to {d1}"),
-        "statistic": statistic, "unit": "µg/m³ PM2.5",
+        "pollutant": pollutant, "statistic": statistic, "unit": unit,
+        **({"units_by_source": units_by_source} if pollutant != "pm25" else {}),
         "rows": out_rows, "n_buckets": len(out_rows),
         "definitions": {k2: DEFINITIONS[k2] for k2 in ("day", "statistic", "registered")},
-        **({"message": "No station-days with at least 6 valid hours in this range."} if not out_rows else {}),
+        **({"message": f"No station-days with at least 6 valid {POLLUTANT_LABELS[pollutant]} hours in this range."} if not out_rows else {}),
     }

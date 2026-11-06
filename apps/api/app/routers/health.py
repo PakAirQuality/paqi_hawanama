@@ -101,7 +101,7 @@ LAST_RUNS_SQL = text("""
 """)
 
 # Sources whose freshness comes from ops.ingest_runs rather than readings (task name per source).
-RUN_BACKED_SOURCES = {"fires": "ingest-fires", "forecast": "daily-forecast", "nowcast": "nowcast"}
+RUN_BACKED_SOURCES = {"fires": "ingest-fires", "forecast": "daily-forecast", "nowcast": "nowcast", "satellite": "satellite-series"}
 LAST_GOOD_RUN_SQL = text("""
     SELECT task, run_id, status, finished_at, latest_observation_ts, rows_written
     FROM ops.ingest_runs

@@ -278,6 +278,40 @@ async def run_fires_outlook(
         raise HTTPException(status_code=500, detail=f"Smoke outlook failed: {e}")
 
 
+@router.post("/tasks/satellite/refresh")
+async def run_satellite_refresh(
+    request: Request,
+    kind: str = Query("all", description="all, tropomi (NO2, CO, SO2, O3, HCHO, aerosol index) or maiac (AOD)"),
+    days: int = Query(30, ge=1, le=400, description="Look back this many days for missing days (the last 7 are always re-fetched)"),
+    since: Optional[str] = Query(None, description="YYYY-MM-DD: backfill from this day (at most 40 days per kind per run)"),
+    until: Optional[str] = Query(None, description="YYYY-MM-DD: last day to consider (default yesterday)"),
+    dry_run: bool = Query(False, description="Plan the days and ping Earth Engine; write nothing"),
+    force: bool = Query(False, description="Re-fetch every day in the window, not only missing ones"),
+    _: bool = Depends(verify_tasks_token)
+):
+    """Satellite column series per region (TROPOMI columns, aerosol index, MAIAC AOD) reduced on Earth Engine → satellite/series."""
+    from datetime import date as _date
+    from app.services.satellite_series import SatelliteSeriesTask
+    if not settings.SATELLITE_ENABLED:
+        raise HTTPException(status_code=503, detail="SATELLITE_ENABLED is false on this service")
+    try:
+        since_d = _date.fromisoformat(since) if since else None
+        until_d = _date.fromisoformat(until) if until else None
+    except ValueError:
+        raise HTTPException(status_code=422, detail="since and until must be YYYY-MM-DD")
+    if kind not in ("all", "tropomi", "maiac"):
+        raise HTTPException(status_code=422, detail="kind must be all, tropomi or maiac")
+    try:
+        outcome = await SatelliteSeriesTask().run(kind=kind, days=days, since=since_d, until=until_d, dry_run=dry_run,
+                                                  force=force, trigger=_trigger(request))
+        return _outcome_response(outcome, "Satellite series " + ("planned (dry run)" if dry_run else "updated"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Satellite series failed: %s", e)
+        raise HTTPException(status_code=500, detail=f"Satellite series failed: {e}")
+
+
 @router.post("/tasks/fires/trajectories")
 async def run_fires_trajectories(
     request: Request,
@@ -395,6 +429,7 @@ async def get_task_status(
                 "POST /tasks/fires/aggregate?backfill=true|false&dry_run=true|false&since=YYYY-MM-DD",
                 "POST /tasks/fires/outlook?dry_run=true|false",
                 "POST /tasks/fires/trajectories?dry_run=true|false",
+                "POST /tasks/satellite/refresh?kind=all|tropomi|maiac&days=30&since=YYYY-MM-DD&until=YYYY-MM-DD&dry_run=true|false&force=true|false",
                 "POST /tasks/registry/provinces?dry_run=true|false",
                 "POST /tasks/twitter-lahore-pm25",
                 "GET /tasks/status"
