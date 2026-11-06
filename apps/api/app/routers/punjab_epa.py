@@ -75,55 +75,9 @@ AQI_CATEGORIES = [
     (301,500, "Hazardous"),
 ]
 
-# ---- EPA breakpoint tables (U.S. AQI). PM2.5 lives in app.services.aqi (2024 table) ----
-PM10_BPTS = [  # µg/m³
-    (0, 54,    0, 50),
-    (55,154,  51,100),
-    (155,254,101,150),
-    (255,354,151,200),
-    (355,424,201,300),
-    (425,604,301,500),
-]
-O3_8H_BPTS = [  # ppm
-    (0.000,0.054,  0, 50),
-    (0.055,0.070, 51,100),
-    (0.071,0.085,101,150),
-    (0.086,0.105,151,200),
-    (0.106,0.200,201,300),
-]
-CO_8H_BPTS = [  # ppm
-    (0.0,4.4,   0, 50),
-    (4.5,9.4,  51,100),
-    (9.5,12.4,101,150),
-    (12.5,15.4,151,200),
-    (15.5,30.4,201,300),
-    (30.5,50.4,301,500),
-]
-NO2_1H_BPTS = [  # ppb
-    (0,53,    0, 50),
-    (54,100, 51,100),
-    (101,360,101,150),
-    (361,649,151,200),
-    (650,1249,201,300),
-    (1250,2049,301,500),
-]
-SO2_1H_BPTS = [  # ppb
-    (0,35,    0, 50),
-    (36,75,  51,100),
-    (76,185,101,150),
-    (186,304,151,200),
-    (305,604,201,300),
-    (605,1004,301,500),
-]
-
-def _interp_aqi(C: float, table):
-    if C is None:
-        return None
-    for lo, hi, Ilo, Ihi in table:
-        if lo <= C <= hi:
-            # piecewise-linear mapping, then round to nearest integer
-            return round((Ihi - Ilo) / (hi - lo) * (C - lo) + Ilo)
-    return None  # out of table
+# ---- EPA breakpoint tables (U.S. AQI). PM2.5 lives in app.services.aqi (2024 table); the other
+# pollutants' tables and the interpolation live in app.services.aqi.multi, shared with the copilot ----
+from app.services.aqi.multi import PM10_BPTS, O3_8H_BPTS, CO_8H_BPTS, NO2_1H_BPTS, SO2_1H_BPTS, interp_aqi as _interp_aqi  # noqa: E402
 
 def _aqi_category(aqi: int) -> str:
     return category_for(aqi)
