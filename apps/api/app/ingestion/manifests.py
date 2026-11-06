@@ -255,22 +255,83 @@ def write_latest_and_run(path_root: Path, run_dir: Path, fmt: str, rows: List[Ma
     if gcs_prefix:
         upload_manifest_to_gcs(latest, gcs_prefix)
 
+def _as_bool(v: Any, default: bool) -> bool:
+    """Manifest booleans may come back from parquet as numpy.bool_, None (NaN) or str."""
+    if v is None:
+        return default
+    try:
+        if v != v:  # NaN
+            return default
+    except Exception:
+        pass
+    if isinstance(v, str):
+        return v.strip().lower() in ("1", "true", "t", "yes")
+    return bool(v)
+
+
+def _as_int(v: Any, default: int = 0) -> int:
+    try:
+        if v is None or v != v:
+            return default
+        return int(v)
+    except Exception:
+        return default
+
+
+def scope_key_of(row: ManifestRow) -> str:
+    return (f"{(row.get('country') or '').strip().lower()}|"
+            f"{(row.get('state') or '').strip().lower()}|"
+            f"{(row.get('city') or '').strip().lower()}")
+
+
+def state_key_of(row: ManifestRow) -> Tuple[str, str]:
+    return ((row.get("country") or "").strip().lower(), (row.get("state") or "").strip().lower())
+
+
+def apply_liveness(row: ManifestRow, dormant_after: int, inactive_after: int) -> ManifestRow:
+    """Derive `dormant` and `active` from `miss_count` (thresholds from settings)."""
+    mc = _as_int(row.get("miss_count"))
+    row["miss_count"] = mc
+    row["dormant"] = mc >= dormant_after
+    row["active"] = mc < inactive_after
+    return row
+
+
 def finalize_union_manifest(
     path_root: Path,
     run_dir: Path,
     fmt: str,
     discovered_rows: List[ManifestRow],
     cities_successfully_fetched: Optional[set] = None,
-    gcs_prefix: str = ""
+    gcs_prefix: str = "",
+    *,
+    cities_listed: Optional[set] = None,
+    states_fetched: Optional[set] = None,
+    dormant_after: Optional[int] = None,
+    inactive_after: Optional[int] = None,
 ) -> List[ManifestRow]:
     """
-    Simplified contract:
-      - Union newly discovered rows with previous latest
-      - Track liveness (last_seen_at_utc, miss_count) but never remove stations
-      - All stations remain active=True (liveness tracking is for polling frequency optimization)
-      - Handle duplicates gracefully by preferring fresh data
+    Union of this run's discoveries with the previous `latest`, with liveness:
+
+      - a station listed this run: miss_count = 0, dormant = False, active = True;
+      - a previous station not listed this run ages by one miss when IQAir gave us
+        the chance to see it, i.e. its (country, state) was fetched (`states_fetched`)
+        and either its city was listed by /cities (`cities_listed`) — the station is
+        simply gone from that city — or the city itself was not listed any more;
+      - when the state could not be fetched (alias exhausted, exception) nothing
+        changes: our own failure must not age anybody;
+      - `dormant` (miss_count >= dormant_after) stations are polled once a day,
+        `active = False` (miss_count >= inactive_after) stations are not polled and
+        are mirrored into stations.active by discovery. Rows are never deleted, so a
+        station that reappears is reactivated with its history intact.
+
+    `cities_successfully_fetched` is the pre-liveness name of `cities_listed`
+    (cities for which /stations returned rows) and is still accepted.
     """
-    cities_successfully_fetched = cities_successfully_fetched or set()
+    dormant_after = int(settings.MANIFEST_DORMANT_AFTER_MISSES if dormant_after is None else dormant_after)
+    inactive_after = int(settings.MANIFEST_INACTIVE_AFTER_MISSES if inactive_after is None else inactive_after)
+    listed: set = set(cities_listed if cities_listed is not None else (cities_successfully_fetched or set()))
+    fetched_states: Optional[set] = set(states_fetched) if states_fetched is not None else None
 
     if ensure_latest_from_gcs(path_root, fmt, gcs_prefix) is None and gcs_prefix and _bucket_name():
         raise ManifestUnavailable(
@@ -281,19 +342,19 @@ def finalize_union_manifest(
 
     now_iso = _now_iso()
     discovered_by_key: Dict[Tuple[str,str], ManifestRow] = {}
-    seen_scope_keys: set = set()
 
     # Normalize and prepare discovered
     for r in discovered_rows:
         r = dict(r)  # copy
-        r.setdefault("provider_uid", r.get("metadata_json", {}).get("iqair_uid"))
-        r.setdefault("miss_count", 0)
+        r.setdefault("provider_uid", (r.get("metadata_json") or {}).get("iqair_uid"))
         r.setdefault("first_seen_at_utc", now_iso)
         r["last_seen_at_utc"] = now_iso
-        r["active"] = True  # All discovered stations are active
+        r["miss_count"] = 0
         discovered_by_key[_key(r)] = r
         if r.get("country") and r.get("state") and r.get("city"):
-            seen_scope_keys.add(f"{r['country'].lower()}|{r['state'].lower()}|{r['city'].lower()}")
+            listed.add(scope_key_of(r))
+            if fetched_states is not None:
+                fetched_states.add(state_key_of(r))
 
     union: Dict[Tuple[str,str], ManifestRow] = {}
 
@@ -302,31 +363,22 @@ def finalize_union_manifest(
         base = prev_by_key.get(k)
         if base:
             r["first_seen_at_utc"] = base.get("first_seen_at_utc", r["first_seen_at_utc"])
-        r["miss_count"] = 0  # Reset because we found it this run
-        union[k] = r
+        union[k] = apply_liveness(r, dormant_after, inactive_after)
 
-    # Then, carry forward previous rows not seen this run (increment miss_count for liveness tracking)
+    # Then, carry forward previous rows not seen this run and age them where IQAir had the chance to list them.
     for k, old in prev_by_key.items():
         if k in union:
             continue  # already handled
         old = dict(old)
-        old.setdefault("miss_count", 0)
+        old["miss_count"] = _as_int(old.get("miss_count"))
         old.setdefault("first_seen_at_utc", old.get("last_seen_at_utc") or now_iso)
 
-        scope_key = (f"{(old.get('country') or '').lower()}|"
-                     f"{(old.get('state') or '').lower()}|"
-                     f"{(old.get('city') or '').lower()}")
-
-        # Only increment miss_count if that scope was successfully fetched this run.
-        if scope_key in seen_scope_keys:
-            old["miss_count"] = int(old["miss_count"]) + 1
-        # else: leave miss_count as is (do not punish for an API-wide city miss)
-
-        # Keep all stations active - liveness tracking is for optimization, not exclusion
-        old["active"] = True
-
-        # Keep in union (never drop stations)
-        union[k] = old
+        state_fetched = (state_key_of(old) in fetched_states) if fetched_states is not None else (scope_key_of(old) in listed)
+        if state_fetched:
+            # City listed without this station, or city no longer listed at all: both are IQAir's inventory.
+            old["miss_count"] += 1
+        # else: our own failure to read the state; leave the counter alone.
+        union[k] = apply_liveness(old, dormant_after, inactive_after)
 
     # Write both run-scoped and latest pointers
     final_rows = list(union.values())

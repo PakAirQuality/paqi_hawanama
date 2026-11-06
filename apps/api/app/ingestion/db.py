@@ -9,9 +9,11 @@ from typing import Dict, List, Any, Optional
 import json
 import logging
 
+from sqlalchemy import bindparam, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
+from app.core.config import settings as _settings
 from app.core.database import engine as async_engine
 from app.ingestion.identity import (append_identity_history, as_dict, ensure_identity, merge_discovery_metadata,
                                     now_iso)
@@ -27,6 +29,12 @@ AsyncSessionLocal = sessionmaker(async_engine, class_=AsyncSession, expire_on_co
 # cleanup_payload_json (no current callers) only trims legacy raw blobs above this
 # size and never touches rows that carry provenance.
 RAW_TRIM_THRESHOLD = 4000
+
+
+def provider_family(raw: Optional[str] = None) -> List[str]:
+    """Provider codes that all denote IQAir devices (curated sub-tags such as airvisual-paqi)."""
+    raw = _settings.IQAIR_PROVIDER_FAMILY if raw is None else raw
+    return [c.strip() for c in (raw or "").split(",") if c.strip()]
 
 
 class DatabaseService:
@@ -163,10 +171,19 @@ class DatabaseService:
 
         by_native = None
         if source_station_id:
+            # The native id identifies the device across the IQAir provider family: a row a curator
+            # re-tagged to airvisual-paqi is still found (exact provider first), so a later rename or
+            # coordinate correction updates it instead of creating a second row under 'airvisual'.
             by_native = (await session.execute(text("""
-                SELECT station_id, name, lat, lon, metadata_json FROM stations
-                WHERE provider_id = :pid AND source_station_id = :sid
-            """), {"pid": provider_id, "sid": source_station_id})).fetchone()
+                SELECT s.station_id, s.name, s.lat, s.lon, s.metadata_json
+                  FROM stations s JOIN providers p ON p.id = s.provider_id
+                 WHERE s.source_station_id = :sid
+                   AND (s.provider_id = :pid OR (p.code IN :codes AND :pcode IN :codes))
+                 ORDER BY (s.provider_id = :pid) DESC
+                 LIMIT 1
+            """).bindparams(bindparam("codes", expanding=True)),
+                {"pid": provider_id, "sid": source_station_id, "codes": provider_family() or ["airvisual"],
+                 "pcode": provider_code})).fetchone()
 
         # --- 1. same native id, different computed id: a move/rename. Keep the legacy id. ---
         if by_native is not None and by_native.station_id.strip() != computed_id:
@@ -191,16 +208,65 @@ class DatabaseService:
             return {"station_id": legacy_id, "created": False, "updated": True,
                     "identity_event": "rename_or_move", "computed_station_id": computed_id}
 
-        # --- 2. computed id already used by a different native id: do not merge, report. ---
+        # --- 2. computed id already used by another row. ---
         by_id = (await session.execute(text("""
-            SELECT station_id, provider_id, source_station_id, metadata_json FROM stations WHERE station_id = :sid
+            SELECT s.station_id, s.provider_id, s.source_station_id, s.metadata_json, p.code AS provider_code
+              FROM stations s JOIN providers p ON p.id = s.provider_id
+             WHERE s.station_id = :sid
         """), {"sid": computed_id})).fetchone()
         if by_id is not None and source_station_id and by_id.source_station_id and \
                 (by_id.source_station_id != source_station_id or int(by_id.provider_id) != provider_id):
+            family = provider_family()
+            if by_id.source_station_id == source_station_id and provider_code in family \
+                    and (by_id.provider_code or "") in family:
+                # 2a. Same native id under a curated sub-provider tag (airvisual-paqi, ...): the same device.
+                # Refresh what discovery owns, keep the tag, the station_id and every curated key.
+                merged = merge_discovery_metadata(as_dict(by_id.metadata_json), incoming_meta)
+                await session.execute(text("""
+                    UPDATE stations
+                       SET name = :name, lat = :lat, lon = :lon, metadata_json = CAST(:metadata_json AS jsonb),
+                           active = :active, updated_at = NOW(), last_seen_at = :last_seen_at
+                     WHERE station_id = :station_id
+                """), {"name": station_data["name"], "lat": station_data["lat"], "lon": station_data["lon"],
+                       "metadata_json": json.dumps(merged), "active": station_data.get("active", True),
+                       "last_seen_at": station_data.get("last_seen_at"), "station_id": by_id.station_id.strip()})
+                return {"station_id": by_id.station_id.strip(), "created": False, "updated": True,
+                        "identity_event": "provider_tag_kept", "provider_code_kept": by_id.provider_code}
+            # 2b. A different native id owns this computed id: do not merge, report.
             logger.error("Identity conflict: computed station_id %s for %s/%s already belongs to %s/%s; skipping",
                          computed_id, provider_code, source_station_id, by_id.provider_id, by_id.source_station_id)
             return {"station_id": None, "created": False, "updated": False, "identity_event": "identity_conflict",
                     "conflicting_station_id": computed_id, "conflicting_source_station_id": by_id.source_station_id}
+
+        # --- 2c. New native id and new computed id at the exact site of a station whose old name IQAir no
+        #         longer lists for this city: a rename. Keep the legacy row (and its readings) instead of
+        #         creating a duplicate that would fail every hourly fetch. `listed_names` is the set of
+        #         station names IQAir returned for the city this run; without it nothing is merged.
+        listed_names = station_data.get("listed_names")
+        if by_native is None and by_id is None and source_station_id and listed_names is not None:
+            renamed = await self._rename_source(session, provider_family(), station_data, set(listed_names))
+            if renamed is not None:
+                merged = merge_discovery_metadata(as_dict(renamed.metadata_json), incoming_meta)
+                merged = append_identity_history(merged, {
+                    "at": ts, "run_id": station_data.get("run_id"), "event": "rename", "provider": provider_code,
+                    "from": {"name": renamed.name, "source_station_id": renamed.source_station_id},
+                    "to": {"name": station_data["name"], "source_station_id": source_station_id},
+                    "computed_station_id": computed_id,
+                })
+                legacy_id = renamed.station_id.strip()
+                await session.execute(text("""
+                    UPDATE stations
+                       SET name = :name, source_station_id = :sid, metadata_json = CAST(:metadata_json AS jsonb),
+                           active = :active, updated_at = NOW(), last_seen_at = :last_seen_at
+                     WHERE station_id = :station_id
+                """), {"name": station_data["name"], "sid": source_station_id, "metadata_json": json.dumps(merged),
+                       "active": station_data.get("active", True), "last_seen_at": station_data.get("last_seen_at"),
+                       "station_id": legacy_id})
+                logger.warning("Station '%s' renamed to '%s' (%s): keeping legacy id %s, computed id %s not created",
+                               renamed.name, station_data["name"], source_station_id, legacy_id, computed_id)
+                return {"station_id": legacy_id, "created": False, "updated": True, "identity_event": "rename_merged",
+                        "computed_station_id": computed_id, "from_source_station_id": renamed.source_station_id,
+                        "from_name": renamed.name}
 
         # --- 3. normal path: merge metadata in Python so curated keys survive, then upsert. ---
         merged = merge_discovery_metadata(as_dict(by_id.metadata_json) if by_id is not None else None, incoming_meta)
@@ -247,6 +313,52 @@ class DatabaseService:
             result["rename_candidates"] = [{"station_id": c.station_id.strip(), "name": c.name,
                                             "source_station_id": c.source_station_id} for c in cands]
         return result
+
+    async def _rename_source(self, session: AsyncSession, family: List[str], station_data: Dict[str, Any],
+                             listed_names: set):
+        """
+        The one station (same provider family, city and coordinates) whose name IQAir
+        no longer lists for the city — the row a renamed station should keep. None when
+        there is no such row or more than one (co-located devices stay separate rows).
+        """
+        rows = (await session.execute(text("""
+            SELECT s.station_id, s.name, s.source_station_id, s.metadata_json
+              FROM stations s JOIN providers p ON p.id = s.provider_id
+             WHERE p.code IN :codes
+               AND COALESCE(s.city_id, -1) = COALESCE(:city_id, -1)
+               AND abs(s.lat - :lat) < 0.000001 AND abs(s.lon - :lon) < 0.000001
+             LIMIT 6
+        """).bindparams(bindparam("codes", expanding=True)),
+            {"codes": list(family), "city_id": station_data.get("city_id"),
+             "lat": station_data["lat"], "lon": station_data["lon"]})).fetchall()
+        vanished = [r for r in rows if (r.name or "").strip() not in listed_names]
+        if len(vanished) != 1 or len(rows) > 5:
+            return None
+        return vanished[0]
+
+    async def set_stations_active(self, session: AsyncSession, source_ids: List[str], active: bool,
+                                  provider_codes: Optional[List[str]] = None) -> List[str]:
+        """
+        Mirror manifest liveness into stations.active for IQAir-family rows only
+        (never punjab/icimod/bam). Returns the station_ids whose flag changed.
+        """
+        ids = [s for s in (source_ids or []) if s]
+        if not ids:
+            return []
+        codes = list(provider_codes or provider_family())
+        changed: List[str] = []
+        for i in range(0, len(ids), 500):
+            rs = await session.execute(text("""
+                UPDATE stations
+                   SET active = :active, updated_at = NOW()
+                 WHERE source_station_id IN :sids
+                   AND provider_id IN (SELECT id FROM providers WHERE code IN :codes)
+                   AND active IS DISTINCT FROM :active
+             RETURNING station_id
+            """).bindparams(bindparam("sids", expanding=True), bindparam("codes", expanding=True)),
+                {"active": bool(active), "sids": ids[i:i + 500], "codes": codes})
+            changed.extend(r.station_id.strip() for r in rs.fetchall())
+        return changed
 
     async def reconcile_and_upsert_readings(self, session: AsyncSession, rows: List[Dict[str, Any]],
                                             policy: ReconcilePolicy) -> ReconcileResult:
