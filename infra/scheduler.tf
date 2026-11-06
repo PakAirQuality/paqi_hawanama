@@ -718,3 +718,38 @@ resource "google_cloud_scheduler_job" "fires_smoke_outlook" {
     max_backoff_duration = "600s"
   }
 }
+
+# Satellite column series: TROPOMI OFFL L3 columns (NO2, CO, SO2, O3, HCHO, aerosol index) and MAIAC AOD
+# reduced on Earth Engine to the 24 regions in app/services/satellite_regions.py, written to
+# satellite/series/<product>.parquet. Runs after the overpass products of D-1 (MAIAC) have landed;
+# OFFL L3 days arrive 3–14 days later and stay "pending" until they do. Start paused: unpause after
+# a reviewed dry run and one manual run (POST /tasks/satellite/refresh) on hawanama-ingest.
+resource "google_cloud_scheduler_job" "satellite_series_daily" {
+  name             = "satellite-series-daily"
+  description      = "Earth Engine: TROPOMI and MAIAC region series for missing and recent days (satellite/series)"
+  schedule         = "35 1 * * *"
+  time_zone        = "UTC"
+  attempt_deadline = "1200s"
+  paused           = true
+
+  http_target {
+    http_method = "POST"
+    uri         = "${local.ingest_base_url}/api/v1/tasks/satellite/refresh?kind=all"
+
+    headers = {
+      "Content-Type" = "application/json"
+    }
+
+    oidc_token {
+      service_account_email = google_service_account.scheduler_invoker.email
+      audience              = local.ingest_base_url
+    }
+  }
+
+  retry_config {
+    retry_count          = 1
+    max_retry_duration   = "1800s"
+    min_backoff_duration = "300s"
+    max_backoff_duration = "600s"
+  }
+}

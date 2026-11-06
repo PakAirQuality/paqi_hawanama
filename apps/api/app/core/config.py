@@ -95,6 +95,9 @@ class Settings(BaseSettings):
     OPS_DERIVED_BUCKET: Optional[str] = None  # GCS bucket for feature stores (e.g., paqi-derived-hawanama-data) - legacy/fallback
     OPS_FORECASTS_BUCKET: Optional[str] = None  # GCS bucket for PM2.5 forecasts (e.g., paqi-forecasts-hawanama-data)
     FIRMS_MAP_KEY: Optional[str] = None  # NASA FIRMS API key for active fire data
+    # Satellite column series (Earth Engine reductions; the daily task runs on hawanama-ingest only)
+    SATELLITE_ENABLED: bool = False
+    EE_PROJECT: str = "hawanama-2"
     OPS_GCP_PROJECT: Optional[str] = None  # GCP project for Cloud Run jobs
     OPS_RUN_REGION: str = "asia-south1"  # Cloud Run region
     OPS_DAILY_JOB_NAME: str = "estimation-daily-pipeline"  # Daily estimation job name
