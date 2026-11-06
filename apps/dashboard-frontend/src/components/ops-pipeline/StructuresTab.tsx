@@ -1,15 +1,15 @@
 'use client'
 
-import { useState, useMemo, useRef, useEffect, useLayoutEffect } from 'react'
+import { useState, useMemo } from 'react'
 import { AqiCard } from '@/components/shared/AqiCard'
-import { Skeleton } from '@/components/shared/Skeleton'
-import { formatDateOnly, relativeAge } from '@/lib/time'
+import { StationHourlyChart, useStationHourly } from '@/components/shared/StationHourlyChart'
+import { formatDateOnly, hourLabel, relativeAge } from '@/lib/time'
 import { classifyPm25, pm25Color } from '@/lib/aqi'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronRight, ChevronLeft, ChevronDown, Search, MapPin } from 'lucide-react'
+import { ChevronRight, ChevronLeft, ChevronDown, ChevronsLeft, Search, MapPin } from 'lucide-react'
+import { useIsMobile } from '@/lib/useMediaQuery'
 import { SatelliteImage } from '@/components/shared/SatelliteImage'
-import { stationForecastDays, stationNowcastPoints, type StationForecastDay } from '@/lib/timeline'
-import { formatPkt } from '@/lib/time'
+import { stationForecastDays, type StationForecastDay } from '@/lib/timeline'
 import type { ForecastEntry, NowcastResponse } from '@/components/analyst-desk/types'
 
 // ── Category icons (Google Material Symbols, weight 300, filled) ──
@@ -137,146 +137,6 @@ function pm25ToBandColor(pm25: number): string {
 }
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ""
-
-// ── PM2.5 bar color (same categories as the markers) ──
-function pm25BarColor(v: number): string {
-  return pm25Color(v)
-}
-
-// ── Interactive 24h PM2.5 bar chart: hover, touch or arrow keys to read any hour ──
-function PM25BarChart({ data }: { data: { hour: string; pm25: number | null; forecast?: boolean; lead?: number }[] }) {
-  const wrapRef = useRef<HTMLDivElement>(null)
-  const [width, setWidth] = useState(0)
-  const [active, setActive] = useState<number | null>(null)
-  const tipRef = useRef<HTMLDivElement>(null)
-  const [tipWidth, setTipWidth] = useState(0)
-
-  useLayoutEffect(() => {
-    if (tipRef.current) setTipWidth(tipRef.current.offsetWidth)
-  }, [active])
-
-  useEffect(() => {
-    const el = wrapRef.current
-    if (!el) return
-    setWidth(el.clientWidth)
-    const ro = new ResizeObserver(() => setWidth(el.clientWidth))
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
-
-  const H = 150
-  const pad = { top: 28, right: 4, bottom: 22, left: 4 }
-  const vals = data.filter(d => d.pm25 != null).map(d => d.pm25 as number)
-
-  if (!vals.length) {
-    return <div ref={wrapRef} className="flex h-[150px] items-center justify-center text-xs text-slate-600">No data</div>
-  }
-
-  const maxVal = Math.ceil(Math.max(...vals, 20) / 10) * 10
-  const w = Math.max(0, width - pad.left - pad.right)
-  const h = H - pad.top - pad.bottom
-  const slot = w / data.length
-  const barW = Math.max(3, slot - 3)
-  const step = Math.max(1, Math.floor(data.length / 5))
-
-  const move = (delta: number) => {
-    setActive(cur => {
-      const start = cur ?? (delta > 0 ? -1 : data.length)
-      let i = start + delta
-      while (i >= 0 && i < data.length && data[i].pm25 == null) i += delta
-      return i >= 0 && i < data.length ? i : cur
-    })
-  }
-
-  const a = active != null ? data[active] : null
-  const tip = a && a.pm25 != null ? (() => {
-    const band = classifyPm25(a.pm25)
-    const cx = pad.left + (active as number) * slot + slot / 2
-    const left = Math.max(0, Math.min(cx - tipWidth / 2, width - tipWidth))
-    return { left, label: a.forecast ? `${a.hour}:00 (+${a.lead} h)` : `${a.hour}:00`, value: Math.round(a.pm25), band }
-  })() : null
-
-  // The dashed tail: from the last observed hour through each nowcast point
-  const cxOf = (i: number) => pad.left + i * slot + slot / 2
-  const cyOf = (v: number) => pad.top + h - Math.max(2, (v / maxVal) * h)
-  const lastObs = data.map((d, i) => ({ d, i })).filter(x => !x.d.forecast && x.d.pm25 != null).at(-1)
-  const tailIdx = data.map((d, i) => ({ d, i })).filter(x => x.d.forecast && x.d.pm25 != null)
-  const tailPath = tailIdx.length
-    ? [...(lastObs ? [lastObs] : []), ...tailIdx].map(x => `${cxOf(x.i)},${cyOf(x.d.pm25 as number)}`).join(' ')
-    : null
-
-  return (
-    <div ref={wrapRef} className="relative select-none" style={{ height: H }}>
-      {width > 0 && (
-        <svg
-          width={width}
-          height={H}
-          tabIndex={0}
-          role="img"
-          aria-label={tailIdx.length ? `Hourly PM2.5 for the last 24 hours and the expected values ${tailIdx.map(x => `${x.d.lead} hours`).join(', ')} ahead (dashed). Use the left and right arrow keys to read each hour.` : `Hourly PM2.5 for the last 24 hours. Use the left and right arrow keys to read each hour.`}
-          onKeyDown={e => {
-            if (e.key === 'ArrowRight') { e.preventDefault(); move(1) }
-            else if (e.key === 'ArrowLeft') { e.preventDefault(); move(-1) }
-            else if (e.key === 'Escape') setActive(null)
-          }}
-          onBlur={() => setActive(null)}
-          onPointerLeave={() => setActive(null)}
-          className="block outline-none focus-visible:rounded-md focus-visible:ring-2 focus-visible:ring-slate-900/30"
-        >
-          {tailPath && <polyline points={tailPath} fill="none" stroke="#475569" strokeWidth="1.5" strokeDasharray="4 3" strokeLinejoin="round" />}
-          {data.map((d, i) => {
-            const x = pad.left + i * slot + (slot - barW) / 2
-            const bh = d.pm25 == null ? 0 : Math.max(2, (d.pm25 / maxVal) * h)
-            const y = pad.top + h - bh
-            return (
-              <g key={i}>
-                {d.pm25 != null && d.forecast && (
-                  <circle
-                    cx={cxOf(i)} cy={cyOf(d.pm25)} r={Math.min(4, Math.max(2.5, barW / 2))}
-                    fill="#fff" stroke={pm25BarColor(d.pm25)} strokeWidth="2"
-                    opacity={active == null || active === i ? 1 : 0.4}
-                    style={{ transition: 'opacity 120ms' }}
-                  />
-                )}
-                {d.pm25 != null && !d.forecast && (
-                  <rect
-                    x={x} y={y} width={barW} height={bh} rx={Math.min(2.5, barW / 2)}
-                    fill={pm25BarColor(d.pm25)}
-                    opacity={active == null || active === i ? 1 : 0.4}
-                    className="bar-grow"
-                    style={{ transition: 'opacity 120ms', animationDelay: `${i * 14}ms` }}
-                  />
-                )}
-                {/* full-height hit area so thin bars are easy to hover or tap */}
-                <rect
-                  x={pad.left + i * slot} y={0} width={slot} height={H} fill="transparent"
-                  onPointerEnter={() => d.pm25 != null && setActive(i)}
-                  onPointerDown={() => d.pm25 != null && setActive(i)}
-                />
-                {(d.forecast ? i === data.length - 1 || !data[i + 1]?.forecast || i % 2 === 0 : i % step === 0) && (
-                  <text x={pad.left + i * slot + slot / 2} y={H - 6} textAnchor="middle" fontSize="11" fill={d.forecast ? '#475569' : '#64748b'} fontStyle={d.forecast ? 'italic' : undefined}>{d.forecast ? `+${d.lead}h` : d.hour}</text>
-                )}
-              </g>
-            )
-          })}
-        </svg>
-      )}
-
-      {tip && (
-        <div
-          ref={tipRef}
-          className="pointer-events-none absolute top-0 max-w-full truncate whitespace-nowrap rounded-lg bg-slate-900 px-2.5 py-1 text-xs text-white shadow-lg"
-          style={{ left: tip.left }}
-          role="status"
-        >
-          <span className="tabular-nums">{tip.label}</span>
-          <span className="mx-1.5 font-semibold tabular-nums">{tip.value} µg/m³</span>
-          <span className="opacity-80">{tip.band.label}</span>
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── Esri satellite image for station location ──
 // SatelliteImage imported from @/components/shared/SatelliteImage
@@ -938,18 +798,8 @@ interface StationDetailProps {
 }
 
 function StationDetailView({ station, selectedDate, caption, forecast, nowcast, onBack }: StationDetailProps) {
-  const { data: hourlyData, isLoading: hourlyLoading } = useQuery({
-    queryKey: ['station-hourly', station.station_id, selectedDate],
-    queryFn: async () => {
-      if (!station.station_id) return null
-      const dateParam = selectedDate ? `&date=${selectedDate}` : ''
-      const res = await fetch(`${API_BASE}/api/v1/dashboard/stations/${station.station_id}/history/pm25?hours=24${dateParam}&all_providers=true`)
-      if (!res.ok) return null
-      return res.json() as Promise<{ timestamp_pk: string; pm25: number | null }[]>
-    },
-    enabled: !!station.station_id,
-    staleTime: 5 * 60 * 1000,
-  })
+  const isMobile = useIsMobile()
+  const { observed: chartData } = useStationHourly(station, selectedDate, nowcast)
 
   const { data: overview } = useQuery({
     queryKey: ['station-overview-mini', station.station_id],
@@ -963,39 +813,9 @@ function StationDetailView({ station, selectedDate, caption, forecast, nowcast, 
     staleTime: 10 * 60 * 1000,
   })
 
-  const chartData = useMemo(() => {
-    if (!hourlyData?.length) return []
-    return hourlyData.map(d => {
-      const pk = new Date(d.timestamp_pk)
-      return {
-        hour: pk.toLocaleTimeString('en-US', { hour: '2-digit', hour12: false, timeZone: 'Asia/Karachi' }),
-        pm25: d.pm25,
-      }
-    })
-  }, [hourlyData])
-
   const forecastDays = useMemo(
     () => (forecast ? stationForecastDays(forecast.forecasts, forecast.today, station.name, station.city) : []),
     [forecast, station.name, station.city],
-  )
-  // Hourly nowcast points still ahead of now (as of opening the panel), drawn as a dashed tail after the last 24 hours
-  const [openedAt] = useState(() => Date.now())
-  const nowcastPoints = useMemo(
-    () => stationNowcastPoints(nowcast, { station_id: station.station_id, name: station.name, city: station.city })
-      .filter(p => Date.parse(p.valid_time) > openedAt),
-    [nowcast, station.station_id, station.name, station.city, openedAt],
-  )
-  const chartWithTail = useMemo(
-    () => [
-      ...chartData,
-      ...nowcastPoints.map(p => ({
-        hour: new Date(p.valid_time).toLocaleTimeString('en-US', { hour: '2-digit', hour12: false, timeZone: 'Asia/Karachi' }),
-        pm25: p.pm25,
-        forecast: true,
-        lead: p.lead,
-      })),
-    ],
-    [chartData, nowcastPoints],
   )
 
   const poll = overview?.pollutant_summary
@@ -1041,7 +861,7 @@ function StationDetailView({ station, selectedDate, caption, forecast, nowcast, 
   // One short reading of the day, instead of a paragraph of narrative
   const insight = (() => {
     if (!stats24h || !peak) return null
-    const parts = [`Peaked at ${Math.round(peak.pm25)} µg/m³ around ${peak.hour}:00.`]
+    const parts = [`Peaked at ${Math.round(peak.pm25)} µg/m³ around ${hourLabel(peak.hour)}.`]
     if (rolling7d != null) {
       const diff = stats24h.mean - rolling7d
       const pct = Math.round((Math.abs(diff) / rolling7d) * 100)
@@ -1052,17 +872,32 @@ function StationDetailView({ station, selectedDate, caption, forecast, nowcast, 
 
   return (
     <div className="flex flex-col h-full bg-white">
-      <button
-        onClick={onBack}
-        aria-label="Close station panel"
-        className="flex w-full items-center justify-center py-2 text-slate-500 hover:text-slate-900 transition-colors"
-      >
-        <ChevronDown size={22} strokeWidth={2} />
-      </button>
+      {/* Phones: the sheet closes downwards. Desktop: the panel collapses back into the left rail. */}
+      {isMobile && (
+        <button
+          onClick={onBack}
+          aria-label="Close station panel"
+          className="flex w-full items-center justify-center py-2 text-slate-500 hover:text-slate-900 transition-colors"
+        >
+          <ChevronDown size={22} strokeWidth={2} />
+        </button>
+      )}
 
-      <div className="flex-1 overflow-y-auto scrollbar-hide px-4 pb-6">
+      <div className={`flex-1 overflow-y-auto scrollbar-hide px-4 pb-6 ${isMobile ? '' : 'pt-4'}`}>
         {/* Identity */}
-        <h2 className="text-[20px] font-semibold text-slate-900 leading-snug tracking-tight">{station.name}</h2>
+        <div className="flex items-start gap-2">
+          <h2 className="min-w-0 flex-1 text-[20px] font-semibold text-slate-900 leading-snug tracking-tight">{station.name}</h2>
+          {!isMobile && (
+            <button
+              onClick={onBack}
+              aria-label="Collapse station panel"
+              title="Collapse"
+              className="-mr-1.5 mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-[background-color,color,transform] duration-150 hover:bg-slate-900/[0.06] hover:text-slate-900 active:scale-90"
+            >
+              <ChevronsLeft size={18} strokeWidth={2} />
+            </button>
+          )}
+        </div>
         <p className="mt-0.5 text-[13px] text-slate-600">
           {station.city}{provider ? `, ${provider}` : ''}
         </p>
@@ -1092,23 +927,8 @@ function StationDetailView({ station, selectedDate, caption, forecast, nowcast, 
           <span className="text-xs text-slate-600">{dateLabel}</span>
         </div>
         <div className="mt-2 -mx-1">
-          {hourlyLoading ? (
-            <div className="flex h-[150px] items-end gap-1 px-1 pb-6" aria-busy="true" aria-label="Loading chart">
-              {Array.from({ length: 24 }, (_, i) => <Skeleton key={i} className="flex-1 rounded-t-md" style={{ height: `${30 + ((i * 37) % 70)}%` }} />)}
-            </div>
-          ) : chartWithTail.length ? (
-            <PM25BarChart data={chartWithTail} />
-          ) : (
-            <div className="h-[150px] flex items-center justify-center text-xs text-slate-600">No hourly data available</div>
-          )}
+          <StationHourlyChart station={station} date={selectedDate} nowcast={nowcast} />
         </div>
-        {nowcastPoints.length > 0 && (
-          <p className="mt-1.5 text-xs leading-relaxed text-slate-600">
-            Dashed: expected hourly PM2.5 {nowcastPoints.map(p => `+${p.lead} h`).join(', ')} ahead
-            {nowcast ? `, issued ${formatPkt(nowcast.init_time)}` : ''}.
-            {nowcastPoints[0].basis === 'neighbours' ? ' Estimated from nearby stations: this station had no recent readings.' : ''}
-          </p>
-        )}
         {insight && <p className="mt-2 text-[13px] leading-relaxed text-slate-700">{insight}</p>}
 
         {/* Location */}

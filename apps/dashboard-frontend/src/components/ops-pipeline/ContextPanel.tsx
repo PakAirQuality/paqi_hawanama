@@ -2,7 +2,7 @@
 
 import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Info } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info } from 'lucide-react'
 import { AnimatePresence, m } from 'motion/react'
 import { AqiCard } from '@/components/shared/AqiCard'
 import { AnimatedNumber } from '@/components/shared/AnimatedNumber'
@@ -12,7 +12,9 @@ import { fetchDailyBrief } from './api'
 import { BAND_KEYS, bandColor, bandCounts, bandKey, bandLabel, classifyPm25, unhealthyOrWorse, BAND_SCALE_LABEL } from '@/lib/aqi'
 import { MIN_CITY_MONITORS, worstRankedCities } from '@/lib/cityRanking'
 import { formatDateOnly } from '@/lib/time'
-import { useIsMobile } from '@/lib/useMediaQuery'
+import { REPORTS_SITE } from '@/lib/reports'
+import type { NowcastResponse } from '@/components/analyst-desk/types'
+import { StationHourlyChart } from '@/components/shared/StationHourlyChart'
 import { MODEL_HELP, MODEL_LABELS, type ModelKey } from '@/lib/selection'
 
 interface OpsContextPanelProps {
@@ -36,9 +38,18 @@ interface OpsContextPanelProps {
   /** A line about the data behind the view, for today and forecast days */
   detail?: string | null
   /** Fires and forecast ramps, for today and forecast days */
-  evidence?: { fires: string; firesLabel: string; firesWarn: boolean; ramps: number } | null
+  evidence?: { fires: string; firesLabel: string; firesWarn: boolean; ramps: number; firesNote?: string | null } | null
+  /** Crop-burning season to date for the two Punjabs (fire report §12): all-satellite fires, and the NOAA-20 comparison with last year */
+  fireSeason?: { label: string; rows: { name: string; fires: number; n20: number | null; n20Last: number | null; lastYear: number | null; pct: number | null; rank: string | null }[] } | null
   /** Air quality where the visitor is: the nearest monitor, or none within range */
-  nearby?: { station: { name: string; city: string; pm25: number } | null; distKm: number | null; radiusKm: number } | null
+  nearby?: { station: { name: string; city: string; pm25: number; station_id?: string } | null; distKm: number | null; radiusKm: number } | null
+  /** The nearest monitor's hourly chart: which day's 24 hours, and the nowcast for the hours ahead */
+  nearbyChart?: { date: string | null; nowcast?: NowcastResponse }
+  /** Open the nearest monitor in the Stations panel */
+  onOpenNearby?: () => void
+  /** Card shown or tucked to the right edge; the page decides, so it can make room for other cards */
+  open: boolean
+  onOpenChange: (open: boolean) => void
 }
 
 interface Obs {
@@ -50,11 +61,9 @@ interface Obs {
   worstCities: { city: string; avg: number; count: number; lat: number; lon: number }[]
 }
 
-export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport, onFlyTo, nearby, mode = 'day', dayLabel, readingLabel = 'PM2.5 daily mean', notice, detail, evidence }: OpsContextPanelProps) {
-  const isMobile = useIsMobile()
-  const [hidden, setHidden] = useState(false)
-  const [seenMobile, setSeenMobile] = useState(false)
-  if (isMobile && !seenMobile) { setSeenMobile(true); setHidden(true) }
+export function OpsContextPanel({ selectedDate, model, onModelChange, stations, predictionStats, runReport, onFlyTo, nearby, nearbyChart, onOpenNearby, open, onOpenChange, mode = 'day', dayLabel, readingLabel = 'PM2.5 daily mean', notice, detail, evidence, fireSeason }: OpsContextPanelProps) {
+  const hidden = !open
+  const setHidden = (h: boolean) => onOpenChange(!h)
   const [showModelHelp, setShowModelHelp] = useState(false)
 
   const obs = useMemo<Obs | null>(() => {
@@ -102,9 +111,6 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
 
   const unhealthyCount = obs ? unhealthyOrWorse(obs.bands) : 0
 
-  // Show the card again when a location result arrives (it starts tucked away on phones)
-  const [seenNearby, setSeenNearby] = useState<typeof nearby>(null)
-  if (nearby && nearby !== seenNearby) { setSeenNearby(nearby); setHidden(false) }
   const total = obs?.count ?? 0
 
   return (
@@ -144,22 +150,57 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
       </div>
 
       {/* ── Headline (always visible): how many stations are unhealthy, then the five worst cities ── */}
+      <AnimatePresence initial={false}>
       {nearby && (
+        <m.div
+          key="nearby"
+          initial={{ opacity: 0, height: 0 }}
+          animate={{ opacity: 1, height: 'auto' }}
+          exit={{ opacity: 0, height: 0 }}
+          transition={{ duration: 0.3, ease: [0.2, 0.8, 0.2, 1] }}
+          className="shrink-0 overflow-hidden"
+        >
         <div className="px-4 pt-3">
           <div className="mb-1.5 text-xs font-semibold text-slate-600">Near you</div>
           {nearby.station ? (
             <AqiCard
-              className="shadow-none"
+              className="shadow-none ring-1 ring-slate-900/[0.06]"
               pm25={nearby.station.pm25}
               title={nearby.station.name}
               subtitle={`${nearby.station.city}, ${nearby.distKm != null ? (nearby.distKm < 1 ? 'under 1' : Math.round(nearby.distKm)) : ''} km away`}
               caption={readingLabel}
-            />
+            >
+              {/* The last 24 hours and the nowcast for the hours ahead (dashed) */}
+              <div className="px-3 pt-2.5 pb-2">
+                <div className="flex items-baseline justify-between px-1">
+                  <span className="text-xs font-semibold text-slate-800">
+                    Last 24 hours{nearbyChart?.nowcast ? ' and next hours' : ''}
+                  </span>
+                  {onOpenNearby && (
+                    <button
+                      onClick={onOpenNearby}
+                      className="-mr-1 inline-flex items-center gap-0.5 rounded-md px-1 py-0.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-900/[0.05] hover:text-slate-900"
+                    >
+                      Details <ChevronRight size={13} aria-hidden />
+                    </button>
+                  )}
+                </div>
+                <StationHourlyChart
+                  station={nearby.station}
+                  date={nearbyChart?.date ?? null}
+                  nowcast={nearbyChart?.nowcast}
+                  height={112}
+                  showNote={false}
+                />
+              </div>
+            </AqiCard>
           ) : (
             <p className="text-[13px] text-slate-700">No monitor within {nearby.radiusKm} km of your location.</p>
           )}
         </div>
+        </m.div>
       )}
+      </AnimatePresence>
 
       {!obs && (
         <div className="px-4 pt-3 pb-4" aria-busy="true" aria-label="Loading stations">
@@ -187,6 +228,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
               <div
                 key={k}
                 title={`${obs.bands[k]} ${bandLabel(k)}`}
+                className="transition-[width] duration-700 ease-out"
                 style={{ width: `${(obs.bands[k] / total) * 100}%`, background: bandColor(k) }}
               />
             ) : null)}
@@ -204,7 +246,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
             {rankedCities.map(c => {
               const b = classifyPm25(c.avg)
               return (
-                <li key={c.city}>
+                <m.li key={c.city} layout="position" transition={{ type: 'spring', stiffness: 380, damping: 36 }}>
                   <button
                     onClick={() => onFlyTo?.(c.lon, c.lat, 10.5)}
                     disabled={!onFlyTo}
@@ -224,7 +266,7 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
                     </span>
                     <ChevronRight size={16} className="shrink-0 text-slate-400 group-hover:text-slate-700" aria-hidden />
                   </button>
-                </li>
+                </m.li>
               )
             })}
           </ul>
@@ -233,7 +275,15 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
 
       <div>
             {/* ── Model switch: the satellite models describe past days, not forecasts ── */}
-            {!forecast && <div className="px-4 pt-3">
+            <AnimatePresence initial={false}>
+            {!forecast && <m.div
+              key="model-switch"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: 'auto' }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: 0.25, ease: [0.2, 0.8, 0.2, 1] }}
+              className="overflow-hidden"
+            ><div className="px-4 pt-3">
               <div className="flex items-center gap-1 rounded-xl bg-slate-900/[0.06] p-1" role="group" aria-label="Prediction model">
                 {([['backbone', 'Satellite'], ['support_aware', 'Enhanced']] as const).map(([key, label]) => (
                   <button
@@ -254,20 +304,31 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
                 ))}
                 <button
                   onClick={() => setShowModelHelp(v => !v)}
-                  className="rounded-lg p-1.5 text-slate-500 hover:text-slate-900"
+                  className="rounded-lg p-1.5 text-slate-500 transition-colors hover:text-slate-900"
                   aria-label="Explain model modes"
                   aria-expanded={showModelHelp}
                 >
                   <Info size={14} />
                 </button>
               </div>
-              {showModelHelp && (
-                <div className="mt-2 space-y-1 text-xs leading-snug text-slate-700">
-                  <div><span className="font-semibold">Satellite:</span> {MODEL_HELP.backbone}</div>
-                  <div><span className="font-semibold">Enhanced:</span> {MODEL_HELP.support_aware}</div>
-                </div>
-              )}
-            </div>}
+              <AnimatePresence initial={false}>
+                {showModelHelp && (
+                  <m.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.22, ease: [0.2, 0.8, 0.2, 1] }}
+                    className="overflow-hidden"
+                  >
+                    <div className="space-y-1 pt-2 text-xs leading-snug text-slate-700">
+                      <div><span className="font-semibold">Satellite:</span> {MODEL_HELP.backbone}</div>
+                      <div><span className="font-semibold">Enhanced:</span> {MODEL_HELP.support_aware}</div>
+                    </div>
+                  </m.div>
+                )}
+              </AnimatePresence>
+            </div></m.div>}
+            </AnimatePresence>
 
             <div className="pb-1 pt-3">
               <div>
@@ -285,8 +346,33 @@ export function OpsContextPanel({ selectedDate, model, onModelChange, stations, 
                 </div>
                 <div className="rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
                   <div className="text-base font-semibold tabular-nums">{evidence.ramps}</div>
-                  <div className="text-xs text-slate-600">Forecast ramp events</div>
+                  <div className="text-xs text-slate-600">Stations forecast to rise sharply</div>
                 </div>
+              </div>
+            )}
+            {evidence?.firesNote && <p className="px-4 pt-1.5 text-xs leading-snug text-amber-700">{evidence.firesNote}</p>}
+            {fireSeason && fireSeason.rows.length > 0 && (
+              <div className="mx-4 mt-3 rounded-xl bg-slate-900/[0.04] px-3 py-2.5">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-800">{fireSeason.label}</span>
+                  <a href={REPORTS_SITE} target="_blank" rel="noopener noreferrer" className="shrink-0 text-xs font-medium text-slate-600 underline-offset-2 hover:text-slate-900 hover:underline">Reports ↗</a>
+                </div>
+                <ul className="mt-1.5 space-y-1.5">
+                  {fireSeason.rows.map(r => (
+                    <li key={r.name} className="text-xs text-slate-600">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="font-medium text-slate-800">{r.name}</span>
+                        <span className="tabular-nums"><b className="font-semibold text-slate-900">{r.fires.toLocaleString('en-US')}</b> fires</span>
+                      </div>
+                      {r.n20 != null && r.n20Last != null && (
+                        <div className="tabular-nums">
+                          NOAA-20 alone: {r.n20.toLocaleString('en-US')} vs {r.n20Last.toLocaleString('en-US')} on the same dates of {r.lastYear}
+                          {r.pct != null ? ` (${r.pct > 0 ? '+' : ''}${r.pct}%)` : ''}{r.rank ? `, ${r.rank}` : ''}
+                        </div>
+                      )}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
             {!forecast && <div className="grid grid-cols-2 gap-2 px-4 pt-3">

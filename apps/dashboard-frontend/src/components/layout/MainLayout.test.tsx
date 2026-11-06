@@ -21,7 +21,7 @@ describe('MainLayout', () => {
     expect(screen.getByRole('link', { name: 'Tracker' }).getAttribute('target')).toBeNull()
   })
 
-  it('keeps Fires off the header for now (the page stays reachable by direct link)', () => {
+  it('has no Fires tab (fire trends live in the reports tool)', () => {
     render(<MainLayout><p>Page</p></MainLayout>)
     expect(screen.queryByRole('link', { name: 'Fires' })).toBeNull()
   })

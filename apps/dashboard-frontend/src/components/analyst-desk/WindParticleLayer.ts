@@ -31,10 +31,51 @@ const TRAIL_FADE = 0.985
 const SPEED_FACTOR = 0.006
 const PARTICLE_RESET_RATE = 0.001
 const LINE_WIDTH = 1.4
-const LINE_OPACITY = 0.85
+const LINE_OPACITY = 0.45
+// Particles are coloured by wind speed (m/s) on a blue-to-red ramp (matplotlib RdBu_r without its near-white
+// middle, which would vanish on the light basemap): blue for calm air, red for strong wind.
+const SPEED_BREAKS = [1, 2, 3.5, 5, 7]
+const SPEED_COLORS = ['#2166ac', '#4393c3', '#92c5de', '#f4a582', '#d6604d', '#b2182b']
 // Zoom range over which particle count scales
 const ZOOM_MIN = 3
 const ZOOM_MAX = 10
+
+/** Areas where no particles are drawn, as lon/lat polygons (rings), rasterised once to a lookup grid. */
+const MASK_DEG = 0.02
+
+class AreaMask {
+  private grid: Uint8Array
+  constructor(private w: number, private s: number, private cols: number, private rows: number, polys: number[][][][]) {
+    const c = document.createElement('canvas')
+    c.width = cols; c.height = rows
+    const ctx = c.getContext('2d', { willReadFrequently: true })!
+    ctx.beginPath()
+    for (const poly of polys) for (const ring of poly) {
+      ring.forEach(([lon, lat], i) => {
+        const x = (lon - w) / MASK_DEG, y = rows - (lat - s) / MASK_DEG
+        if (i) ctx.lineTo(x, y); else ctx.moveTo(x, y)
+      })
+      ctx.closePath()
+    }
+    ctx.fillStyle = '#000'
+    ctx.fill('evenodd')
+    const px = ctx.getImageData(0, 0, cols, rows).data
+    this.grid = new Uint8Array(cols * rows)
+    for (let i = 0; i < this.grid.length; i++) this.grid[i] = px[i * 4 + 3] > 127 ? 1 : 0
+  }
+
+  static from(polys: number[][][][]): AreaMask | null {
+    let w = Infinity, s = Infinity, e = -Infinity, n = -Infinity
+    for (const poly of polys) for (const [x, y] of poly[0]) { if (x < w) w = x; if (x > e) e = x; if (y < s) s = y; if (y > n) n = y }
+    if (!Number.isFinite(w)) return null
+    return new AreaMask(w, s, Math.ceil((e - w) / MASK_DEG) + 1, Math.ceil((n - s) / MASK_DEG) + 1, polys)
+  }
+
+  has(lon: number, lat: number): boolean {
+    const x = Math.floor((lon - this.w) / MASK_DEG), y = this.rows - 1 - Math.floor((lat - this.s) / MASK_DEG)
+    return x >= 0 && y >= 0 && x < this.cols && y < this.rows && this.grid[y * this.cols + x] === 1
+  }
+}
 
 export class WindParticleRenderer {
   private canvas: HTMLCanvasElement
@@ -50,18 +91,23 @@ export class WindParticleRenderer {
 
   // [currentX, currentY, prevX, prevY] per particle
   private particles: Float32Array
+  // Wind speed at each particle's last step, for its colour
+  private speeds: Float32Array
 
   // Visible bounds in normalized grid coords (0–1), updated on move
   private visBounds = { nxMin: 0, nxMax: 1, nyMin: 0, nyMax: 1 }
 
   private animFrame = 0
   private running = false
+  // Where particles are not drawn (Pakistan on the Tracker, which has its own smoke plumes there)
+  private mask: AreaMask | null
   private mapMoving = false
   private speedScale = 1
 
-  constructor(map: mapboxgl.Map, windImage: HTMLImageElement, meta: WindMetadata) {
+  constructor(map: mapboxgl.Map, windImage: HTMLImageElement, meta: WindMetadata, opts: { excludePolygons?: number[][][][] } = {}) {
     this.map = map
     this.meta = meta
+    this.mask = opts.excludePolygons?.length ? AreaMask.from(opts.excludePolygons) : null
 
     const isMobile = window.innerWidth < 768
     this.baseParticles = isMobile ? BASE_PARTICLES_MOBILE : BASE_PARTICLES_DESKTOP
@@ -89,6 +135,7 @@ export class WindParticleRenderer {
 
     // Allocate for max particles; activeParticles controls how many we use
     this.particles = new Float32Array(this.maxParticles * 4)
+    this.speeds = new Float32Array(this.maxParticles)
     this._updateVisibleBounds()
     this._updateActiveParticles()
     this._resetAllParticles()
@@ -126,13 +173,22 @@ export class WindParticleRenderer {
     }
   }
 
-  /** Spawn a particle within the visible viewport bounds */
+  /** Spawn a particle within the visible viewport bounds, outside the masked area when there is one */
   private _randomVisiblePos(): [number, number] {
     const { nxMin, nxMax, nyMin, nyMax } = this.visBounds
-    return [
-      nxMin + Math.random() * (nxMax - nxMin),
-      nyMin + Math.random() * (nyMax - nyMin),
-    ]
+    let pos: [number, number] = [0, 0]
+    for (let tries = 0; tries < 6; tries++) {
+      pos = [nxMin + Math.random() * (nxMax - nxMin), nyMin + Math.random() * (nyMax - nyMin)]
+      if (!this._masked(pos[0], pos[1])) break
+    }
+    return pos
+  }
+
+  /** Is a normalised grid position inside the masked area? */
+  private _masked(nx: number, ny: number): boolean {
+    if (!this.mask) return false
+    const { lon_min, lon_max, lat_min, lat_max } = this.meta
+    return this.mask.has(lon_min + nx * (lon_max - lon_min), lat_max - ny * (lat_max - lat_min))
   }
 
   private _resetAllParticles() {
@@ -267,6 +323,7 @@ export class WindParticleRenderer {
       this.particles[idx + 3] = cy
 
       const [u, v] = this._sampleWind(cx, cy)
+      this.speeds[i] = Math.hypot(u, v)
       const speed = SPEED_FACTOR * this.speedScale
       cx += (u / lonRange) * speed
       cy -= (v / latRange) * speed
@@ -299,14 +356,13 @@ export class WindParticleRenderer {
     ctx.fillStyle = 'black'
     ctx.fillRect(0, 0, w, h)
 
-    // Draw line segments
+    // Draw line segments, one path per speed class
     ctx.globalCompositeOperation = 'source-over'
     ctx.globalAlpha = LINE_OPACITY
-    ctx.strokeStyle = '#ffffff'
     ctx.lineWidth = LINE_WIDTH
     ctx.lineCap = 'round'
 
-    ctx.beginPath()
+    const paths = SPEED_COLORS.map(() => new Path2D())
     for (let i = 0; i < this.activeParticles; i++) {
       const idx = i * 4
       const cx = this.particles[idx]
@@ -315,6 +371,7 @@ export class WindParticleRenderer {
       const py = this.particles[idx + 3]
 
       if (cx === px && cy === py) continue
+      if (this._masked(cx, cy)) continue
 
       const cLon = lon_min + cx * lonRange
       const cLat = lat_max - cy * latRange
@@ -329,9 +386,14 @@ export class WindParticleRenderer {
         (pp.x < -20 || pp.x > w + 20 || pp.y < -20 || pp.y > h + 20)
       ) continue
 
-      ctx.moveTo(pp.x, pp.y)
-      ctx.lineTo(cp.x, cp.y)
+      let k = 0
+      while (k < SPEED_BREAKS.length && this.speeds[i] >= SPEED_BREAKS[k]) k++
+      paths[k].moveTo(pp.x, pp.y)
+      paths[k].lineTo(cp.x, cp.y)
     }
-    ctx.stroke()
+    paths.forEach((path, k) => {
+      ctx.strokeStyle = SPEED_COLORS[k]
+      ctx.stroke(path)
+    })
   }
 }
