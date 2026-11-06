@@ -88,6 +88,31 @@ export function trajectoryGeo(doc: TrajectoryDoc): TrajectoryGeo {
   return { members: fc(members), central: fc(central), points: fc(points), marks: fc(marks), arrows: fc(arrows), fires: fc(fires), origin: fc(origin) }
 }
 
+// ── province outlines ────────────────────────────────────────────────────────
+// The Standard basemap draws almost no boundaries at the zoom of the small figure, so the trajectory
+// maps carry their own: Pakistan's provinces and Indian Punjab–Haryana, the files the SVG uses too.
+
+const OUTLINE_FILES = ['/pakistan_adm1.geojson', '/india_pb_hr.geojson']
+let outlinesPromise: Promise<FC> | null = null
+
+function loadOutlines(): Promise<FC> {
+  outlinesPromise ??= Promise.all(OUTLINE_FILES.map(async f => {
+    const res = await fetch(f)
+    if (!res.ok) throw new Error(`${f}: ${res.status}`)
+    return res.json() as Promise<FC>
+  })).then(parts => fc(parts.flatMap(p => p.features))).catch(err => { outlinesPromise = null; throw err })
+  return outlinesPromise
+}
+
+function addOutlines(map: mapboxgl.Map, outlines: FC) {
+  if (map.getSource('traj-adm1')) return
+  map.addSource('traj-adm1', { type: 'geojson', data: outlines })
+  map.addLayer({ id: 'traj-adm1-fill', type: 'fill', source: 'traj-adm1', slot: 'middle',
+    paint: { 'fill-color': '#64748b', 'fill-opacity': 0.05 } } as mapboxgl.AnyLayer)
+  map.addLayer({ id: 'traj-adm1-line', type: 'line', source: 'traj-adm1', slot: 'middle',
+    paint: { 'line-color': '#64748b', 'line-width': ['interpolate', ['linear'], ['zoom'], 4, 0.6, 8, 1], 'line-opacity': 0.55 } } as mapboxgl.AnyLayer)
+}
+
 // ── images ───────────────────────────────────────────────────────────────────
 
 const ARROW_PX = 24
@@ -147,12 +172,14 @@ function addLayers(map: mapboxgl.Map, geo: TrajectoryGeo) {
     layout: { 'icon-image': ['concat', 'traj-arrow-', ['get', 'level']], 'icon-rotate': ['get', 'bearing'], 'icon-rotation-alignment': 'map',
       'icon-size': 0.9, 'icon-allow-overlap': true, 'icon-ignore-placement': true } })
   add({ id: 'traj-marks', type: 'symbol', source: SRC.marks,
-    layout: { 'text-field': ['get', 'label'], 'text-font': TEXT_FONT, 'text-size': 11, 'text-anchor': 'bottom-left', 'text-offset': [0.5, -0.4], 'text-allow-overlap': true },
+    // the hour marks always draw and never claim space: the city names around them stay on the small map
+    layout: { 'text-field': ['get', 'label'], 'text-font': TEXT_FONT, 'text-size': 11, 'text-anchor': 'bottom-left', 'text-offset': [0.5, -0.4], 'text-allow-overlap': true, 'text-ignore-placement': true },
     paint: { 'text-color': '#334155', ...HALO } })
   add({ id: 'traj-origin', type: 'circle', source: SRC.origin,
     paint: { 'circle-color': '#0f172a', 'circle-radius': 5, 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2 } })
+  // the origin label picks whichever side keeps it inside the view (the origin is often at an edge)
   add({ id: 'traj-origin-label', type: 'symbol', source: SRC.origin,
-    layout: { 'text-field': ['get', 'label'], 'text-font': TEXT_FONT, 'text-size': 12.5, 'text-anchor': 'left', 'text-offset': [0.8, 0], 'text-allow-overlap': true },
+    layout: { 'text-field': ['get', 'label'], 'text-font': TEXT_FONT, 'text-size': 12.5, 'text-variable-anchor': ['left', 'right', 'top', 'bottom'], 'text-radial-offset': 0.7, 'text-justify': 'auto', 'text-allow-overlap': true, 'text-ignore-placement': true },
     paint: { 'text-color': '#0f172a', ...HALO } })
 }
 
@@ -199,18 +226,30 @@ function addPopups(map: mapboxgl.Map, backward: boolean) {
   show('traj-fires-icon', fireHtml)
 }
 
-/** Draws the document on the map once it has loaded and keeps the level filter in step with `visible`. */
-export function useTrajectoryLayers(map: mapboxgl.Map | null, loaded: boolean, doc: TrajectoryDoc | undefined, visible: string[]) {
+/** Draws the document on the map once it has loaded and keeps the level filter in step with `visible`; `popups` false for a preview nobody hovers. */
+export function useTrajectoryLayers(map: mapboxgl.Map | null, loaded: boolean, doc: TrajectoryDoc | undefined, visible: string[], popups = true) {
   useEffect(() => {
     if (!map || !loaded || !doc) return
     try {
       ensureImages(map)
       addLayers(map, trajectoryGeo(doc))
-      addPopups(map, doc.direction === 'backward')
+      if (popups) addPopups(map, doc.direction === 'backward')
     } catch (err) {
       console.warn('[trajectory] layers not added', err)
     }
-  }, [map, loaded, doc])
+    // the origin carries its own label: drop the basemap tuning's city label for it (otherwise "Lahore" twice)
+    const cities = map.getLayer('hawa-cities')
+    if (cities && doc.origin.label) {
+      const own = map.getFilter('hawa-cities') as unknown[] | undefined
+      const notOrigin = ['!=', ['get', 'name'], doc.origin.label]
+      map.setFilter('hawa-cities', (own ? ['all', own, notOrigin] : notOrigin) as unknown as mapboxgl.FilterSpecification)
+    }
+    let alive = true
+    loadOutlines()
+      .then(outlines => { if (alive && map.getLayer('traj-members-line')) addOutlines(map, outlines) })
+      .catch(err => console.warn('[trajectory] outlines not drawn', err))
+    return () => { alive = false }
+  }, [map, loaded, doc, popups])
 
   useEffect(() => {
     if (!map || !loaded || !map.getLayer('traj-members-line')) return
