@@ -300,6 +300,15 @@ MODEL_FALLBACK_CHAIN = [
 # Thinking effort per model family. Gemini 3's default (high) thinking spent ~5 s per call
 # deciding which tool to use; low keeps Pro's answers at a fraction of the latency.
 # Gemini 3 takes a thinking level, Gemini 2.5 a token budget.
+GEMINI_API_VERSION = "v1beta"      # the preview models (gemini-3.1-pro-preview) exist only on v1beta; newer google-genai defaults to v1
+
+
+def _genai_client(api_key: str):
+    """The Gemini Developer API client pinned to v1beta, so a library upgrade cannot move us to v1 (404 for preview models)."""
+    from google.genai import Client
+    return Client(vertexai=False, api_key=api_key, http_options={"api_version": GEMINI_API_VERSION})
+
+
 def _thinking_config(model_name: str) -> dict:
     if model_name.startswith("gemini-3"):
         return {"thinking_level": "low"}
@@ -335,7 +344,7 @@ def get_agent(model_name: str | None = None):
     name = model_name or "gemini-3.1-pro-preview"
     model = GoogleModel(
         name,
-        provider=GoogleProvider(api_key=api_key),
+        provider=GoogleProvider(client=_genai_client(api_key)),
         settings=GoogleModelSettings(google_thinking_config=_thinking_config(name)),
     )
 

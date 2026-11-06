@@ -58,3 +58,29 @@ def test_trajectory_action_comes_from_this_turns_tool_return():
     bad = {"data": {"status": "unavailable", "message": "too old"}}
     assert copilot.trajectory_action([ModelRequest(parts=[ToolReturnPart(tool_name="aq_trajectory", content=bad, tool_call_id="3")])]) is None
     assert copilot.trajectory_action([]) is None and copilot.trajectory_action(None) is None
+
+
+async def test_a_retired_model_falls_back_to_the_next_one(monkeypatch, caplog):
+    """gemini-3.1-pro-preview vanished from API v1 on 2026-11-06 and every answer died; a 404 must try the next model."""
+    from pydantic_ai.exceptions import ModelHTTPError
+    seen = []
+    monkeypatch.setattr(copilot, "get_agent", lambda *a, **k: k.get("model_name", copilot.MODEL_FALLBACK_CHAIN[0]))
+
+    async def run_one(agent):
+        seen.append(agent)
+        if agent == copilot.MODEL_FALLBACK_CHAIN[0]:
+            raise ModelHTTPError(status_code=404, model_name=agent, body={"error": {"code": 404, "message": "models/x is not found for API version v1"}})
+        yield copilot._sse_event({"type": "text", "content": "answer from " + agent})
+
+    events = _events([c async for c in copilot._stream_with_fallback(run_one, "203.0.113.9", "copilot chat")])
+    assert seen == copilot.MODEL_FALLBACK_CHAIN[:2]
+    assert events == [{"type": "text", "content": "answer from " + copilot.MODEL_FALLBACK_CHAIN[1]}, {"type": "done"}]
+    assert "unavailable, falling back to" in caplog.text and "Traceback" not in caplog.text
+    assert copilot._is_model_unavailable(RuntimeError("status_code: 404, model_name: x")) and not copilot._is_model_unavailable(RuntimeError("boom"))
+
+
+def test_gemini_client_is_pinned_to_v1beta():
+    """The preview models exist only on v1beta; a google-genai upgrade must not move the copilot to v1."""
+    from app.services.copilot import agent as agent_mod
+    client = agent_mod._genai_client("not-a-real-key")
+    assert agent_mod.GEMINI_API_VERSION == "v1beta" and client._api_client._http_options.api_version == "v1beta"

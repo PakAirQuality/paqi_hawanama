@@ -51,6 +51,16 @@ def _is_rate_limit_error(exc: Exception) -> bool:
     return "429" in exc_str or "resource_exhausted" in exc_str or "rate limit" in exc_str or "rate-limit" in exc_str
 
 
+def _is_model_unavailable(exc: Exception) -> bool:
+    """True when the model itself is gone (404 / not found): a retired preview must not take the copilot down."""
+    exc_str = str(exc).lower()
+    return type(exc).__name__ == "ModelNotFoundError" or "status_code: 404" in exc_str or "is not found for api version" in exc_str
+
+
+def _should_fall_back(exc: Exception) -> bool:
+    return _is_rate_limit_error(exc) or _is_model_unavailable(exc)
+
+
 class SelectionLocation(BaseModel):
     type: str = Field(default="national", max_length=20)      # national | city | station
     id: str = Field(default="", max_length=80)
@@ -169,8 +179,9 @@ async def _stream_with_fallback(run_one, ip: str, label: str):
             yield _sse_event({"type": "error", "content": TOO_MUCH_DATA_MSG})
             break
         except Exception as e:
-            if _is_rate_limit_error(e) and i < len(MODEL_FALLBACK_CHAIN) - 1:
-                logger.warning("%s: model %s rate-limited, falling back to %s", label, model_name, MODEL_FALLBACK_CHAIN[i + 1])
+            if _should_fall_back(e) and i < len(MODEL_FALLBACK_CHAIN) - 1:
+                logger.warning("%s: model %s %s, falling back to %s", label, model_name,
+                               "unavailable" if _is_model_unavailable(e) else "rate-limited", MODEL_FALLBACK_CHAIN[i + 1])
                 continue
             logger.error("%s error (%s)", label, type(e).__name__, exc_info=True)
             yield _sse_event({"type": "error", "content": "An internal error occurred."})
