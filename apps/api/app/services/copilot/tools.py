@@ -1239,8 +1239,8 @@ async def aq_trajectory(
     hours = max(6, min(int(hours or 72), fk.MAX_HOURS))
 
     _update_session(ctx, tool="aq_trajectory", focus_type="city", focused_city=name, entities=[name], historical_date=date or None)
-    followups = [f"Which fires lie along that path?", f"What is the smoke outlook for {name}?" if direction == "backward" else f"Where did {name}'s air come from?",
-                 f"How does this season's burning compare with last year?"]
+    followups = ["Which fires lie along that path?", f"What is the smoke outlook for {name}?" if direction == "backward" else f"Where did {name}'s air come from?",
+                 "How does this season's burning compare with last year?"]
 
     # 1. a HYSPLIT run for this receptor and hour, when the runner has produced one
     try:
@@ -1441,3 +1441,168 @@ async def aq_period_stats(
     followups = [f"Which was the worst month for {label}?", f"Compare {label} with the previous year",
                  f"How many stations contributed in {label}?"]
     return {"date": _effective_date(ctx), "data": data, "followups": followups}
+
+
+# ── Other pollutants and satellite columns ───────────────────────────────────
+
+async def aq_pollutant_stats(
+    ctx: RunContext[CopilotSession],
+    pollutant: str = "",
+    entity: str = "city",
+    name: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    bucket: str = "day",
+) -> dict:
+    """Station statistics for a pollutant other than PM2.5 (PM10, NO2, SO2, O3, CO) over a period:
+    daily, monthly, yearly or whole-range means for a station, city, province or the country, on
+    Pakistan calendar days, with the US-EPA sub-index where the provider attested the unit.
+
+    Use for "NO2 in Lahore last week", "SO2 at Punjab EPA stations", "PM10 this month", "ozone
+    in Islamabad in May". For PM2.5 use aq_period_stats. Gases come mainly from the Punjab EPA
+    monitors (µg/m³, CO in mg/m³) and the IQAir network (unit not attested, so no sub-index):
+    quote the unit line and the sources the tool returns, and never convert an unattested value.
+
+    Args:
+        pollutant: "pm10", "no2", "so2", "o3" or "co" (empty: the session's pollutant, else PM2.5 is refused here).
+        entity: "station", "city", "province" or "national".
+        name: Station, city or province name (empty for national).
+        start_date: YYYY-MM-DD, YYYY-MM or YYYY (inclusive; default the last 30 days).
+        end_date: YYYY-MM-DD, YYYY-MM or YYYY (inclusive, default today).
+        bucket: "day", "month", "year" or "all" (one row for the whole range). Max 120 buckets.
+    """
+    from app.services.aqi.multi import POLLUTANT_LABELS, SCALES, sub_index
+    from app.services.copilot.station_queries import period_stats
+
+    pol = (pollutant or getattr(ctx.deps, "pollutant", "") or "").lower().replace(".", "").replace("_", "")
+    if pol in ("", "pm25"):
+        return {"data": {"message": "aq_pollutant_stats is for PM10, NO2, SO2, O3 and CO; PM2.5 statistics come from aq_period_stats."},
+                "followups": []}
+    db = await _get_db()
+    try:
+        data = await period_stats(db, entity=entity, name=name, start=start_date, end=end_date, bucket=bucket, pollutant=pol)
+    finally:
+        await db.close()
+    ent = data.get("entity", {}) if isinstance(data, dict) else {}
+    if isinstance(data, dict) and data.get("rows"):
+        # one attested unit -> a sub-index on each bucket mean; mixed or missing units -> values as reported, no index
+        units = {u["unit"] for u in data.get("units_by_source", []) if u.get("unit")}
+        unattested = sum(u["n_rows"] for u in data.get("units_by_source", []) if not u.get("unit"))
+        unit = next(iter(units)) if len(units) == 1 and not unattested else None
+        for row in data["rows"]:
+            row["sub_index"] = sub_index(pol, row.get("mean"), unit)
+        data["sub_index_basis"] = (f"US-EPA {SCALES[pol]['basis']} of each bucket, from the attested unit {unit}" if unit
+                                   else "no sub-index: the rows mix units or the providers did not attest one")
+    _update_session(ctx, tool="aq_pollutant_stats",
+                    focus_type=ent.get("kind") if ent.get("kind") in ("city", "province", "national") else None,
+                    focused_city=ent.get("name") if ent.get("kind") == "city" else None,
+                    entities=[ent.get("name")] if ent.get("name") else [])
+    label = ent.get("name") or name or "Pakistan"
+    lab = POLLUTANT_LABELS.get(pol, pol.upper())
+    basis = {"description": f"{lab} from the readings table: reporting-station means of station daily means (≥ 6 valid hours per Pakistan day)",
+             "sources": [f"{u['source']}: {u['n_rows']} hourly rows, unit {u['unit'] or 'not attested'}" for u in (data.get("units_by_source") or [])] if isinstance(data, dict) else [],
+             "limitations": ["gas units are what each provider reported; a value without an attested unit is quoted as reported and gets no sub-index",
+                             "the IQAir network's gases are not calibrated reference measurements; Punjab EPA monitors are regulatory-grade"]}
+    followups = [f"How does {lab} in {label} compare with PM2.5 over the same days?", f"Which stations reported {lab} in {label}?",
+                 f"What did the satellite {lab if pol in ('no2', 'so2', 'o3', 'co') else 'aerosol'} column show over {label}?"]
+    return {"date": _effective_date(ctx), "data": data, "basis": basis, "followups": followups}
+
+
+async def aq_satellite_columns(
+    ctx: RunContext[CopilotSession],
+    place: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    products: str = "",
+    compare_place: str = "",
+    compare_years: int = 0,
+) -> dict:
+    """Satellite column amounts over a region from Sentinel-5P TROPOMI (NO2, CO, SO2, O3, HCHO
+    columns, UV aerosol index) and MODIS MAIAC aerosol optical depth: window means with coverage,
+    the anomaly against the day-of-year climatology (z and percent of normal), the same window in
+    earlier years, and a naive comparison with another region. Archive from 2020; recent days are
+    added daily (TROPOMI lags days to two weeks).
+
+    Use for "was NO2 over Lahore above normal this month", "how does the NO2 column over Punjab
+    compare with Indian Punjab", "aerosol optical depth over Karachi in November", "is there an
+    SO2 signal over Quetta". Columns are not surface concentrations: report percent of normal and
+    z, name the coverage, and call the aerosol index "absorbing aerosol (dust, ash or smoke)".
+
+    Args:
+        place: City, province, "Pakistan", "Indian Punjab", "eastern Afghanistan", "Thar" (default Pakistan).
+        start_date: YYYY-MM-DD, YYYY-MM or YYYY (default the 14 days up to end_date).
+        end_date: YYYY-MM-DD, YYYY-MM or YYYY (default the last day in the archive).
+        products: Comma list of NO2, CO, SO2, O3, HCHO, AAI, AOD or "all" (default NO2, CO, SO2, HCHO, AAI, AOD).
+        compare_place: Another region for a naive ratio of window means.
+        compare_years: Also give the same window 1..3 years earlier.
+    """
+    from app.services.satellite_copilot import columns_summary, parse_day, parse_products
+    from app.services.satellite_series import sat_store
+
+    try:
+        d0 = parse_day(start_date)
+        d1 = parse_day(end_date, end=True)
+    except ValueError:
+        return {"data": {"message": "Dates must be YYYY-MM-DD, YYYY-MM or YYYY."}, "followups": []}
+    store = sat_store()
+    data = await asyncio.to_thread(columns_summary, store, place=place, start=d0, end=d1, products=parse_products(products),
+                                   compare_place=compare_place, compare_years=max(0, min(int(compare_years or 0), 3)))
+    reg = data.get("region", {}) if isinstance(data, dict) else {}
+    _update_session(ctx, tool="aq_satellite_columns", entities=[reg.get("label")] if reg.get("label") else [])
+    label = reg.get("label") or place or "Pakistan"
+    basis = {"description": "satellite column amounts reduced to the region (valid native pixels only), anomalies against the "
+                            "2020–2025 day-of-year climatology with the target season left out",
+             "sources": list((data.get("sources") or {}).values()) if isinstance(data, dict) else [],
+             "limitations": list(data.get("caveats") or []) if isinstance(data, dict) else []}
+    followups = [f"What did the rule-adjudicated findings say about {label}?", f"How does {label} compare with the same window last year?",
+                 f"What were the station readings in {label} over those days?"]
+    return {"date": _effective_date(ctx), "data": data, "basis": basis, "followups": followups}
+
+
+async def aq_observational_findings(
+    ctx: RunContext[CopilotSession],
+    place: str = "",
+    start_date: str = "",
+    end_date: str = "",
+    claim_types: str = "",
+) -> dict:
+    """Rule-adjudicated observational findings from the atmospheric investigation records (satellite
+    columns and aerosol, meteorology, trajectories, fires): Lahore's Oct–Dec 2022 episodes and the
+    matched city-versus-city and year-versus-year comparisons of AOD, NO2, CO and HCHO for Lahore,
+    Karachi, Islamabad/Rawalpindi, Peshawar, Faisalabad, Multan and Quetta, 2020–2025.
+
+    Use for "what did the satellites show over Lahore in November 2022", "is Lahore's NO2 really
+    higher than Karachi's once weather is matched", "was the smoke transport consistent", "what do
+    the observations establish". Each finding answers one question with a verdict from fixed rules;
+    say "supported / not supported by the evidence", flag threshold-sensitive ones, and close with
+    "these describe what the data show, not how much any source contributed".
+
+    Args:
+        place: City (Lahore, Karachi, Islamabad, Peshawar, Faisalabad, Multan, Quetta); empty for all.
+        start_date: YYYY-MM-DD, YYYY-MM or YYYY; findings whose window overlaps [start, end] are returned.
+        end_date: YYYY-MM-DD, YYYY-MM or YYYY.
+        claim_types: Comma list to narrow: column, aod, absorbing, type, smoke, transport, contrast, equivalence, sampling, episode, stagnation, ventilation, fire.
+    """
+    from app.services.satellite_copilot import findings_for, parse_day
+    from app.services.satellite_series import sat_store
+
+    try:
+        d0 = parse_day(start_date)
+        d1 = parse_day(end_date, end=True)
+    except ValueError:
+        return {"data": {"message": "Dates must be YYYY-MM-DD, YYYY-MM or YYYY."}, "followups": []}
+    store = sat_store()
+    findings = await asyncio.to_thread(store.adjudicated)
+    if not findings:
+        return {"data": {"message": "The adjudicated findings are not available on this deployment yet."}, "followups": []}
+    data = findings_for(findings, place=place, start=d0, end=d1, claim_types=claim_types)
+    _update_session(ctx, tool="aq_observational_findings", entities=[place] if place else [])
+    basis = {"description": "atmospheric investigation engine records (air_copilot atminvest), rule-adjudicated verdicts from cited evidence",
+             "sources": ["TROPOMI NRTI/OFFL L3 columns and aerosol index", "MAIAC AOD (strict QA)", "ERA5 meteorology",
+                         "HYSPLIT trajectories", "FIRMS fires", "station PM2.5"],
+             "limitations": ["observational findings describe what the data show, not how much any source contributed",
+                             "a threshold-sensitive finding changes verdict under alternative thresholds"]}
+    label = place or "these cities"
+    followups = [f"What do the satellite columns show over {label} now?", f"Which findings for {label} are still open?",
+                 f"How does {label} compare with Karachi once weather is matched?"]
+    return {"date": _effective_date(ctx), "data": data, "basis": basis, "followups": followups}
