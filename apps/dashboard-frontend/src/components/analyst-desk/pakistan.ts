@@ -51,6 +51,33 @@ export function isInsidePakistan(lng: number, lat: number): boolean {
   return false
 }
 
+/**
+ * Distance in km from a point to Pakistan's border (0 inside). Planar distance to each border
+ * segment, with longitude scaled by the latitude's cosine: within about 1% at these latitudes,
+ * plenty for the map's cross-border cut-off. Infinity until the boundary has loaded.
+ */
+export function distanceToPakistanKm(lng: number, lat: number): number {
+  if (!pakMultiPoly?.length) return Infinity
+  if (isInsidePakistan(lng, lat)) return 0
+  const kx = 111.32 * Math.cos((lat * Math.PI) / 180), ky = 110.57
+  let best = Infinity
+  for (const polygon of pakMultiPoly) {
+    const ring = polygon[0]
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+      const ax = (ring[j][0] - lng) * kx, ay = (ring[j][1] - lat) * ky
+      const bx = (ring[i][0] - lng) * kx, by = (ring[i][1] - lat) * ky
+      const dx = bx - ax, dy = by - ay
+      const len2 = dx * dx + dy * dy
+      // Closest point on segment AB to the origin (the fire)
+      const t = len2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / len2)) : 0
+      const px = ax + t * dx, py = ay + t * dy
+      const d2 = px * px + py * py
+      if (d2 < best) best = d2
+    }
+  }
+  return Math.sqrt(best)
+}
+
 export function isPakBoundaryLoaded(): boolean {
   return pakMultiPoly != null && pakMultiPoly.length > 0
 }

@@ -10,7 +10,6 @@ import { LazyMotion, MotionConfig, domMax, m } from 'motion/react'
 // Hidden modules stay open by direct link, with no tab in the header
 const modules = [
   { id: 'aqi-tracker', name: 'Tracker', href: '/' },
-  { id: 'fires', name: 'Fires', href: '/fires', hidden: true },   // open by direct link for now
   { id: 'stations', name: 'Stations', href: '/stations', hidden: true },
   { id: 'data-quality', name: 'Data Quality', href: '/data-quality', hidden: true },
 ]
@@ -36,7 +35,8 @@ export function MainLayout({ children }: { children: React.ReactNode }) {
       <header className="shrink-0 z-50 bg-white border-slate-200">
         <div className="flex items-center h-14 px-3 sm:px-4 lg:px-6 gap-2 sm:gap-4 lg:gap-6">
           <Link href="/" className="flex items-center gap-2.5 shrink-0 rounded-lg" aria-label="Hawanama home">
-            <img src="/logo-cropped.png" alt="" className="h-8 w-8 rounded-lg" />
+            {/* Square mark with its own margin: the calligraphy's stroke tips and dots are never clipped */}
+            <img src="/logo-mark.png" alt="" width={36} height={36} className="h-9 w-9 object-contain" />
             <span className="text-[15px] font-semibold tracking-tight text-slate-900 hidden sm:block">Hawanama</span>
           </Link>
 

@@ -1,4 +1,6 @@
-// Fire trends page: fetchers and response types for /api/v1/fires (public, read-only, cached).
+// Fetchers and response types for /api/v1/fires (public, read-only, cached), used by the Tracker map
+// (smoke outlook, persistent sources, season figures) and the chat's trajectory map. Fire trends
+// themselves are published in the reports tool, not as a Hawanama page.
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? ''
 export const FIRES_API = `${API_BASE}/api/v1/fires`
@@ -365,6 +367,28 @@ export interface CityOutlookResponse {
 }
 
 export const fetchCityOutlook = (city: string) => getJson<CityOutlookResponse>(`/outlook?city=${encodeURIComponent(city)}`)
+
+/** Tomorrow (D+1) for every city in the outlook, as the Tracker map draws it. */
+export interface OutlookCityD1 {
+  band: OutlookBand
+  upwind_load_mw: number
+  by_country?: Record<string, number>
+  fires_in_cone?: number
+  from_compass: string | null
+}
+
+export interface OutlookAllResponse {
+  status: 'ok' | 'stale' | 'unavailable'
+  message?: string
+  generated_at?: string
+  model?: string
+  fires_as_of?: { days: string[]; observation_period?: { start: string; end: string } | null; satellites?: string[] }
+  cities?: { city: string; province: string | null; lat: number; lon: number; d1: OutlookCityD1 | null }[]
+  summary?: { lead: string; cities_by_band: Partial<Record<OutlookBand, string[]>>; n_cities: number }
+  caveats?: string[]
+}
+
+export const fetchOutlookAll = () => getJson<OutlookAllResponse>('/outlook')
 
 // ── on-demand trajectory (drawn inside the copilot chat) ─────────────────────
 

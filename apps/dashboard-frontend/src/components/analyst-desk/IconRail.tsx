@@ -1,10 +1,10 @@
 'use client'
 
-import { MessageCircle, BarChart3, Radio, Building2, Flame, Layers } from 'lucide-react'
+import { MessageCircle, BarChart3, Radio, Building2, Layers } from 'lucide-react'
 import { m } from 'motion/react'
 import Link from 'next/link'
 
-export type RailTab = 'chat' | 'analytics' | 'stations' | 'sources' | 'fires' | 'layers'
+export type RailTab = 'chat' | 'analytics' | 'stations' | 'sources' | 'layers'
 
 interface IconRailProps {
   activeTab: RailTab | null
@@ -18,7 +18,6 @@ const ALL_TABS: { id: RailTab; icon: typeof MessageCircle; label: string; href?:
   { id: 'analytics', icon: BarChart3, label: 'Analytics' },
   { id: 'stations', icon: Radio, label: 'Stations' },
   { id: 'sources', icon: Building2, label: 'Sources' },
-  { id: 'fires', icon: Flame, label: 'Fires', href: '/fires' },
   { id: 'layers', icon: Layers, label: 'Layers' },
 ]
 

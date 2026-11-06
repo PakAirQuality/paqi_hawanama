@@ -122,6 +122,15 @@ export function bandColor(key: string | null | undefined): string {
   return bandByKey(key).color
 }
 
+/** Bands whose cards and map markers carry white figures (a design choice for the large numbers;
+    small text elsewhere keeps `textColor`, which meets 4.5:1 contrast). */
+const WHITE_FIGURE_BANDS = new Set(['unhealthy', 'very_unhealthy', 'hazardous'])
+
+/** Text colour for AQI cards and map markers: white on red, purple and brown, dark otherwise. */
+export function cardTextColor(key: string | null | undefined): string {
+  return WHITE_FIGURE_BANDS.has(bandByKey(key).key) ? '#ffffff' : bandByKey(key).textColor
+}
+
 export function bandLabel(key: string | null | undefined, short = false): string {
   const b = bandByKey(key)
   return short ? b.shortLabel : b.label

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { AnimatePresence, m } from 'motion/react'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react'
 
 interface DatePickerProps {
   /** Dates that can be chosen, as YYYY-MM-DD */
@@ -61,15 +61,30 @@ export function DatePicker({ dates, value, onChange, label }: DatePickerProps) {
   const monthLabel = new Date(year, month, 1).toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
 
   return (
-    <div ref={rootRef} className="relative min-w-0 lg:min-w-[116px] max-lg:flex-1">
+    <div ref={rootRef} className="relative shrink-0">
       <button
         onClick={() => setOpen(v => !v)}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={`Date, ${label}. Change date`}
-        className="w-full truncate rounded-full px-1 py-2 md:py-1.5 lg:px-3 text-center text-[13px] font-semibold tabular-nums text-slate-900 transition-colors hover:bg-slate-900/[0.06] md:px-3"
+        className={`flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1.5 text-[13px] font-semibold tabular-nums text-slate-900 transition-[background-color,transform] duration-150 hover:bg-slate-900/[0.06] active:scale-[0.97] ${open ? 'bg-slate-900/[0.06]' : ''}`}
       >
-        {label}
+        <CalendarDays size={14} className="shrink-0 text-slate-500" aria-hidden />
+        {/* The new label slides in over the old one */}
+        <span className="relative inline-grid overflow-hidden">
+          <AnimatePresence mode="popLayout" initial={false}>
+            <m.span
+              key={label}
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.18, ease: [0.2, 0.8, 0.2, 1] }}
+              className="col-start-1 row-start-1"
+            >
+              {label}
+            </m.span>
+          </AnimatePresence>
+        </span>
       </button>
 
       <AnimatePresence>

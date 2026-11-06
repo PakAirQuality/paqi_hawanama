@@ -1,7 +1,7 @@
 'use client'
 
 import { Droplets, Navigation, Thermometer } from 'lucide-react'
-import { classifyPm25, pm25ToAqi, type BandKey } from '@/lib/aqi'
+import { cardTextColor, classifyPm25, pm25ToAqi, type BandKey } from '@/lib/aqi'
 import { AnimatedNumber } from './AnimatedNumber'
 
 interface Weather {
@@ -19,6 +19,8 @@ interface AqiCardProps {
   caption?: string
   weather?: Weather
   className?: string
+  /** Extra content on a white footer under the reading (a chart, a link) */
+  children?: React.ReactNode
 }
 
 const GAUGE_ORDER: BandKey[] = ['good', 'moderate', 'unhealthy_sensitive', 'unhealthy', 'very_unhealthy', 'hazardous']
@@ -29,7 +31,7 @@ function polar(cx: number, cy: number, r: number, deg: number): [number, number]
 }
 
 /** Six-segment dial: the current band is solid, the others are faint, and the needle points into the current band. */
-function GaugeIcon({ band, aqi, color }: { band: BandKey; aqi: number | null; color: string }) {
+export function GaugeIcon({ band, aqi, color }: { band: BandKey; aqi: number | null; color: string }) {
   const idx = Math.max(0, GAUGE_ORDER.indexOf(band))
   const cx = 32, cy = 36, r = 24
   const seg = 180 / GAUGE_ORDER.length
@@ -64,36 +66,35 @@ function GaugeIcon({ band, aqi, color }: { band: BandKey; aqi: number | null; co
   )
 }
 
-/** Large AQI card: coloured by band, US AQI tile, category, main pollutant and an optional weather row. */
-export function AqiCard({ pm25, title, subtitle, caption = 'Main pollutant: PM2.5', weather, className = '' }: AqiCardProps) {
+/** Large AQI card: coloured by band; the US AQI, its category and a dial read as one line of type, no tiles or pills. */
+export function AqiCard({ pm25, title, subtitle, caption = 'Main pollutant: PM2.5', weather, className = '', children }: AqiCardProps) {
   const band = classifyPm25(pm25)
   const aqi = pm25ToAqi(pm25)
-  const fg = band.textColor
+  const fg = cardTextColor(band.key)
   const hasWeather = weather && (weather.tempC != null || weather.windKmh != null || weather.humidity != null)
 
   return (
     <div className={`overflow-hidden rounded-2xl shadow-lg ${className}`} style={{ background: band.color, color: fg }}>
       {(title || subtitle) && (
-        <div className="px-4 pt-3">
+        <div className="px-4 pt-3.5">
           {title && <div className="text-sm font-semibold leading-tight">{title}</div>}
-          {subtitle && <div className="text-xs opacity-80">{subtitle}</div>}
+          {subtitle && <div className="mt-0.5 text-xs opacity-75">{subtitle}</div>}
         </div>
       )}
-      <div className="flex items-center gap-4 px-4 pt-3 pb-3">
-        <div
-          className="shrink-0 rounded-xl px-3 py-2 text-center"
-          style={{ background: fg === '#ffffff' ? 'rgba(255,255,255,0.22)' : 'rgba(255,255,255,0.62)' }}
-        >
-          <div className="text-3xl font-semibold leading-none tabular-nums">{aqi != null ? <AnimatedNumber value={aqi} /> : '–'}</div>
-          <div className="mt-1 text-xs font-medium">US AQI</div>
+      <div className="flex items-center gap-3.5 px-4 pt-3 pb-2.5">
+        <div className="shrink-0">
+          <div className="text-[44px] font-semibold leading-[0.9] tracking-tight tabular-nums">{aqi != null ? <AnimatedNumber value={aqi} /> : '–'}</div>
+          <div className="mt-1 text-[11px] font-semibold uppercase tracking-[0.06em] opacity-70">US AQI</div>
         </div>
-        <div className="min-w-0 flex-1 text-lg font-medium leading-tight">{band.label}</div>
-        <GaugeIcon band={band.key} aqi={aqi} color="#ffffff" />
+        {/* Long categories ("Unhealthy for Sensitive Groups") step down a size and wrap evenly */}
+        <div className={`ml-1 min-w-0 flex-1 font-semibold text-balance ${band.label.length > 16 ? 'text-[14px] leading-snug' : 'text-[17px] leading-tight'}`}>{band.label}</div>
+        <GaugeIcon band={band.key} aqi={aqi} color={fg === '#ffffff' ? '#ffffff' : '#0f172a'} />
       </div>
-      <div className="flex items-baseline justify-between gap-3 px-4 py-3 text-sm">
-        <span>{caption}</span>
+      <div className="flex items-baseline justify-between gap-3 px-4 pt-0.5 pb-3 text-xs">
+        <span className="opacity-75">{caption}</span>
         <span className="font-semibold tabular-nums"><AnimatedNumber value={Math.round(pm25)} /> µg/m³</span>
       </div>
+      {children && <div className="bg-white text-slate-900">{children}</div>}
       {hasWeather && (
         <div className="flex items-center justify-between bg-white px-4 py-2.5 text-sm text-slate-900 tabular-nums">
           {weather!.tempC != null && (

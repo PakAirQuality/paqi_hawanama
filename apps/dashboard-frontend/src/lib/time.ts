@@ -32,16 +32,28 @@ export function formatDateOnly(dateStr: string, opts: Intl.DateTimeFormatOptions
   return parseDateOnly(dateStr).toLocaleDateString('en-US', opts)
 }
 
-/** "17 Oct 2026, 14:00 PKT" for a UTC timestamp. */
+/** "17 Oct 2026, 2:00 pm PKT" for a UTC timestamp (12-hour clock, so 1:21 am is never misread). */
 export function formatPkt(instant: Date | string | null | undefined, withSeconds = false): string {
   if (!instant) return '—'
   const d = typeof instant === 'string' ? new Date(instant) : instant
   if (Number.isNaN(d.getTime())) return '—'
   const s = d.toLocaleString('en-GB', {
-    timeZone: PK_TZ, day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-    ...(withSeconds ? { second: '2-digit' } : {}), hour12: false,
+    timeZone: PK_TZ, day: 'numeric', month: 'short', year: 'numeric', hour: 'numeric', minute: '2-digit',
+    ...(withSeconds ? { second: '2-digit' } : {}), hour12: true,
   })
   return `${s} PKT`
+}
+
+/** "Fri 2:00 pm" for a UTC timestamp, Pakistan time: a short label for the timeline. */
+export function formatPktShort(instant: Date | string): string {
+  const d = typeof instant === 'string' ? new Date(instant) : instant
+  return d.toLocaleString('en-GB', { timeZone: PK_TZ, weekday: 'short', hour: 'numeric', minute: '2-digit', hour12: true })
+}
+
+/** "1 am", "2 pm" for an hour of the day (0-23 or "00"-"23"). */
+export function hourLabel(hour: number | string): string {
+  const h = Number(hour) % 24
+  return `${h % 12 || 12} ${h < 12 ? 'am' : 'pm'}`
 }
 
 /** Hour (0-23) of a UTC timestamp in Pakistan time, for hourly charts. */

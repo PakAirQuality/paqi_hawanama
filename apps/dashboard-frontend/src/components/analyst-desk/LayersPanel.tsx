@@ -23,6 +23,8 @@ interface LayersPanelProps {
   onTogglePopulation: () => void
   sources: SourceLayer[]
   onToggleSource: (key: string) => void
+  /** Extra map views (district shading, wind arrows, smoke drift...), listed under their own heading */
+  views?: { key: string; label: string; description: string; icon: typeof Flame; on: boolean; onToggle: () => void; activeColor?: string }[]
 }
 
 const LAYER_ITEMS: {
@@ -57,6 +59,7 @@ export function LayersPanel({
   showWind, onToggleWind,
   showPopulation, onTogglePopulation,
   sources, onToggleSource,
+  views = [],
 }: LayersPanelProps) {
   const toggles: Record<string, { value: boolean; toggle: () => void }> = {
     showStations: { value: showStations, toggle: onToggleStations },
@@ -91,6 +94,23 @@ export function LayersPanel({
                 </div>
               </div>
               <Toggle on={value} />
+            </button>
+          )
+        })}
+
+        {views.length > 0 && <h4 className="px-3 pb-1 pt-4 text-[11px] font-semibold text-slate-600">Map views</h4>}
+        {views.map(v => {
+          const Icon = v.icon
+          return (
+            <button key={v.key} onClick={v.onToggle} aria-pressed={v.on} className={rowClass(v.on)}>
+              <div className={`shrink-0 ${v.on ? v.activeColor ?? 'text-slate-700' : 'text-slate-300'}`}>
+                <Icon size={16} />
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className={`text-xs font-medium ${v.on ? 'text-slate-700' : 'text-slate-500'}`}>{v.label}</div>
+                <div className="text-[11px] text-slate-500 truncate">{v.description}</div>
+              </div>
+              <Toggle on={v.on} />
             </button>
           )
         })}

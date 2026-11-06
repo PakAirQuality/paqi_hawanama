@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { updatedAgo } from './time'
+import { updatedAgo, formatPkt, formatPktShort, hourLabel } from './time'
 
 const now = new Date('2026-11-01T12:00:00Z')
 const minutesAgo = (m: number) => new Date(now.getTime() - m * 60_000).toISOString()
@@ -24,5 +24,21 @@ describe('updatedAgo', () => {
 
   it('copes with a missing time', () => {
     expect(updatedAgo(null, now)).toBe('Updated recently')
+  })
+})
+
+describe('12-hour Pakistan times', () => {
+  it('formats a night pass with am, not as a bare 01:21', () => {
+    expect(formatPkt('2026-11-05T20:21:00Z')).toBe('6 Nov 2026, 1:21 am PKT')
+    expect(formatPkt('2026-11-06T09:00:00Z')).toBe('6 Nov 2026, 2:00 pm PKT')
+  })
+  it('gives a short weekday label for the timeline', () => {
+    expect(formatPktShort('2026-11-06T09:00:00Z')).toBe('Fri 2:00 pm')
+  })
+  it('names hours of the day', () => {
+    expect(hourLabel(0)).toBe('12 am')
+    expect(hourLabel('09')).toBe('9 am')
+    expect(hourLabel(12)).toBe('12 pm')
+    expect(hourLabel(23)).toBe('11 pm')
   })
 })
