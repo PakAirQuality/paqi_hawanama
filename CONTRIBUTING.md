@@ -87,6 +87,8 @@ Use your GitHub noreply address for commits (`git config user.email`), because t
 | Dashboard | https://hawanama.org (Firebase site `hawanama-2`) | `apps/dashboard-frontend` |
 | Public website | https://hawanama-dashboard.web.app (Firebase site `hawanama-dashboard`) | `apps/web-next` |
 
+Merging into `main` deploys whatever the merge touched. GitHub Actions deploy the API when `apps/api/` (except its tests) or `cloudbuild.yaml` changes, and the dashboard or public website when its app folder changes. Apply database migrations and Terraform changes before merging the code that needs them. A maintainer can also run any deploy by hand from the Actions tab: the API's `smoke` option runs a no-op build, and the frontends' `preview` option deploys to a one-hour preview channel.
+
 Never deploy `apps/web-next` to Firebase site `hawanama-2`: that site owns hawanama.org.
 
 To confirm which revision is live, read `provenance.git_sha` from `/api/v1/health/`.

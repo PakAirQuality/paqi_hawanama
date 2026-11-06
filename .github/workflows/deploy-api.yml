@@ -1,6 +1,12 @@
 name: Deploy API
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - apps/api/**
+      - '!apps/api/tests/**'
+      - cloudbuild.yaml
   workflow_dispatch:
     inputs:
       smoke:

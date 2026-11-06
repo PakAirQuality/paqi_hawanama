@@ -1,6 +1,10 @@
 name: Deploy Public website
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - apps/web-next/**
   workflow_dispatch:
     inputs:
       preview:
