@@ -2,10 +2,12 @@
 
 // The trajectory figure inside a chat answer: where the air arriving at a place had been (or where
 // air leaving it goes), on three levels with the ensemble members of each, and the fires it passed
-// near. Interactive Mapbox map when the browser can draw one and the figure is on screen, the SVG
-// otherwise; level toggles, an expanded full-screen view, and the caption with the member agreement.
+// near. The small figure is a preview (Mapbox when the browser can draw one and the figure is on
+// screen, the SVG otherwise) that opens the expanded, interactive view when clicked; level toggles,
+// a one-line caption with the member agreement, and the method behind a "How to read this map"
+// disclosure.
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Maximize2, X } from 'lucide-react'
@@ -24,16 +26,17 @@ function hoursLine(doc: TrajectoryDoc): string {
   return parts.length ? `At ~700 m the air spent ${parts.join(', ')}.` : ''
 }
 
-/** True while the element is on screen (always true where IntersectionObserver is missing). */
-function useInView<T extends Element>(): [boolean, React.RefObject<T>] {
-  const ref = useRef<T>(null)
+/** True while the element is on screen (always true where IntersectionObserver is missing). A callback ref, so the
+ *  observer attaches whenever the figure appears, including after the loading skeleton it replaces. */
+function useInView<T extends Element>(): [boolean, (el: T | null) => void] {
+  const io = useRef<IntersectionObserver | null>(null)
   const [inView, setInView] = useState(() => typeof IntersectionObserver === 'undefined')
-  useEffect(() => {
-    const el = ref.current
+  const ref = useCallback((el: T | null) => {
+    io.current?.disconnect()
+    io.current = null
     if (!el || typeof IntersectionObserver === 'undefined') return
-    const io = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { rootMargin: '160px' })
-    io.observe(el)
-    return () => io.disconnect()
+    io.current = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting), { rootMargin: '160px' })
+    io.current.observe(el)
   }, [])
   return [inView, ref]
 }
@@ -65,16 +68,9 @@ function LevelToggles({ visible, onChange, doc }: { visible: string[]; onChange:
 
 function Legend({ doc, visible, onChange }: { doc: TrajectoryDoc; visible: string[]; onChange: (v: string[]) => void }) {
   const fireCount = doc.fires.loose?.n_fires ?? 0
-  const hasMembers = !!doc.ensemble && Object.values(doc.ensemble.members ?? {}).some(m => m.length)
   return (
     <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-3 pt-1.5 text-[11px] text-slate-600">
       <LevelToggles visible={visible} onChange={onChange} doc={doc} />
-      {hasMembers && (
-        <span className="inline-flex items-center gap-1">
-          <span className="inline-block w-4 border-t border-slate-500 opacity-50" style={{ borderTopWidth: 1 }} />
-          members
-        </span>
-      )}
       <span className="inline-flex items-center gap-1">
         <span className="inline-block h-2 w-2 rounded-full" style={{ background: FIRE_COLOUR, opacity: 0.6 }} />
         fires within 25 km{fireCount ? ` (${fireCount})` : ''}
@@ -83,18 +79,25 @@ function Legend({ doc, visible, onChange }: { doc: TrajectoryDoc; visible: strin
   )
 }
 
-function Caption({ doc, gl }: { doc: TrajectoryDoc; gl: boolean }) {
+/** One line under the map (the member agreement, or the sector when there is no ensemble) and the method behind a disclosure. */
+function Caption({ doc, open = false }: { doc: TrajectoryDoc; open?: boolean }) {
   const sector24 = doc.sectors['24']?.modal
   const agree24 = doc.sectors['24']?.agreement
+  const sectorLine = sector24 ? `At 24 h the air was to the ${sector24}${agree24 != null ? ` (${Math.round(agree24 * 3)} of 3 levels agree)` : ''}.` : ''
   const members = ensembleLine(doc)
+  const hasMembers = !!doc.ensemble && Object.values(doc.ensemble.members ?? {}).some(m => m.length)
   return (
-    <p className="px-3 pb-2 pt-1 text-[11px] leading-4 text-slate-500">
-      {sector24 ? `At 24 h the air was to the ${sector24}${agree24 != null ? ` (${Math.round(agree24 * 3)} of 3 levels agree)` : ''}. ` : ''}
-      {hoursLine(doc)}{' '}
-      {members && <>{members} The members are the start point shifted by ±{doc.ensemble?.offsets.horizontal_deg}° and ±{doc.ensemble?.offsets.vertical_hpa} hPa; their spread shows sensitivity to the winds, not a probability.{' '}</>}
-      {doc.engine.startsWith('hysplit') ? 'HYSPLIT on GFS 0.25°' : 'Kinematic trajectory on ECMWF IFS 0.25° winds'}; position error roughly 10–20 % of the distance travelled. A plausibility screen, not an attribution.
-      {gl && <span className="text-slate-400"> © Mapbox © OpenStreetMap</span>}
-    </p>
+    <div className="px-3 pb-2 pt-1 text-[11px] leading-4 text-slate-500">
+      <p>{members || sectorLine}</p>
+      <details open={open} className="mt-0.5">
+        <summary className="cursor-pointer select-none text-slate-400 hover:text-slate-600">How to read this map</summary>
+        <p className="mt-1">
+          {members && sectorLine ? `${sectorLine} ` : ''}{hoursLine(doc)}{' '}
+          {hasMembers && <>The thin lines are the {doc.ensemble?.n_members ? Object.values(doc.ensemble.n_members).reduce((a, b) => a + b, 0) : ''} ensemble members: the start point shifted by ±{doc.ensemble?.offsets.horizontal_deg}° and ±{doc.ensemble?.offsets.vertical_hpa} hPa; their spread shows sensitivity to the winds, not a probability.{' '}</>}
+          {doc.engine.startsWith('hysplit') ? 'HYSPLIT on GFS 0.25°' : 'Kinematic trajectory on ECMWF IFS 0.25° winds'}; position error roughly 10–20 % of the distance travelled. A plausibility screen, not an attribution.
+        </p>
+      </details>
+    </div>
   )
 }
 
@@ -131,7 +134,7 @@ export function TrajectoryMiniMap({ action }: { action: CopilotAction }) {
     )
   }
   if (!doc) {
-    return <div className="skeleton mt-2 h-[230px] w-full rounded-xl" aria-busy="true" aria-label="Loading the trajectory map" />
+    return <div className="skeleton mt-2 h-[260px] w-full rounded-xl" aria-busy="true" aria-label="Loading the trajectory map" />
   }
   const backward = doc.direction === 'backward'
   const label = doc.origin.label || action.label || 'here'
@@ -155,13 +158,22 @@ export function TrajectoryMiniMap({ action }: { action: CopilotAction }) {
           <Maximize2 size={14} />
         </button>
       </figcaption>
-      <div className="relative mt-1 h-[230px] w-full overflow-hidden rounded-lg">
+      {/* a div with the button role: Mapbox's own attribution control is a <button>, which must not nest inside another */}
+      <div
+        role="button" tabIndex={0} aria-label="Open the map"
+        onClick={() => setExpanded(true)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setExpanded(true) } }}
+        className="group relative mt-1 block h-[260px] w-full cursor-pointer overflow-hidden rounded-lg focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-400"
+      >
         {useGl
-          ? <TrajectoryMapGL doc={doc} visible={shown} title={title} className="h-full w-full" onUnavailable={() => setGl(false)} />
+          ? <TrajectoryMapGL doc={doc} visible={shown} title={title} preview className="h-full w-full" onUnavailable={() => setGl(false)} />
           : <TrajectorySvg doc={doc} visible={shown} label={label} title={title} className="block h-full w-full" />}
+        <span className="pointer-events-none absolute right-2 top-2 inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white/90 px-2 py-0.5 text-[11px] font-medium text-slate-600 shadow-sm group-hover:bg-white group-hover:text-slate-800">
+          <Maximize2 size={11} /> Tap to expand
+        </span>
       </div>
       <Legend doc={doc} visible={shown} onChange={setVisible} />
-      <Caption doc={doc} gl={gl} />
+      <Caption doc={doc} />
 
       {expanded && typeof document !== 'undefined' && createPortal(
         <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 p-3 md:p-6" onClick={() => setExpanded(false)}>
@@ -177,12 +189,12 @@ export function TrajectoryMiniMap({ action }: { action: CopilotAction }) {
             </div>
             <div className="relative min-h-0 flex-1 bg-slate-50">
               {gl
-                ? <TrajectoryMapGL doc={doc} visible={shown} title={title} padding={60} className="h-full w-full" onUnavailable={() => setGl(false)} />
+                ? <TrajectoryMapGL doc={doc} visible={shown} title={title} className="h-full w-full" onUnavailable={() => setGl(false)} />
                 : <TrajectorySvg doc={doc} visible={shown} label={label} title={title} className="mx-auto block h-full max-w-full" />}
             </div>
             <div className="border-t border-slate-200 pb-1">
               <Legend doc={doc} visible={shown} onChange={setVisible} />
-              <Caption doc={doc} gl={gl} />
+              <Caption doc={doc} open />
             </div>
           </div>
         </div>,

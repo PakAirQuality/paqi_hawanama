@@ -34,7 +34,14 @@ export function levelOrder(rec: Record<string, unknown>): string[] {
   return [...LEVEL_KEYS.filter(k => k in rec), ...Object.keys(rec).filter(k => !LEVEL_KEYS.includes(k))]
 }
 
-/** Origin, central paths and members: everything the view must contain. */
+/** Origin and the central paths: what the small preview is fitted to (members may run off its edge). */
+export function centralPoints(doc: TrajectoryDoc): LonLat[] {
+  const all: LonLat[] = [{ lon: doc.origin.lon, lat: doc.origin.lat }]
+  for (const path of Object.values(doc.paths)) for (const p of path) all.push({ lon: p.lon, lat: p.lat })
+  return all
+}
+
+/** Origin, central paths and members: everything the expanded view must contain. */
 export function allPoints(doc: TrajectoryDoc): LonLat[] {
   const all: LonLat[] = [{ lon: doc.origin.lon, lat: doc.origin.lat }]
   for (const path of Object.values(doc.paths)) for (const p of path) all.push({ lon: p.lon, lat: p.lat })

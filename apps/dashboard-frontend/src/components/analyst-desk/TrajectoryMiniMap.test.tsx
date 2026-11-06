@@ -42,6 +42,14 @@ describe('TrajectoryMiniMap', () => {
     expect(container.textContent).toContain('At 24 h, 2 of 2 members (~700 m) were over Pakistan Punjab · spread 31 km.')
     expect(container.textContent).toContain('not a probability')
     expect(container.textContent).toContain('fires within 25 km (2)')
+    // the caption is one line; the method sits behind a closed disclosure
+    const details = container.querySelector('details') as HTMLDetailsElement
+    expect(details.open).toBe(false)
+    expect(details.textContent).toContain('How to read this map')
+    expect(details.textContent).toContain('Kinematic trajectory on ECMWF IFS 0.25° winds')
+    expect(details.textContent).toContain('33 h Pakistan Punjab, 39 h other Pakistan')
+    const caption = details.parentElement as HTMLElement
+    expect(caption.querySelector('p')?.textContent).toBe('At 24 h, 2 of 2 members (~700 m) were over Pakistan Punjab · spread 31 km.')
     const calls = (fetch as unknown as ReturnType<typeof vi.fn>).mock.calls.map(c => String(c[0]))
     expect(calls.find(u => u.includes('/trajectory?'))).toContain('lat=31.52&lon=74.36&at=2026-11-05T23%3A00%3A00&direction=backward&hours=72&label=Lahore')
   })
@@ -59,17 +67,30 @@ describe('TrajectoryMiniMap', () => {
     expect(screen.getByRole('button', { name: '~1,400 m' }).getAttribute('aria-pressed')).toBe('true')
   })
 
-  it('expands into a dialog with the same drawing, closed by Escape', async () => {
+  it('opens the expanded view when the map itself is clicked, with the method shown, closed by Escape', async () => {
     const { container } = wrap(<TrajectoryMiniMap action={ACTION} />)
     await waitFor(() => expect(svgOf(container)).toBeTruthy())
-    fireEvent.click(screen.getByRole('button', { name: 'Expand the map' }))
+    expect(screen.getByText('Tap to expand')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Open the map' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog.getAttribute('aria-label')).toBe('Where the air reaching Lahore had been')
     expect(dialog.querySelectorAll('[data-testid="trajectory-map-svg"]')).toHaveLength(1)
+    expect((dialog.querySelector('details') as HTMLDetailsElement).open).toBe(true)
     expect(document.body.style.overflow).toBe('hidden')
     fireEvent.keyDown(window, { key: 'Escape' })
     expect(screen.queryByRole('dialog')).toBeNull()
     expect(document.body.style.overflow).toBe('')
+  })
+
+  it('also opens from the header icon and from the keyboard', async () => {
+    const { container } = wrap(<TrajectoryMiniMap action={ACTION} />)
+    await waitFor(() => expect(svgOf(container)).toBeTruthy())
+    fireEvent.click(screen.getByRole('button', { name: 'Expand the map' }))
+    expect(screen.getByRole('dialog')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Open the map' }), { key: 'Enter' })
+    expect(screen.getByRole('dialog')).toBeTruthy()
   })
 
   it('shows the failure and a retry button when the engine is unavailable', async () => {

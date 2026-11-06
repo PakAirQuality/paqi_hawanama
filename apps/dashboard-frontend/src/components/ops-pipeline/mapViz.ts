@@ -29,7 +29,19 @@ type Map = mapboxgl.Map
 // ─────────────────────────────────────────────────────────────────────────────
 // Basemap: monochrome Standard theme, a light hillshade, and our own city labels
 // ─────────────────────────────────────────────────────────────────────────────
-export function useBasemapTuning(map: Map | null, loaded: boolean) {
+export interface BasemapOptions {
+  /** Mapbox Standard theme; the Tracker is monochrome (the PM2.5 surface carries the colour) */
+  theme?: 'monochrome' | 'faded' | 'default'
+  /** Show the basemap's own place names (towns the Tracker leaves to its own city labels) */
+  placeLabels?: boolean
+  /** Zoom from which our rank-2 cities are labelled */
+  cityStep?: number
+  /** Hillshade strength: 'strong' for a small map at low zoom, where the light default reads as blank */
+  relief?: 'light' | 'strong'
+}
+
+export function useBasemapTuning(map: Map | null, loaded: boolean, opts: BasemapOptions = {}) {
+  const { theme = 'monochrome', placeLabels, cityStep = 5.6, relief = 'light' } = opts
   useEffect(() => {
     if (!map || !loaded) return
     // Mapbox Standard basemap (when the style imports it): greyscale, fewer points of interest
@@ -37,8 +49,13 @@ export function useBasemapTuning(map: Map | null, loaded: boolean) {
       const imports = (map.getStyle() as { imports?: { id: string }[] } | undefined)?.imports ?? []
       const basemap = imports.find(i => i.id === 'basemap')?.id
       if (basemap) {
-        map.setConfigProperty(basemap, 'theme', 'monochrome')
+        map.setConfigProperty(basemap, 'theme', theme)
         map.setConfigProperty(basemap, 'showPointOfInterestLabels', false)
+        if (placeLabels != null) {
+          map.setConfigProperty(basemap, 'showPlaceLabels', placeLabels)
+          map.setConfigProperty(basemap, 'showRoadLabels', false)
+          map.setConfigProperty(basemap, 'showTransitLabels', false)
+        }
       }
     } catch (err) {
       console.warn('[basemap] config not applied', err)
@@ -52,7 +69,9 @@ export function useBasemapTuning(map: Map | null, loaded: boolean) {
         map.addLayer({
           id: 'hawa-hillshade', type: 'hillshade', source: 'hawa-dem', slot: 'bottom',
           paint: {
-            'hillshade-exaggeration': ['interpolate', ['linear'], ['zoom'], 4, 0.25, 8, 0.4, 12, 0.3],
+            'hillshade-exaggeration': relief === 'strong'
+              ? ['interpolate', ['linear'], ['zoom'], 4, 0.6, 8, 0.5, 12, 0.35]
+              : ['interpolate', ['linear'], ['zoom'], 4, 0.25, 8, 0.4, 12, 0.3],
             'hillshade-shadow-color': '#334155',
             'hillshade-highlight-color': '#ffffff',
             'hillshade-accent-color': '#475569',
@@ -73,7 +92,7 @@ export function useBasemapTuning(map: Map | null, loaded: boolean) {
       })
       map.addLayer({
         id: 'hawa-cities', type: 'symbol', source: 'hawa-cities', slot: 'top',
-        filter: ['<=', ['get', 'rank'], ['step', ['zoom'], 1, 5.6, 2]],
+        filter: ['<=', ['get', 'rank'], ['step', ['zoom'], 1, cityStep, 2]],
         layout: {
           'text-field': ['get', 'name'],
           'text-font': ['DIN Pro Medium', 'Arial Unicode MS Regular'],
@@ -92,7 +111,7 @@ export function useBasemapTuning(map: Map | null, loaded: boolean) {
         },
       } as mapboxgl.AnyLayer)
     }
-  }, [map, loaded])
+  }, [map, loaded, theme, placeLabels, cityStep, relief])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
