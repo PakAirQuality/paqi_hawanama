@@ -56,6 +56,7 @@ FINE_DEG, CORRIDOR_DEG = 0.5, 1.5
 BOX = (5.0, 40.0, 55.0, 95.0)                             # lat min, lat max, lon min, lon max: the wind grid never leaves it
 MAX_LOCATIONS = 200
 LOOSE_KM, LOOSE_HOURS = 25.0, 3.0
+MAX_FIRE_POINTS = 300                                     # fire coordinates carried for the map, by FRP
 MEMO_TTL_S = 600.0
 MEMO_MAX = 100
 CACHE_PREFIX = "forecasts/trajectories/kinematic"
@@ -372,9 +373,13 @@ def fire_matches(paths: Dict[int, pd.DataFrame], det: pd.DataFrame) -> Dict[str,
     top_d = (sel.groupby("district")["frp"].agg(["count", "sum"]).sort_values("sum", ascending=False).head(10)
              if "district" in sel and sel["district"].notna().any() else None)
     classes = sel["source_class"].value_counts().to_dict() if "source_class" in sel and len(sel) else {}
+    top = sel.sort_values("frp", ascending=False).head(MAX_FIRE_POINTS) if len(sel) else sel
+    points = [{"lat": round(float(r.lat), 3), "lon": round(float(r.lon), 3), "frp": round(float(r.frp), 1),
+               "district": (None if pd.isna(r.district) else str(r.district)), "country": str(r.country),
+               "source_class": (str(getattr(r, "source_class", "")) or None)} for r in top.itertuples()]
     return {"strict": {"n_points": n_pts, "n_fires": n_f, "frp_mw": round(frp, 1), "by_level": strict_lv},
             "loose": {"n_fires": int(len(sel)), "frp_mw": round(float(sel["frp"].sum()), 1) if len(sel) else 0.0,
-                      "by_country": by_country,
+                      "points": points, "by_country": by_country,
                       "top_districts": [{"district": str(d), "n_fires": int(r["count"]), "frp_mw": round(float(r["sum"]), 1)}
                                         for d, r in top_d.iterrows()] if top_d is not None else [],
                       "source_classes": {str(k): int(v) for k, v in classes.items()}}}
@@ -518,6 +523,13 @@ async def run(http, store, lat: float, lon: float, at_utc: datetime, *, directio
     return doc
 
 
+def _fires_without_points(fires: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    """The model gets the counts and districts, not 300 coordinates."""
+    if not fires or "loose" not in fires:
+        return fires
+    return {**fires, "loose": {k: v for k, v in fires["loose"].items() if k != "points"}}
+
+
 def copilot_view(doc: Dict[str, Any], every_h: int = 6) -> Dict[str, Any]:
     """The compact form for the model: 6-hourly points per level, residence, sectors, fires, caveats."""
     if doc.get("status") != STATUS:
@@ -527,6 +539,6 @@ def copilot_view(doc: Dict[str, Any], every_h: int = 6) -> Dict[str, Any]:
            for lv, path in doc["paths"].items()}
     return {k: doc[k] for k in ("engine", "status", "direction", "hours", "levels_hpa", "origin", "at_utc", "at_pkt", "uses_forecast",
                                 "wind_source", "left_domain", "residence_hours", "sectors", "caveats") if k in doc} | {
-        "points_6h": pts, "fires": doc.get("fires"), "cached": doc.get("cached", False),
+        "points_6h": pts, "fires": _fires_without_points(doc.get("fires")), "cached": doc.get("cached", False),
         "definitions": {k: doc["definitions"][k] for k in ("engine", "levels", "error", "match_strict", "match_loose", "not_attribution",
                                                            "forward_vs_backward")}}

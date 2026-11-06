@@ -61,6 +61,23 @@ export function parseAction(raw: unknown): CopilotAction | null {
         ...(hours !== undefined ? { hours } : {}),
       }
     }
+    case 'show_trajectory': {
+      // Emitted by the server after the trajectory tool ran; the chat fetches the document and draws it
+      const lat = num(a.lat, 5, 40)
+      const lon = num(a.lon, 55, 95)
+      const at = typeof a.at === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2})?(Z|[+-]\d{2}:\d{2})?$/.test(a.at) ? a.at : undefined
+      const hours = num(a.hours, 6, 72)
+      const direction = a.direction === 'forward' ? 'forward' : a.direction === 'backward' ? 'backward' : undefined
+      if (lat === undefined || lon === undefined || !at || hours === undefined || !direction) return null
+      const label = typeof a.label === 'string' && a.label.length > 0 && a.label.length <= 60 ? a.label : undefined
+      const engine = typeof a.engine === 'string' && a.engine.length > 0 && a.engine.length <= 60 ? a.engine : undefined
+      return {
+        type: 'show_trajectory',
+        lat, lon, at, hours, direction,
+        ...(label ? { label } : {}),
+        ...(engine ? { engine } : {}),
+      }
+    }
     default:
       return null
   }
@@ -88,6 +105,7 @@ export function actionLabel(action: CopilotAction): string {
     case 'zoom_to_city': return `Show ${action.city}`
     case 'zoom_to_station': return action.station_name ? `Show ${action.station_name}` : 'Show station'
     case 'set_horizon': return action.horizon === 0 ? 'Show today' : `Show +${action.horizon} days`
+    case 'show_trajectory': return action.direction === 'forward' ? 'Air path ahead' : 'Where the air came from'
     case 'filter_network': return action.network ? `Show ${action.network}` : 'Show all networks'
     case 'show_station_trend': {
       const hours = action.hours ?? 24

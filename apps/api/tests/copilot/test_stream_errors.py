@@ -41,3 +41,20 @@ def test_per_turn_token_cap_is_well_under_the_daily_budget():
     from app.core.config import settings
     assert copilot.RUN_LIMITS.total_tokens_limit == 120_000
     assert copilot.RUN_LIMITS.total_tokens_limit * 10 <= settings.COPILOT_GLOBAL_DAILY_TOKENS
+
+
+def test_trajectory_action_comes_from_this_turns_tool_return():
+    from pydantic_ai.messages import ModelRequest, ModelResponse, TextPart, ToolReturnPart, UserPromptPart
+    doc = {"date": "2026-11-06", "data": {"status": "kinematic", "engine": "kinematic_ecmwf_ifs025", "direction": "backward", "hours": 72,
+                                          "origin": {"lat": 31.5204, "lon": 74.3587, "label": "Lahore"}, "at_utc": "2026-11-05T23:00:00", "place": "Lahore"}}
+    msgs = [ModelRequest(parts=[UserPromptPart(content="where did the air come from")]),
+            ModelResponse(parts=[TextPart(content="calling")]),
+            ModelRequest(parts=[ToolReturnPart(tool_name="aq_fire_trends", content={"data": {}}, tool_call_id="1"),
+                                ToolReturnPart(tool_name="aq_trajectory", content=doc, tool_call_id="2")]),
+            ModelResponse(parts=[TextPart(content="answer")])]
+    assert copilot.trajectory_action(msgs) == {"type": "show_trajectory", "lat": 31.5204, "lon": 74.3587, "at": "2026-11-05T23:00:00",
+                                               "direction": "backward", "hours": 72, "label": "Lahore", "engine": "kinematic_ecmwf_ifs025"}
+    # an unavailable run, or a run without coordinates, gives no action
+    bad = {"data": {"status": "unavailable", "message": "too old"}}
+    assert copilot.trajectory_action([ModelRequest(parts=[ToolReturnPart(tool_name="aq_trajectory", content=bad, tool_call_id="3")])]) is None
+    assert copilot.trajectory_action([]) is None and copilot.trajectory_action(None) is None

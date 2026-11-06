@@ -13,6 +13,7 @@ import logging
 import re
 import uuid
 from datetime import date
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
@@ -128,6 +129,33 @@ def _clean(text: str) -> str:
     return STRAY_BRACE_RE.sub("", ACTION_RE.sub("", text))
 
 
+def trajectory_action(messages) -> Optional[dict]:
+    """The map action for the last trajectory the tools computed this turn, or None.
+
+    Emitted by the server, not copied by the model, so the chat always gets the map when
+    `aq_trajectory` ran. Only the last ModelRequest's tool returns count (this turn's).
+    """
+    from pydantic_ai.messages import ModelRequest, ToolReturnPart
+    last = None
+    for m in messages or []:
+        if not isinstance(m, ModelRequest):
+            continue
+        for part in m.parts:
+            if isinstance(part, ToolReturnPart) and part.tool_name == "aq_trajectory" and isinstance(part.content, dict):
+                data = part.content.get("data") or {}
+                if data.get("status") not in ("kinematic", "ok"):
+                    continue
+                origin = data.get("origin") or {}
+                lat, lon = origin.get("lat"), origin.get("lon")
+                if lat is None or lon is None or not data.get("at_utc"):
+                    continue
+                last = {"type": "show_trajectory", "lat": float(lat), "lon": float(lon), "at": str(data["at_utc"]),
+                        "direction": "forward" if str(data.get("direction", "")).startswith("f") else "backward",
+                        "hours": int(data.get("hours") or 72), "label": str(data.get("place") or origin.get("label") or "")[:60],
+                        "engine": str(data.get("engine") or "")}
+    return last
+
+
 async def _stream_with_fallback(run_one, ip: str, label: str):
     """Try the model chain in order, falling back only on quota errors."""
     for i, model_name in enumerate(MODEL_FALLBACK_CHAIN):
@@ -191,7 +219,11 @@ async def copilot_chat(req: ChatRequest, request: Request):
                             yield _sse_event({"type": "action", "action": json.loads(match.group(1))})
                         except json.JSONDecodeError:
                             pass
-                session.set_history(result.all_messages())
+                messages = result.all_messages()
+                traj = trajectory_action(messages)
+                if traj:
+                    yield _sse_event({"type": "action", "action": traj})
+                session.set_history(messages)
                 p, c = budget.usage_tokens(result.usage)
             await budget.record_tokens(ip, p, c)
 
