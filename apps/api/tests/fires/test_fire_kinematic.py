@@ -300,3 +300,26 @@ class _NoClient:
 
 async def _coro(v):
     return v
+
+
+def test_vectorised_members_match_the_scalar_integrator():
+    http = FakeHttp(315.0, 4.0, rotate_deg_per_h=1.5, shear={1000: 0.7, 850: 1.4, 700: 1.8})
+    big = fk._grid(31.5, 74.4, 2.0, 10.0, 12.0)
+    coarse = asyncio.run(fk.fetch_winds(http, big, ARRIVAL - timedelta(hours=73), ARRIVAL + timedelta(hours=1)))
+    fine = asyncio.run(fk.fetch_winds(http, fk._grid(31.5, 74.4, 0.5, 3.0, 3.0), ARRIVAL - timedelta(hours=73), ARRIVAL + timedelta(hours=1)))
+    field = fk.CompositeField(fine, coarse)
+    members = fk.ensemble_paths(field, 31.5, 74.4, fk.LEVELS, ARRIVAL, 72, "backward")
+    for lv in fk.LEVELS:
+        for m in members[lv][:4]:                                                   # the central one and three offsets, incl. a 975/900 hPa one
+            dlat, dlon, p = m.attrs["start"]
+            ref = fk.integrate(field, 31.5 + dlat, 74.4 + dlon, lv, ARRIVAL, 72, "backward", dt_min=fk.ENSEMBLE_DT_MIN, p_hpa=p)
+            assert len(m) == len(ref) > 50 and m.attrs["left_domain"] == ref.attrs["left_domain"]     # the fast 850 hPa parcels leave BOX near 60 h
+            assert np.allclose(m["lat"].to_numpy(), ref["lat"].to_numpy(), atol=2e-4) and np.allclose(m["lon"].to_numpy(), ref["lon"].to_numpy(), atol=2e-4)
+            assert np.allclose(m["speed_ms"].to_numpy(), ref["speed_ms"].to_numpy(), atol=0.15) and m["height_agl"].iloc[0] == ref["height_agl"].iloc[0]
+            assert m["time"].iloc[-1] == ref["time"].iloc[-1] and m["age_h"].iloc[-1] == -float(len(m) - 1)
+    assert sum(len(m) == 73 for m in members[925]) >= 18 and sum(m.attrs["left_domain"] for m in members[850]) > 0   # the faster members leave BOX
+    # a parcel that leaves the composite field stops where the scalar one does
+    small = fk.CompositeField(fine, fine)
+    one = fk.ensemble_paths(small, 31.5, 74.4, (925,), ARRIVAL, 72, "backward")[925][0]
+    ref = fk.integrate(small, 31.5, 74.4, 925, ARRIVAL, 72, "backward", dt_min=fk.ENSEMBLE_DT_MIN)
+    assert one.attrs["left_domain"] and ref.attrs["left_domain"] and abs(len(one) - len(ref)) <= 1 and len(one) < 73
