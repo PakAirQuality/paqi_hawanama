@@ -1,34 +1,34 @@
 fastapi==0.162.0  # pinned: an unpinned rebuild pulled a release that dropped Param(**extra) and failed to start
-uvicorn[standard]>=0.34.0,<1
-pydantic>=2.12.0
-pydantic-settings>=2.6.0
-sqlalchemy[asyncio]==2.0.55  # the extra installs greenlet on every CPU; without it arm64 Macs get none
+uvicorn[standard]>=0.54.0,<1
+pydantic>=2.14.2
+pydantic-settings>=2.16.2
+sqlalchemy[asyncio]==2.1.7  # the extra installs greenlet on every CPU; without it arm64 Macs get none
 asyncpg==0.32.0
-psycopg2-binary==2.9.9
-geoalchemy2==0.14.2
+psycopg2-binary==2.9.13
+geoalchemy2==0.20.0
 redis==5.0.1
-httpx>=0.27.0
-requests==2.31.0
+httpx>=0.28.1
+requests==2.34.2
 tenacity==8.2.3
-slowapi==0.1.9
-python-multipart>=0.0.31
+slowapi==0.1.10
+python-multipart>=0.0.33
 python-jose[cryptography]==3.5.0
 passlib[bcrypt]==1.7.4
 pytest==7.4.3
 pytest-asyncio==0.21.1
 tweepy>=4.14.0
-google-generativeai>=0.3.2
+google-generativeai>=0.8.6
 respx>=0.21.0
 psutil==5.9.6
-alembic==1.13.2
+alembic==1.20.1
 # Worker task dependencies (needed for /tasks endpoints)
-apscheduler==3.10.4
-pandera==0.17.2
-numpy==1.24.3
+apscheduler==3.11.3
+pandera==0.35.0
+numpy==1.26.4
 pyarrow==20.0.0   # last line that imports with numpy 1.24.x; 21+ requires NumPy 2 (broke manifest reads 2026-10-15)
 pandas==2.1.3
 google-cloud-storage==2.19.0
-earthengine-api==1.6.3   # satellite column series (app/services/satellite_ee.py); imported lazily by the ingest task only
+earthengine-api==1.7.51   # satellite column series (app/services/satellite_ee.py); imported lazily by the ingest task only
 # AI Copilot (analyst desk)
 pydantic-ai-slim>=1.0.0
 google-genai>=1.31.0
